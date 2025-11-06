@@ -1,9 +1,9 @@
 import subprocess
 
 
-def run_gsim(venv_python: str, xml_path: str) -> bool:
+def run_gsim(venv_path: str, xml_path: str) -> bool:
     try:
-        run_cmd = f"{venv_python} /usr/local/gsim/run.py {xml_path}"
+        run_cmd = f"{venv_path}/bin/python /usr/local/gsim/run.py {xml_path}"
         process = subprocess.Popen(run_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
         # 实时打印回测日志

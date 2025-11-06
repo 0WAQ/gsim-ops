@@ -24,7 +24,7 @@ def check_compiler_env(args) -> None:
     ]
 
     if not args.factor_folders:
-        sys.exit(f"❌ 未找到匹配UnixId[{args.unix_id}]的Alpha因子文件夹")
+        sys.exit(f"❌ 未找到匹配UnixId[{target_unix_id}]的Alpha因子文件夹")
 
     # 3. 校验全局虚拟环境
     venv_activate = os.path.join(args.venv_path, "bin", "activate")

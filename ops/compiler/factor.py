@@ -57,13 +57,14 @@ def process_single_factor(args, folder: str) -> bool:
     if not info:
         print(f"❌ 因子信息提取失败: {err}")
         return False
+    info['unix_id'] = args.unix_id
 
     # 2. 生成 setup.py
     if not generate_setup_py(info, args.compile_opt):
         return False
     
     # 3. 编译生成 .so
-    so_abs_path = compile_alpha(info, args.venv_python)
+    so_abs_path = compile_alpha(info, args.venv_path)
     if not so_abs_path:
         return False
     print(f"✅ 编译成功：{os.path.basename(so_abs_path)}")
@@ -76,7 +77,7 @@ def process_single_factor(args, folder: str) -> bool:
     
     # 5. 可选: 回测
     if args.enable_backtest:
-        if not run_gsim(args.venv_python, info["xml_file"]):
+        if not run_gsim(args.venv_path, info["xml_file"]):
             return False
         
     # 6. 清理中间文件
@@ -106,4 +107,4 @@ def run_compiler(args):
     if fail_folders:
         print(f"失败因子: {', '.join(fail_folders)}")
     print("="*50)
-    sys.exit(0 if fail_count == 0 else 1)
+    return

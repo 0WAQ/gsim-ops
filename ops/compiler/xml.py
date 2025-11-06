@@ -8,9 +8,9 @@ def backup_xml(xml_path: str) -> None:
     try:
         bak_path = f"{xml_path}.bak"
         shutil.copy2(xml_path, bak_path)
-        print(f"✅ 备份XML文件：{os.path.basename(bak_path)}")
+        print(f"✅ 备份XML文件: {os.path.basename(bak_path)}")
     except Exception as e:
-        print(f"⚠️ XML备份失败：{str(e)}")
+        print(f"⚠️ XML备份失败: {str(e)}")
 
 
 def modify_xml_module(xml_path: str, module_name: str, so_abs_path: str) -> bool:
@@ -27,6 +27,17 @@ def modify_xml_module(xml_path: str, module_name: str, so_abs_path: str) -> bool
         
         # 更新module属性
         alpha_node.set("module", so_abs_path)
+
+        # 更新日期
+        universe_node = root.find(f".//Universe")
+        universe_node.set('startdate', '20130101')
+        universe_node.set('enddate', '20241231')
+
+        # 更新 pnl 目录
+        stats_node = root.find(f".//Portfolio/Stats")
+        stats_node.set('pnlDir', '/mnt/storage/dropbox/pnl')
+        if not os.path.exists('/mnt/storage/dropbox/pnl'):
+            os.makedirs('/mnt/storage/dropbox/pnl')
 
         # 美化xml并保存
         xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")

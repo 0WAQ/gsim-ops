@@ -1,23 +1,20 @@
 import argparse
 from .compiler import add_compiler_subparser
 from .scp import add_scp_subparser
+from .cp import add_cp_subparser
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="ops",
-        description="GSIM ops",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Usage:
-  1. 编译因子: ops compiler -d 20251031 -u wbai --xml-backup
-  2. 本地 -> 远程传输: ops scp /local/path wbai@10.6.100.146:/remote/path -p password
-  3. 远程 -> 本地传输: ops scp wbai@10.6.100.146:/remote/path /local/path -p password
-    """)
+        description="Gsim Operations Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
 
-    subparsers = parser.add_subparsers(title="sub tools", dest="subcommand", required=True)
+    subparsers = parser.add_subparsers(title="sub-command", dest="sub-command", required=True)
     add_compiler_subparser(subparsers)
-    add_scp_subparser(subparsers)
+    # add_scp_subparser(subparsers)
+    add_cp_subparser(subparsers)
 
     args = parser.parse_args()
     args.func(args)

@@ -141,7 +141,6 @@ def run_scp(args):
     ssh = init_ssh_client(
         host=ssh_config.host,
         port=ssh_config.port,
-        username=ssh_config.username,
         password=ssh_config.password,
         key_path=ssh_config.key_path
     )

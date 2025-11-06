@@ -7,23 +7,17 @@ def add_scp_subparser(subparser: argparse._SubParsersAction):
         "scp",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-使用示例：
-  1. 远程→本地 (下载目录):
+Usage:
+  1. remote -> local (download):
      ops scp wbai@10.6.100.146:/mnt/storage/dropbox/wbai/20251030 ../ -p 123456
-  2. 本地→远程 (上传目录):
+  2. local -> remote (upload):
      ops scp ../ wbai@10.6.100.146:/mnt/storage/dropbox/wbai/20251030 --key-path ~/.ssh/my_key
-  3. 传输单个文件：
-     ops scp wbai@10.6.100.146:/tmp/test.so ./ -P 2222
-     
-远程路径格式: 用户名@主机IP:远程路径 (如 wbai@10.6.100.146:/mnt/xxx)
-注意: 源和目标路径中仅允许一个远程路径 (自动判断传输方向)
-        """
-    )
+""")
 
     parser.add_argument("source")
     parser.add_argument("dest")
 
-    opt_group = parser.add_argument_group("可选配置参数")
+    opt_group = parser.add_argument_group("options")
     opt_group.add_argument("-p", "--password")
     opt_group.add_argument("--port", default=22, type=int)
     opt_group.add_argument("--key-path", default="~/.ssh/id_rsa")
