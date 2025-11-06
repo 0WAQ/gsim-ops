@@ -11,7 +11,7 @@ def add_compiler_subparser(subparser: argparse._SubParsersAction):
 
     required_group = parser.add_argument_group("核心必填参数")
     required_group.add_argument("-d", "--date-dir", required=True, help="format: YYYYMMDD")
-    # required_group.add_argument("-u", "--unix-id", required=True)
+    required_group.add_argument("-u", "--unix-id", required=True)
 
     opt_group = parser.add_argument_group("可选配置参数")
     opt_group.add_argument("--venv-path", default="/tmp/cython/.venv")

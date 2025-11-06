@@ -4,8 +4,8 @@ import paramiko
 from typing import Optional
 from scp import SCPClient
 from tqdm import tqdm
-from common.ssh_utils import init_ssh_client
-from common.utils import check_path_exists, ensure_dir_exists
+from ..common.ssh_utils import init_ssh_client
+from ..common.utils import check_path_exists, ensure_dir_exists
 
 def scp_local2remote(ssh: paramiko.SSHClient, local_path: str, remote_path: str) -> bool:
     try:

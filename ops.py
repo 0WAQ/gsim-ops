@@ -1,7 +1,7 @@
 import argparse
 
-from compiler import add_compiler_subparser
-from scp_transfer import add_scp_subparser
+from src.compiler import add_compiler_subparser
+from src.scp import add_scp_subparser
 
 
 def main():

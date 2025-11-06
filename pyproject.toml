@@ -11,5 +11,7 @@ dependencies = [
     "pandas>=2.3.3",
     "paramiko>=4.0.0",
     "scp>=0.15.0",
+    "setuptools>=80.9.0",
     "tqdm>=4.67.1",
+    "wheel>=0.45.1",
 ]
