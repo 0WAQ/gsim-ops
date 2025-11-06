@@ -1,7 +1,7 @@
 [project]
 name = "ops"
 version = "0.1.0"
-description = "Add your description here"
+description = "GSIM operations tool"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -15,3 +15,6 @@ dependencies = [
     "tqdm>=4.67.1",
     "wheel>=0.45.1",
 ]
+
+[project.scripts]
+ops = "ops.main:main"

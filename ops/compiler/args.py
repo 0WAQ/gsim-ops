@@ -1,6 +1,6 @@
 import argparse
-
 from .factor import run_compiler
+
 
 def add_compiler_subparser(subparser: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparser.add_parser(

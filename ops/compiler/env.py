@@ -2,7 +2,6 @@ import os
 import sys
 import shutil
 import subprocess
-
 from ..common.utils import check_path_exists
 
 
