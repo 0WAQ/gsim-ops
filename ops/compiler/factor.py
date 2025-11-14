@@ -9,8 +9,8 @@ from .backtest import run_gsim
 from .clean import clean_intermediate_files
 
 
-def get_factor_info(date_dir_abs: str, folder: str) -> tuple[Optional[dict], str]:
-    folder_path = os.path.join(date_dir_abs, folder)
+def get_factor_info(alpha_abs_path: str) -> tuple[Optional[dict], str]:
+    folder_path = alpha_abs_path# os.path.join()
     py_files = glob.glob(f"{folder_path}/*.py")
     xml_files = glob.glob(f"{folder_path}/*.xml")
 
@@ -51,9 +51,9 @@ def get_factor_info(date_dir_abs: str, folder: str) -> tuple[Optional[dict], str
     }, ""
 
 
-def process_single_factor(args, folder: str) -> bool:
+def process_single_factor(args, alpha_abs_path: str) -> bool:
     # 1. 提取因子信息
-    info, err = get_factor_info(args.date_dir_abs, folder)
+    info, err = get_factor_info(alpha_abs_path)
     if not info:
         print(f"❌ 因子信息提取失败: {err}")
         return False
@@ -93,17 +93,17 @@ def run_compiler(args):
     fail_folders = []
 
     # 2. 批量处理所有因子
-    for folder in args.factor_folders:
-        if process_single_factor(args, folder):
+    for alpha_abs_path in args.alpha_abs_paths:
+        if process_single_factor(args, alpha_abs_path):
             success_count += 1
         else:
             fail_count += 1
-            fail_folders.append(folder)
+            fail_folders.append(alpha_abs_path)
 
     # 3. 输出执行总结
     print("\n" + "="*50)
     print(f"Compiler 执行总结 (UnixId: {args.unix_id})")
-    print(f"总因子数: {len(args.factor_folders)} | 成功: {success_count} | 失败: {fail_count}")
+    print(f"总因子数: {len(args.alpha_abs_paths)} | 成功: {success_count} | 失败: {fail_count}")
     if fail_folders:
         print(f"失败因子: {', '.join(fail_folders)}")
     print("="*50)

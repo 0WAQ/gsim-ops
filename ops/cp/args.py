@@ -2,6 +2,17 @@ import argparse
 from .transfer import run_cp
 
 
+class LowerAction(argparse.Action):
+    def __call__(self, parser, namespace, values: str, option_string=None):
+        setattr(namespace, self.dest, values.lower())
+
+
+# TODO: gloabl argument
+class Args():
+    def __init__(self, args):
+        self.unix_id: str = args.unix_id
+
+
 def add_cp_subparser(subparser: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparser.add_parser(
         "cp",
@@ -11,8 +22,14 @@ Usage:
     ops cp -u wbai -s 20251030 -e 20251030"""
     )
 
-    parser.add_argument("-u", "--unix-id", required=True)
-    parser.add_argument("-s", "--start-date", required=True)
-    parser.add_argument("-e", "--end-date", default=None)
+    parser.add_argument("-u", "--unix-id", type=str, required=True, action=LowerAction)
+    parser.add_argument("-s", "--start-date", type=str, required=True)
+    parser.add_argument("-e", "--end-date", type=str, default=None)
+
+    parser.add_argument("--venv-path", type=str, default="/home/wbai/.venvs/gsim/")
+    parser.add_argument("--compile-opt", type=str, default="-O2")
+    parser.add_argument("--xml-backup", action="store_true", default=False)     # TODO: is default useful?
+    parser.add_argument("--enable-backtest", action="store_true", default=True) # TODO: is default useful?
+    parser.add_argument("--dropbox-directory", type=str, default="/mnt/storage/dropbox")
 
     parser.set_defaults(func=run_cp)
