@@ -1,18 +1,32 @@
 import os
 import sys
+import paramiko
 
 
-def check_path_exists(path: str, path_type: str = "file"):
-    path = os.path.abspath(path)
-    if not os.path.exists(path):
-        sys.exit(f"路径不存在: {path}")
-    # if path_type == "file" and not os.path.isfile(path):
-    #     sys.exit(f"❌ 文件不存在：{path}")
-    # else:
-    #     sys.exit(f"❌ 目录不存在：{path}")
+class Remote:
+    @staticmethod
+    # TODO: rename
+    def check_is_dir(ssh: paramiko.SSHClient, path: str):
+        _, stdout, _ = ssh.exec_command(f"file {path} 2>/dev/null")
+        is_dir = (stdout.read().decode('utf-8').strip().split(' ')[-1] == "directory")
+        return is_dir
+    
+    @staticmethod
+    def check_path_exists(ssh: paramiko.SSHClient, path: str):
+        pass
+
+    @staticmethod
+    def ensure_dir_exists(ssh: paramiko.SSHClient, path: str):
+        pass
 
 
-def ensure_dir_exists(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
+class Local:    
+    @staticmethod
+    def check_path_exists(path: str):
+        if not os.path.exists(os.path.abspath(path)):
+            sys.exit(f"路径不存在: {path}")
 
+    @staticmethod
+    def ensure_dir_exists(path: str) -> None:
+        os.makedirs(path, exist_ok=True)
 

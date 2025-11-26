@@ -12,7 +12,7 @@ def main():
     )
 
     subparsers = parser.add_subparsers(title="sub-command", dest="sub-command", required=True)
-    add_compiler_subparser(subparsers)
+    # add_compiler_subparser(subparsers)
     # add_scp_subparser(subparsers)
     add_cp_subparser(subparsers)
 

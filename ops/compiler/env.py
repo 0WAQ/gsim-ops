@@ -1,13 +1,12 @@
 import os
 import sys
 import shutil
-import subprocess
-from ..common.utils import check_path_exists
+from ..common.utils import Local, Remote
 
 
 def check_compiler_env(args) -> None:
     # 1. 校验
-    check_path_exists(args.dropbox_user_date_path, "dir")
+    Local.check_path_exists(args.dropbox_user_date_path)
 
     # 2. 寻找因子路径
     alpha_abs_pahts: list[str] = []

@@ -30,11 +30,17 @@ def modify_xml_module(xml_path: str, module_name: str, so_abs_path: str) -> bool
 
         # 更新日期
         universe_node = root.find(f".//Universe")
-        universe_node.set('startdate', '20130101')
+        if universe_node is None:
+            return False # TODO: return
+
+        universe_node.set('startdate', '20130101')  # TODO: default 20130101 or user defines?
         universe_node.set('enddate', '20241231')
 
         # 更新 pnl 目录
         stats_node = root.find(f".//Portfolio/Stats")
+        if stats_node is None:
+            return False
+
         stats_node.set('pnlDir', '/mnt/storage/dropbox/pnl')
         if not os.path.exists('/mnt/storage/dropbox/pnl'):
             os.makedirs('/mnt/storage/dropbox/pnl')
@@ -45,6 +51,7 @@ def modify_xml_module(xml_path: str, module_name: str, so_abs_path: str) -> bool
         with open(xml_path, "w", encoding="utf-8") as f:
             f.write(xml_str)
         return True
+
     except Exception as e:
         print(f"❌ XML修改失败: {str(e)}")
         return False

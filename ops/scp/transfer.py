@@ -5,7 +5,7 @@ from typing import Optional
 from scp import SCPClient
 from tqdm import tqdm
 from ..common.ssh_utils import init_ssh_client
-from ..common.utils import check_path_exists, ensure_dir_exists
+from ..common.utils import Local, Remote
 
 
 def scp_local2remote(ssh: paramiko.SSHClient, local_path: str, remote_path: str) -> bool:
@@ -13,7 +13,12 @@ def scp_local2remote(ssh: paramiko.SSHClient, local_path: str, remote_path: str)
         # 确保远程目录存在
         ssh.exec_command(f"mkdir -p {os.path.dirname(remote_path)}")
 
-        with SCPClient(ssh.get_transport(), socket_timeout=10) as scp:
+        transport = ssh.get_transport()
+        if transport is None:
+            # TODO:
+            return False
+
+        with SCPClient(transport, socket_timeout=10) as scp:
             if os.path.isdir(local_path):
                 # 遍历所有文件, 显示进度条
                 file_list = []
@@ -42,9 +47,14 @@ def scp_local2remote(ssh: paramiko.SSHClient, local_path: str, remote_path: str)
 
 def scp_remote2local(ssh: paramiko.SSHClient, local_path: str, remote_path: str) -> bool:
     try:
-        ensure_dir_exists(os.path.dirname(local_path))
+        Local.ensure_dir_exists(os.path.dirname(local_path))
 
-        with SCPClient(ssh.get_transport(), socket_timeout=10) as scp:
+        transport = ssh.get_transport()
+        if transport is None:
+            # TODO:
+            return False
+
+        with SCPClient(transport, socket_timeout=10) as scp:
             stdin, stdout, stderr = ssh.exec_command(f"file {remote_path} 2>/dev/null")
             is_remote_dir = (stdout.read().decode('utf-8').strip().split(' ')[-1] == "directory")
 
@@ -135,7 +145,7 @@ def run_scp(args):
         print(f"远程：{dest_remote['username']}@{dest_remote['host']}:{remote_path}")
 
     if direction == "local2remote":
-        check_path_exists(local_path)
+        Local.check_path_exists(local_path)
 
     # 3. 初始化 ssh 连接
     ssh = init_ssh_client(
