@@ -1,16 +1,6 @@
 import argparse
 from .transfer import run_cp
-
-
-class LowerAction(argparse.Action):
-    def __call__(self, parser, namespace, values: str, option_string=None):
-        setattr(namespace, self.dest, values.lower())
-
-
-# TODO: gloabl argument
-class Args():
-    def __init__(self, args):
-        self.unix_id: str = args.unix_id
+from ..common.utils import LowerAction
 
 
 def add_cp_subparser(subparser: argparse._SubParsersAction):

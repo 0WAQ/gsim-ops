@@ -1,6 +1,20 @@
 import os
 import sys
+import argparse
 import paramiko
+import subprocess as sp
+from typing import Optional
+
+
+class LowerAction(argparse.Action):
+    def __call__(self, parser, namespace, values: str, option_string=None):
+        setattr(namespace, self.dest, values.lower())
+
+
+# TODO: gloabl argument
+class Args():
+    def __init__(self, args):
+        self.unix_id: str = args.unix_id
 
 
 class Remote:
@@ -20,7 +34,11 @@ class Remote:
         pass
 
 
-class Local:    
+class Local:
+    @staticmethod
+    def check_is_dir(path: str):
+        return os.path.isdir(path)
+
     @staticmethod
     def check_path_exists(path: str):
         if not os.path.exists(os.path.abspath(path)):
@@ -28,5 +46,50 @@ class Local:
 
     @staticmethod
     def ensure_dir_exists(path: str) -> None:
-        os.makedirs(path, exist_ok=True)
+        if not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
 
+
+class Gsim:
+    @staticmethod
+    def run_backtest(xml_path: str):
+        try:
+            python = "/usr/local/gsim/.venv/bin/python"
+            run_py = "/usr/local/gsim/run.py"
+            sp.run([python, run_py, xml_path], stdout=sp.PIPE, text=True)
+            print("✅ backtest succeed")
+        except sp.CalledProcessError as e:
+            print(f"❌ backtest failed: {e}")
+
+
+    @staticmethod
+    def run_simsummary(pnl_path: str) -> Optional[str]:
+        try:
+            python = "/usr/local/gsim/.venv/bin/python"
+            simsummary_py = "/usr/local/gsim/tools/simsummary.py"
+            sim_path = pnl_path + ".sim"
+            with open(sim_path, 'w+') as f:
+                sp.run([python, simsummary_py, pnl_path], stdout=f, text=True)
+            print("✅ simsummary succeed")
+            return sim_path
+        except Exception as e:
+            print(f"❌ simsummary failed: {e}")
+            return None
+
+    
+    @staticmethod
+    def run_diff(lhs: str, rhs: str, out: str) -> Optional[str]:
+        try:
+            output_path = os.path.join(os.path.dirname(lhs), "diff.txt")
+            with open(output_path, 'w+') as f:
+                _ = sp.run(["diff", lhs, rhs], stdout=f, text=True)
+                size = f.seek(0, )
+                if size != 0:
+                    with open(out, 'w+') as f1:
+                        f1.write(os.path.dirname(lhs))
+                        f1.writelines(f.readlines())
+                    print("Error: forward looking!")    # TODO: 
+            print("run diff succeed")
+            return output_path
+        except sp.CalledProcessError as e:
+            print(f"run diff failed: {e}")
