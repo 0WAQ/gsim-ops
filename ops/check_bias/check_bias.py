@@ -97,69 +97,52 @@ def do_xml(alpha_path: str) -> tuple[str, ...]:
 
     xml_cc0_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
     xml_cc0_str = os.linesep.join([line for line in xml_cc0_str.splitlines() if line.strip()])
-    
     with open(xml_cc0_path, "w", encoding="utf-8") as f:
         f.write(xml_cc0_str)
 
     return pnl_path, pnl_cc0_path, xml_path, xml_cc0_path
 
 def run_check_bias(args):
-    dropbox_user_path = os.path.join(args.dropbox_directory, args.unix_id)
-    args.dropbox_user_path = dropbox_user_path
+    src = args.dropbox_path
+    dst = args.target_path
 
-    # 拷贝到临时目录
-    target_path = os.path.join("/tmp/check_bias", args.unix_id)
-    # Local.ensure_dir_exists(target_path)
-
-    start_date = datetime.strptime(args.start_date, "%Y%m%d")
-    end_date = datetime.strptime(args.end_date, "%Y%m%d") if args.end_date is not None else None
-
-    date_folders = []
-    if end_date is None:
-        cur_date = args.start_date
-        cur_path = os.path.join(dropbox_user_path, cur_date)
-        if not Local.check_is_dir(cur_path):
-            print(f"WARN: {cur_path} doesn't exist.")
-            return  # TODO: return
-
-        date_folders.append(cur_path)
-        args.dropbox_user_date_path = os.path.join(dropbox_user_path, cur_date)
-    else:
-        for t in range(int((end_date - start_date).days) + 1):
-            cur_date = (start_date + timedelta(1) * t).strftime("%Y%m%d")
-            cur_path = os.path.join(dropbox_user_path, cur_date)
-            if not Local.check_is_dir(cur_path):
-                print(f"WARN: {cur_path} doesn't exist.")
-                continue
-
-            date_folders.append(cur_path)
-            args.dropbox_user_date_path = os.path.join(dropbox_user_path, cur_date)
-
-    for folder in date_folders:
-        print(folder)
-        os.copy_file_range
-        shutil.copy(folder, target_path)
-
-    check_bias(args)
-
-def check_bias(args):
-    src = "/mnt/storage/dropbox2"
-    dst = "/tmp/check_bias"
-
-    user = "fguo"
-    dates = ["20251121"]
-
+    # TODO: 
     if os.path.exists(dst):
         shutil.rmtree("/tmp/check_bias")
 
     if not os.path.exists(dst):
         os.makedirs(dst)
 
-    user_src = os.path.join(src, user)
-    if not os.path.exists(user_src):
-        os.makedirs(user_src)
+    user_src = os.path.join(src, args.unix_id)
+    args.user_src = user_src
 
-    user_dst = os.path.join(dst, user)
+    # 拷贝到临时目录
+    user_dst = os.path.join(dst, args.unix_id)
+    args.user_dst = user_dst
+
+    start_date = datetime.strptime(args.start_date, "%Y%m%d")
+    end_date = datetime.strptime(args.end_date, "%Y%m%d") if args.end_date is not None else None
+
+    dates = []
+    if end_date is None:
+        cur_date = args.start_date
+        cur_path = os.path.join(user_src, cur_date)
+        if not Local.check_is_dir(cur_path):
+            print(f"WARN: {cur_path} doesn't exist.")
+            return  # TODO: return
+
+        dates.append(cur_date)
+    else:
+        for t in range(int((end_date - start_date).days) + 1):
+            cur_date = (start_date + timedelta(1) * t).strftime("%Y%m%d")
+            cur_path = os.path.join(user_src, cur_date)
+            if not Local.check_is_dir(cur_path):
+                print(f"WARN: {cur_path} doesn't exist.")
+                continue
+
+            dates.append(cur_date)
+
+    args.dates = dates
     for date in dates:
         user_date_src = os.path.join(user_src, date)
         user_date_dst = os.path.join(user_dst, date)
@@ -171,6 +154,14 @@ def check_bias(args):
         if not os.path.exists(user_date_dst):
             shutil.copytree(user_date_src, user_date_dst)
 
+    check_bias(args)
+
+
+def check_bias(args):
+    dst = args.target_path
+
+    user = args.unix_id # TODO: to list?
+    dates = args.dates
 
     users = [user]
     # 遍历 users

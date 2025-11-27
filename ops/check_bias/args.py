@@ -16,6 +16,7 @@ Usage:
     parser.add_argument("-s", "--start-date", type=str, required=True)
     parser.add_argument("-e", "--end-date", type=str, default=None)
 
-    parser.add_argument("--dropbox-directory", type=str, default="/mnt/storage/dropbox")
+    parser.add_argument("--dropbox-path", type=str, default="/mnt/storage/dropbox")
+    parser.add_argument("--target-path", type=str, default="/tmp/check_bias")
 
-    parser.set_defaults(func=check_bias)
+    parser.set_defaults(func=run_check_bias)
