@@ -1,5 +1,5 @@
 import argparse
-from .check_bias import run_check_bias, check_bias
+from .check_bias import run_check_bias
 from ..common.utils import LowerAction
 
 

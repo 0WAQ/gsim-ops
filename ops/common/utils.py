@@ -56,7 +56,9 @@ class Gsim:
         try:
             python = "/usr/local/gsim/.venv/bin/python"
             run_py = "/usr/local/gsim/run.py"
-            sp.run([python, run_py, xml_path], stdout=sp.PIPE, text=True)
+            # TODO: how about stderr?
+            # TODO: 加入超时机制
+            sp.run([python, run_py, xml_path], stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, text=True)
             print("✅ backtest succeed")
         except sp.CalledProcessError as e:
             print(f"❌ backtest failed: {e}")
@@ -83,13 +85,15 @@ class Gsim:
             output_path = os.path.join(os.path.dirname(lhs), "diff.txt")
             with open(output_path, 'w+') as f:
                 _ = sp.run(["diff", lhs, rhs], stdout=f, text=True)
-                size = f.seek(0, )
+                print(f"running diff: {output_path}")
+                size = f.seek(0, 2)
                 if size != 0:
                     with open(out, 'w+') as f1:
                         f1.write(os.path.dirname(lhs))
                         f1.writelines(f.readlines())
-                    print("Error: forward looking!")    # TODO: 
-            print("run diff succeed")
+                    print(f"❌ {os.path.dirname(output_path)} has forward looking!") 
+                else:
+                    print(f"✅ {os.path.dirname(output_path)} doesn't have forward looking!")
             return output_path
         except sp.CalledProcessError as e:
             print(f"run diff failed: {e}")
