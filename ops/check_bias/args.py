@@ -8,7 +8,7 @@ def add_check_bias_subparser(subparser: argparse._SubParsersAction):
         "check-bias",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Usage:
+Example:
     ops check-bias -u wbai -s 20251030 -e 20251030"""
     )
 

@@ -1,10 +1,100 @@
 import os
+import re
 import sys
 import shutil
+import multiprocessing as mp
+from glob import glob
 from datetime import datetime, timedelta
-
 from .xml import do_xml
-from ..common.utils import Local, Gsim
+from ..common.utils import BacktestError, Local, Gsim, debug
+
+DATA_FIREWALL_CODE = """
+class DataFirewall:
+    DEFAULT_DATA_ATTRS = ['close', 'vol']
+
+    def __init__(self, func):
+        self.func = func
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        def wrapper(*args, **kwargs):
+            return self.__decorator__(instance, *args, **kwargs)
+        return wrapper
+
+    def __decorator__(self, *args, **kwargs):
+        instance = args[0]
+        di = args[1]
+        ti = None
+        ii = args[-1]
+        if len(args) > 2:
+            ti = args[1]
+
+        attrs_to_protect = getattr(instance.__class__, '__protected_data__', None) \
+                            or self.DEFAULT_DATA_ATTRS
+        
+        originals = {}
+        for attr in attrs_to_protect:
+            if hasattr(instance, attr):
+                # 保存
+                originals[attr] = getattr(instance, attr)
+                # 截断
+                setattr(instance, attr, self._SafeProxy(originals[attr], di, ti))
+
+        try:
+            return self.func(*args, **kwargs)
+        finally:
+            for attr, orig in originals.items():
+                setattr(instance, attr, orig)
+
+
+    class _SafeProxy:
+        def __init__(self, data, di, ti):
+            self._data = data
+            self._di = di
+            self._ti = ti
+
+        def check(self, index, max_pos):
+            if isinstance(index, slice):
+                start, stop = index.start, index.stop
+                if start is None:
+                    start = 0
+                elif start < 0:
+                    start = max(0, max_pos + start)
+                if stop is None:
+                    stop = max_pos
+                elif stop < 0:
+                    stop = max(0, max_pos + stop)
+                if start >= max_pos:
+                    raise IndexError("looking forward!!!")
+                if stop > max_pos:
+                    raise IndexError("looking forward!!!")
+            elif isinstance(index, int):
+                if index >= max_pos or index < 0:
+                    raise IndexError("looking forward!!!")
+
+        def __getitem__(self, key):
+            di = ti = None
+            if isinstance(key, tuple):
+                di = key[0]
+                if len(key) > 2:
+                    ti = key[1]
+            else:
+                di = key
+
+            self.check(di, self._di)
+            self.check(ti, self._ti)
+            if ti is None:
+                truncated_data = self._data[:self._di]
+            else:
+                truncated_data = self._data[:self._di, :self._ti]
+            return truncated_data[key]
+
+        def __getattr__(self, name):
+            truncated_data = self._data[:self._di]
+            return getattr(truncated_data, name)
+
+"""
 
 
 def run_check_bias(args):
@@ -61,6 +151,24 @@ def run_check_bias(args):
     do_check_bias(args)
 
 
+def inject_datafirewall(py_file):
+    with open(py_file, "r", encoding="utf-8") as f:
+        content = f.read(-1)
+    new_content = DATA_FIREWALL_CODE + content
+
+    dr_pattern = re.compile(r"\s*self\.(\w+)\s*=\s*dr\.getData\(.*\)", re.M)
+    dr_attrs = dr_pattern.findall(content)
+    new_content = new_content.replace("DEFAULT_DATA_ATTRS = ['close', 'vol']",
+                        f"DEFAULT_DATA_ATTRS = [{','.join(t.__repr__() for t in dr_attrs)}]")
+
+    generate_pattern = re.compile(r"(\s*)def generate\(self,\s*di\):", re.M)
+    new_content = generate_pattern.sub(r"\1@DataFirewall\n\1def generate(self, di):", new_content)
+
+    with open(py_file, 'w', encoding="utf-8") as f:
+        f.write(new_content)
+    return True
+
+
 def do_check_bias(args):
     # TODO: to list?
     users = [args.unix_id]
@@ -79,26 +187,31 @@ def do_check_bias(args):
 
             # 遍历 Alpha
             for alpha in os.listdir(user_date_path):
+                if not alpha.startswith("Alpha"):
+                    continue
+
                 alpha_path = os.path.join(user_date_path, alpha)
 
                 # 修改 xml
-                pnl_path, pnl_cc0_path, xml_path, xml_cc0_path = do_xml(alpha_path)
+                py_path, xml_path = do_xml(alpha_path)
+
+                # 注入 DataFirewall
+                inject_datafirewall(py_path)
 
                 # 回测 cc       
                 print("backtest from to cc")
-                Gsim.run_backtest(xml_path)
-                cc = Gsim.run_simsummary(pnl_path)
+                try:
+                    Gsim.run_backtest(xml_path)
+                except BacktestError as e:
+                    print(e)
+                # cc = Gsim.run_simsummary(pnl_path)
 
-                # 回测 cc0
-                print("backtest cc0")
-                Gsim.run_backtest(xml_cc0_path)
-                cc0 = Gsim.run_simsummary(pnl_cc0_path)
-
-                if cc is None or cc0 is None:
-                    print(f"{cc} or {cc0} is None")
-                    sys.exit(0)
+                # if cc is None:
+                #     print(f"{cc} is None")
+                #     sys.exit(0)
 
                 # diff
-                output = Gsim.run_diff(cc, cc0, "/tmp/result")
-                if output is None:
-                    sys.exit(0)
+                # os.makedirs(f"/tmp/result", exist_ok=True)
+                # output = Gsim.run_diff(cc, cc0, f"/tmp/result/{args.unix_id}") # TODO:
+                # if output is None:
+                #     sys.exit(0)

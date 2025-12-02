@@ -2,9 +2,18 @@ import os
 import sys
 import argparse
 import paramiko
+import hashlib
 import subprocess as sp
 from typing import Optional
 
+
+def debug(*args):
+    print(args)
+    while True:
+        pass
+
+class BacktestError(Exception):
+    ...
 
 class LowerAction(argparse.Action):
     def __call__(self, parser, namespace, values: str, option_string=None):
@@ -15,6 +24,16 @@ class LowerAction(argparse.Action):
 class Args():
     def __init__(self, args):
         self.unix_id: str = args.unix_id
+
+
+def md5sum(file_path: str):
+    if not os.path.isfile(file_path):
+        raise Exception(f"{file_path} is not file")
+    md5 = hashlib.md5()
+    with open(file_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(4096), b''):
+            md5.update(chunk)
+    return md5.hexdigest()
 
 
 class Remote:
@@ -56,12 +75,14 @@ class Gsim:
         try:
             python = "/usr/local/gsim/.venv/bin/python"
             run_py = "/usr/local/gsim/run.py"
-            # TODO: how about stderr?
-            # TODO: 加入超时机制
-            sp.run([python, run_py, xml_path], stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, text=True)
+            sp.run([python, run_py, xml_path],
+                   stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE,
+                   text=True, check=True, timeout=3600)
             print("✅ backtest succeed")
         except sp.CalledProcessError as e:
-            print(f"❌ backtest failed: {e}")
+            raise BacktestError(f"❌ looking forward!!! ({xml_path})") from e
+        except sp.TimeoutExpired as e:
+            ...
 
 
     @staticmethod
