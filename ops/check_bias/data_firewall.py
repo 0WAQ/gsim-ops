@@ -1,5 +1,9 @@
+class AlphaData:
+    pass
+
 class DataFirewall:
-    DEFAULT_DATA_ATTRS = ['close', 'vol']
+    DEFAULT_DATA_ATTRS = []
+    DEFAULT_DATA_ATTRS = list(set(DEFAULT_DATA_ATTRS))
 
     def __init__(self, func):
         self.func = func
@@ -19,16 +23,18 @@ class DataFirewall:
         if len(args) > 2:
             ti = args[1]
 
-        attrs_to_protect = getattr(instance.__class__, '__protected_data__', None) \
-                            or self.DEFAULT_DATA_ATTRS
+        attrs_to_protect = self.DEFAULT_DATA_ATTRS
         
         originals = {}
         for attr in attrs_to_protect:
             if hasattr(instance, attr):
                 # 保存
                 originals[attr] = getattr(instance, attr)
+                if originals[attr] is None:
+                    continue
+
                 # 截断
-                setattr(instance, attr, self._SafeProxy(originals[attr], di, ti))
+                setattr(instance, attr, self._SafeProxy(originals[attr], di, ti, attr))
 
         try:
             return self.func(*args, **kwargs)
@@ -38,10 +44,11 @@ class DataFirewall:
 
 
     class _SafeProxy:
-        def __init__(self, data, di, ti):
+        def __init__(self, data, di, ti, attr):
             self._data = data
             self._di = di
             self._ti = ti
+            self._attr = attr
 
         def check(self, index, max_pos):
             if isinstance(index, slice):
@@ -55,12 +62,12 @@ class DataFirewall:
                 elif stop < 0:
                     stop = max(0, max_pos + stop)
                 if start >= max_pos:
-                    raise IndexError("looking forward!!!")
+                    raise IndexError(f"{self._attr} looking forward!!!")
                 if stop > max_pos:
-                    raise IndexError("looking forward!!!")
+                    raise IndexError(f"{self._attr} looking forward!!!")
             elif isinstance(index, int):
                 if index >= max_pos or index < 0:
-                    raise IndexError("looking forward!!!")
+                    raise IndexError(f"{self._attr} looking forward!!!")
 
         def __getitem__(self, key):
             di = ti = None
@@ -72,13 +79,24 @@ class DataFirewall:
                 di = key
 
             self.check(di, self._di)
-            self.check(ti, self._ti)
-            if ti is None:
-                truncated_data = self._data[:self._di]
+            if self._ti is not None:
+                self.check(ti, self._ti)
+            if isinstance(self._data, AlphaData):
+                if ti is None:
+                    truncated_data = self._data.raw_data[:self._di]
+                else:
+                    truncated_data = self._data.raw_data[:self._di, :self._ti]
             else:
-                truncated_data = self._data[:self._di, :self._ti]
+                if ti is None:
+                    truncated_data = self._data[:self._di]
+                else:
+                    truncated_data = self._data[:self._di, :self._ti]
             return truncated_data[key]
 
         def __getattr__(self, name):
-            truncated_data = self._data[:self._di]
+            if isinstance(self._data, AlphaData):
+                raw = self._data.raw_data
+                truncated_data = AlphaData(raw[:self._di])
+            else:
+                truncated_data = self._data[:self._di]
             return getattr(truncated_data, name)

@@ -8,9 +8,13 @@ from datetime import datetime, timedelta
 from .xml import do_xml
 from ..common.utils import BacktestError, Local, Gsim, debug
 
-DATA_FIREWALL_CODE = """
+DATA_FIREWALL_CODE = """\
+class AlphaData:
+    pass
+
 class DataFirewall:
-    DEFAULT_DATA_ATTRS = ['close', 'vol']
+    DEFAULT_DATA_ATTRS = []
+    DEFAULT_DATA_ATTRS = list(set(DEFAULT_DATA_ATTRS))
 
     def __init__(self, func):
         self.func = func
@@ -30,16 +34,18 @@ class DataFirewall:
         if len(args) > 2:
             ti = args[1]
 
-        attrs_to_protect = getattr(instance.__class__, '__protected_data__', None) \
-                            or self.DEFAULT_DATA_ATTRS
+        attrs_to_protect = self.DEFAULT_DATA_ATTRS
         
         originals = {}
         for attr in attrs_to_protect:
             if hasattr(instance, attr):
                 # 保存
                 originals[attr] = getattr(instance, attr)
+                if originals[attr] is None:
+                    continue
+
                 # 截断
-                setattr(instance, attr, self._SafeProxy(originals[attr], di, ti))
+                setattr(instance, attr, self._SafeProxy(originals[attr], di, ti, attr))
 
         try:
             return self.func(*args, **kwargs)
@@ -49,10 +55,11 @@ class DataFirewall:
 
 
     class _SafeProxy:
-        def __init__(self, data, di, ti):
+        def __init__(self, data, di, ti, attr):
             self._data = data
             self._di = di
             self._ti = ti
+            self._attr = attr
 
         def check(self, index, max_pos):
             if isinstance(index, slice):
@@ -66,12 +73,12 @@ class DataFirewall:
                 elif stop < 0:
                     stop = max(0, max_pos + stop)
                 if start >= max_pos:
-                    raise IndexError("looking forward!!!")
+                    raise IndexError(f"{self._attr} looking forward!!!")
                 if stop > max_pos:
-                    raise IndexError("looking forward!!!")
+                    raise IndexError(f"{self._attr} looking forward!!!")
             elif isinstance(index, int):
                 if index >= max_pos or index < 0:
-                    raise IndexError("looking forward!!!")
+                    raise IndexError(f"{self._attr} looking forward!!!")
 
         def __getitem__(self, key):
             di = ti = None
@@ -83,15 +90,26 @@ class DataFirewall:
                 di = key
 
             self.check(di, self._di)
-            self.check(ti, self._ti)
-            if ti is None:
-                truncated_data = self._data[:self._di]
+            if self._ti is not None:
+                self.check(ti, self._ti)
+            if isinstance(self._data, AlphaData):
+                if ti is None:
+                    truncated_data = self._data.raw_data[:self._di]
+                else:
+                    truncated_data = self._data.raw_data[:self._di, :self._ti]
             else:
-                truncated_data = self._data[:self._di, :self._ti]
+                if ti is None:
+                    truncated_data = self._data[:self._di]
+                else:
+                    truncated_data = self._data[:self._di, :self._ti]
             return truncated_data[key]
 
         def __getattr__(self, name):
-            truncated_data = self._data[:self._di]
+            if isinstance(self._data, AlphaData):
+                raw = self._data.raw_data
+                truncated_data = AlphaData(raw[:self._di])
+            else:
+                truncated_data = self._data[:self._di]
             return getattr(truncated_data, name)
 
 """
@@ -156,11 +174,11 @@ def inject_datafirewall(py_file):
         content = f.read(-1)
     new_content = DATA_FIREWALL_CODE + content
 
-    dr_pattern = re.compile(r"\s*self\.(\w+)\s*=\s*dr\.getData\(.*\)", re.M)
+    dr_pattern = re.compile(r"\s*self\.(\w+)\s*=.*dr\.getData\(.*\).*", re.M)
     dr_attrs = dr_pattern.findall(content)
-    new_content = new_content.replace("DEFAULT_DATA_ATTRS = ['close', 'vol']",
+    new_content = new_content.replace("DEFAULT_DATA_ATTRS = []",
                         f"DEFAULT_DATA_ATTRS = [{','.join(t.__repr__() for t in dr_attrs)}]")
-
+    new_content = new_content.replace("self.raw_data = raw_data_object.data", "self.raw_data = raw_data_object")
     generate_pattern = re.compile(r"(\s*)def generate\(self,\s*di\):", re.M)
     new_content = generate_pattern.sub(r"\1@DataFirewall\n\1def generate(self, di):", new_content)
 
@@ -173,6 +191,8 @@ def do_check_bias(args):
     # TODO: to list?
     users = [args.unix_id]
 
+    os.makedirs(f"/tmp/result/{args.unix_id}", exist_ok=True)
+
     # 遍历 users
     for user in users:
         user_path = os.path.join(args.target_path, user)
@@ -184,6 +204,8 @@ def do_check_bias(args):
             user_date_path = os.path.join(user_path, date)
             if not os.path.exists(user_date_path):
                 continue
+
+            f = open(f"/tmp/result/{args.unix_id}/{date}", "w+")
 
             # 遍历 Alpha
             for alpha in os.listdir(user_date_path):
@@ -204,14 +226,6 @@ def do_check_bias(args):
                     Gsim.run_backtest(xml_path)
                 except BacktestError as e:
                     print(e)
-                # cc = Gsim.run_simsummary(pnl_path)
+                    f.write(str(e))
 
-                # if cc is None:
-                #     print(f"{cc} is None")
-                #     sys.exit(0)
-
-                # diff
-                # os.makedirs(f"/tmp/result", exist_ok=True)
-                # output = Gsim.run_diff(cc, cc0, f"/tmp/result/{args.unix_id}") # TODO:
-                # if output is None:
-                #     sys.exit(0)
+            f.close()

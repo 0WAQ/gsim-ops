@@ -80,7 +80,7 @@ class Gsim:
                    text=True, check=True, timeout=3600)
             print("✅ backtest succeed")
         except sp.CalledProcessError as e:
-            raise BacktestError(f"❌ looking forward!!! ({xml_path})") from e
+            raise BacktestError(f"❌ looking forward!!! ({xml_path}) {e.stderr}") from e
         except sp.TimeoutExpired as e:
             ...
 
