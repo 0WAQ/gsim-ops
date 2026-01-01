@@ -121,7 +121,7 @@ def run_check_bias(args):
 
     # TODO: remove dst/user
     if os.path.exists(dst):
-        shutil.rmtree("/tmp/check_bias")
+        shutil.rmtree("/mnt/storage/work/wbai/check_bias")
 
     if not os.path.exists(dst):
         os.makedirs(dst)
@@ -191,7 +191,7 @@ def do_check_bias(args):
     # TODO: to list?
     users = [args.unix_id]
 
-    os.makedirs(f"/tmp/result/{args.unix_id}", exist_ok=True)
+    os.makedirs(f"/mnt/storage/work/wbai/check_bias/result/{args.unix_id}", exist_ok=True)
 
     # 遍历 users
     for user in users:
@@ -205,7 +205,7 @@ def do_check_bias(args):
             if not os.path.exists(user_date_path):
                 continue
 
-            f = open(f"/tmp/result/{args.unix_id}/{date}", "w+")
+            f = open(f"/mnt/storage/work/wbai/check_bias/result/{args.unix_id}/{date}", "w+")
 
             # 遍历 Alpha
             for alpha in os.listdir(user_date_path):

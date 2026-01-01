@@ -17,6 +17,6 @@ Example:
     parser.add_argument("-e", "--end-date", type=str, default=None)
 
     parser.add_argument("--dropbox-path", type=str, default="/mnt/storage/dropbox")
-    parser.add_argument("--target-path", type=str, default="/tmp/check_bias")
+    parser.add_argument("--target-path", type=str, default="/mnt/storage/work/wbai/check_bias")
 
     parser.set_defaults(func=run_check_bias)
