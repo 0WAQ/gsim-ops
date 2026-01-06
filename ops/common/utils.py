@@ -1,10 +1,15 @@
 import os
 import sys
-import argparse
-import paramiko
+import mmap
 import hashlib
+import paramiko
+import argparse
 import subprocess as sp
+from pathlib import Path
 from typing import Optional
+from datetime import datetime, timedelta
+
+from .exception import BacktestError
 
 
 def debug(*args):
@@ -12,28 +17,25 @@ def debug(*args):
     while True:
         pass
 
-class BacktestError(Exception):
-    ...
+def date_range(start: str, end: str):
+    d =  datetime.strptime(start, "%Y%m%d").date()
+    stop = datetime.strptime(end, "%Y%m%d").date()
+    while d <= stop:
+        yield d.strftime("%Y%m%d")
+        d += timedelta(days=1)
+
+def md5sum(file_path: str | Path) -> str | None:
+    try:
+        with open(file_path, "rb") as f, \
+            mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            return hashlib.md5(mm).hexdigest()
+    except:
+        return None
+
 
 class LowerAction(argparse.Action):
     def __call__(self, parser, namespace, values: str, option_string=None):
         setattr(namespace, self.dest, values.lower())
-
-
-# TODO: gloabl argument
-class Args():
-    def __init__(self, args):
-        self.unix_id: str = args.unix_id
-
-
-def md5sum(file_path: str):
-    if not os.path.isfile(file_path):
-        raise Exception(f"{file_path} is not file")
-    md5 = hashlib.md5()
-    with open(file_path, 'rb') as f:
-        for chunk in iter(lambda: f.read(4096), b''):
-            md5.update(chunk)
-    return md5.hexdigest()
 
 
 class Remote:

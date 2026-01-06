@@ -4,7 +4,8 @@ import paramiko
 from typing import Optional
 from scp import SCPClient
 from tqdm import tqdm
-from ..common.ssh_utils import init_ssh_client
+
+from ..common.ssh import init_ssh_client
 from ..common.utils import Local, Remote
 
 

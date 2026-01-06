@@ -1,9 +1,8 @@
 import os
-import sys
 from scp import SCPClient
 from datetime import datetime, timedelta
 from ..common.utils import Local, Remote
-from ..common.ssh_utils import init_ssh_client
+from ..common.ssh import init_ssh_client
 from ..compiler.factor import run_compiler
 
 
