@@ -6,13 +6,10 @@ import sys
 from ...common.config import Config
 from ...common.runner import Runner
 from ...common.alpha.metadata import AlphaMetadata
-from ...common.alpha.metadatas import AlphaMetadatas
 from ...common.alpha.results.correlation import *
 
 class CorrelationChecker:
-    def __init__(self, metadatas: AlphaMetadatas, config: Config):
-        self.metadatas = metadatas
-
+    def __init__(self, config: Config):
         self.corr_threshold: float = config.correlation["corr_threshold"]
         self.config = config    # TODO:
 
@@ -44,46 +41,6 @@ class CorrelationChecker:
         ])
         
         return win_count >= 2
-    
-    def _print_result_compact(self, factor: AlphaMetadata,
-                              ret: tuple[CorrStatus, CorrResult | str],
-                              pct: float):
-        """精简输出单个结果"""
-        status: CorrStatus = ret[0]
-        result: CorrResult | str = ret[1]
-        
-        if isinstance(result, str) or status == CorrStatus.ERROR:
-            print(f"❌ [{pct}%] {factor.name}: {result}")
-            sys.stdout.flush()
-            return
-
-        m = result.metrics
-        mc = result.max_bcorr
-        hc = result.high_corr_count
-        
-        # 状态图标
-        icon = '✅' if status in [CorrStatus.PASS, CorrStatus.BEAT] else '❌'
-        
-        # 主要信息 (单行)
-        output = (f"{icon} [{pct}%] {factor.name} | "
-                f"MaxCorr={mc:.3f} HC={hc} | "
-                f"ret={m.ret:.1f}% "
-                f"shrp={m.shrp:.2f} "
-                f"fit={m.fitness:.2f}")
-        
-        print(output)
-        
-        # 如果失败，输出未打败因子示例
-        if status == CorrStatus.FAIL:
-            unbeaten = result.unbeaten_example
-            if unbeaten:
-                uf_name, uf_corr, uf_m = unbeaten
-                print(f"   → 未打败 {uf_name} (corr={uf_corr:.3f}): "
-                    f"ret={uf_m.ret:.1f}% "
-                    f"shrp={uf_m.shrp:.2f} "
-                    f"fit={uf_m.fitness:.2f}")
-        
-        sys.stdout.flush()
     
     def check_one(self, factor: AlphaMetadata) -> tuple[CorrStatus, str, CorrResult | None]:
         # 1. 运行 bcorr

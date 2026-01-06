@@ -19,13 +19,10 @@ from pathlib import Path
 
 from ...common.config import Config
 from ...common.alpha.metadata import AlphaMetadata
-from ...common.alpha.metadatas import AlphaMetadatas
 from ...common.alpha.results.compliance import *
 
 class ComplianceChecker:
-    def __init__(self, metadatas: AlphaMetadatas, config: Config):
-        self.metadatas = metadatas
-
+    def __init__(self, config: Config):
         self.max_position_pct: float = config.compliance["max_position_pct"]
         self.min_total_stocks: int = config.compliance["min_total_stocks"]
         self.min_long_stocks: int = config.compliance["min_long_stocks"]

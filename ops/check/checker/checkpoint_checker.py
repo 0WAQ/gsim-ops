@@ -7,18 +7,15 @@
 3. 重新计算 MD5 并对比
 4. 输出检测结果
 """
-import time
 from ...common.utils import md5sum
 from ...common.config import Config
 from ...common.runner import Runner
 from ...common.alpha.metadata import AlphaMetadata
-from ...common.alpha.metadatas import AlphaMetadatas
 from ...common.alpha.results.checkpoint import *
 
 
 class CheckpointChecker:
-    def __init__(self, metadatas: AlphaMetadatas, config: Config):
-        self.metadatas = metadatas
+    def __init__(self, config: Config):
         self.config = config
 
     def _get_v1md5(self, factor: AlphaMetadata) -> str | None:

@@ -40,27 +40,9 @@ class CheckerPipeline:
 
         self.metadatas = AlphaMetadatas(self.config.dropbox_path_target, users, start, end, factor)
 
-        # self.compliance_enable = self.config.compliance["enabled"]
-        # self.correlation_enable = self.config.correlation["enabled"]
-        # self.checkpoint_enable = self.config.checkpoint["enabled"]
-
-        # 创建合规性检测器
-        self.compliance_checker = ComplianceChecker(
-            metadatas=self.metadatas,
-            config=self.config
-        )
-        
-        # 相关性检测器
-        self.correlation_checker = CorrelationChecker(
-            metadatas=self.metadatas,
-            config=self.config
-        )
-        
-        # checkpoint检测器
-        self.checkpoint_checker = CheckpointChecker(
-            metadatas=self.metadatas,
-            config=self.config
-        )
+        self.compliance_checker = ComplianceChecker(config=self.config)
+        self.correlation_checker = CorrelationChecker(config=self.config)
+        self.checkpoint_checker = CheckpointChecker(config=self.config)
 
     def classify(self,
                 passed: list[tuple[AlphaReport, str, str]],
