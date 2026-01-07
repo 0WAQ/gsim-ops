@@ -20,9 +20,10 @@ from ..common.alpha.results.compliance import *
 from ..common.alpha.results.correlation import *
 from ..common.alpha.results.checkpoint import *
 
+from .checker.base import *
 from .checker.modify_xml import do_main as modify_xml
 from .checker.compliance_checker import ComplianceChecker
-from .checker.checkpoint_checker import CheckpointChecker
+from .checker.checkpoint_checker import CheckpointChecker, CheckpointSkip, CheckpointFail
 from .checker.correlation_checker import CorrelationChecker
 
 
@@ -30,7 +31,7 @@ class CheckerPipeline:
     def __init__(self,
                  users: list[str], 
                  start: str, end: str,
-                 config_path: Path,    # TODO:
+                 config_path: Path,
                  factor: str | None=None):
 
         self.config = Config.load(config_path)
@@ -102,84 +103,73 @@ class CheckerPipeline:
         warn(f"⚠ 跳过  : {len(skipped):>4}")
         bottom()
 
-    def run_one(self, factor: AlphaMetadata, i: int) -> tuple[int, AlphaReport, str, str]:
+    def classify_one(self, factor: AlphaMetadata):
+        ...
+
+    def run_one(self, factor: AlphaMetadata, i: int) -> tuple[int, AlphaReport, str, str] | None:
         total = len(self.metadatas)
         prog  = (i + 1) / total
         bar   = f"[{i+1:>{len(str(total))}}/{total}] {prog:>6.1%}"
-
-        print(f"{bar} 检测因子 ", end="")
-        highlight(f"{factor.key}")
+        print(f"{bar} checking ", end=""); highlight(f"{factor.key}")
 
         report = AlphaReport(factor.key)
+        
+        try:
+            # 1. Short Backtest
+            ok, err = Runner.run_backtest(factor.xml_file, self.config)
+            if not ok:
+                error(f"  ↘  {factor.key} 短区间回测失败  {err}")
+            info(f"  ✔  {factor.key} short backtest succeed")
 
-        # 1. 回测
-        ok, err = Runner.run_backtest(factor.xml_file, self.config)
-        if not ok:
-            error(f"  ↘  {factor.key} 短区间回测失败  {err}")
-            return 0, report, "backtest", err
+            # 2. Checkpoint
+            report.checkpoint_result = self.checkpoint_checker.check(factor)
+            info(f"  ✔  {factor.key} checkpoint passed")
 
-        # 2. Checkpoint # TODO:
-        ok, msg = self.checkpoint_checker.check_one(factor)
-        report.checkpoint_result = PointResult()
-        if ok:
-            info(f"  ✔  {factor.key} 断点通过")
-        else:
-            error(f"  ✘  {factor.key} 断点未通过")
-            return 1, report, "checkpoint", ""
+            # 3. Clean and Change XML
+            shutil.rmtree(factor.alpha_dir, ignore_errors=True)
+            Path(factor.pnl_file).unlink(missing_ok=True)
+            shutil.rmtree(factor.checkpoint_dir, ignore_errors=True)
 
-        # 3. 清理 & 长区间回测
-        shutil.rmtree(factor.alpha_dir, ignore_errors=True)
-        Path(factor.pnl_file).unlink(missing_ok=True)
-        shutil.rmtree(factor.checkpoint_dir, ignore_errors=True)
+            factor.xml_config["gsim"]["Universe"]["@startdate"] = "20150101"
+            factor.xml_config["gsim"]["Universe"]["@enddate"]   = "20241231"
+            factor.save()
 
-        factor.xml_config["gsim"]["Universe"]["@startdate"] = "20150101"
-        factor.xml_config["gsim"]["Universe"]["@enddate"]   = "20241231"
-        factor.save()
+            # 4. Long Backtest
+            ok, err = Runner.run_backtest(factor.xml_file, self.config)
+            if not ok:
+                error(f"  ✘  {factor.key} 长区间回测失败 {err}")
+            info(f"  ✔  {factor.key} long backtest succeed")
 
-        ok, err = Runner.run_backtest(factor.xml_file, self.config)
-        if not ok:
-            error(f"  ✘  {factor.key} 长区间回测失败  {err}")
-            return 1, report, "backtest", err
+            # 5. Compliance
+            report.compliance_result = self.compliance_checker.check(factor)
+            info(f"  ✔  {factor.key} compliance passed")
 
-        # 4. 合规
-        ok, err, res = self.compliance_checker.check_one(factor)
-        report.compliance_result = res
-        if ok == CompStatus.PASS and res:
-            info(f"  ✔  {factor.key} 合规通过")
-        elif ok == CompStatus.FAIL and res:
-            error(f"  ✘  {factor.key} 合规失败  {err}")
-            return 1, report, "compliance", err
-        else:
-            warn(f"  ⚠  {factor.key} 合规跳过")
-            return 0, report, "", ""
+            # 6. Correlation
+            report.correlation_result = self.correlation_checker.check(factor)
+            info(f"  ✔  {factor.key} correlation passed")
 
-        # 5. 相关性
-        ok, err, res = self.correlation_checker.check_one(factor)
-        if ok in (CorrStatus.PASS, CorrStatus.BEAT):
-            info(f"  ✔  {factor.key} 相关性通过")
-        elif ok == CorrStatus.FAIL and res is not None:
-            error(f"  ✘  {factor.key} 相关性过高 (bcorr={res.max_bcorr}, {res.metrics})")
-            # TODO: 之后得加上
-            # return 1, report, "correlation", f"bcorr={res.max_bcorr}, {res.metrics}"
-        else:  # ERROR
-            warn(f"  ⚠  {factor.key} 相关性检测异常  {err}")
-            return 0, report, "", err
+        except CheckSkip as e:
+            warn(f"  ⚠  {factor.key} {e.stage} skipped. ({str(e)})")
+        except CheckFail as e:
+            error(f"  ✘  {factor.key} {e.stage} failed. ({str(e)})")
+        except Exception as e:
+            ...
 
-        return 2, report, "", ""
 
     def run(self):
         banner("因子检测")
 
         passed, failed, skipped = [], [], []
         with ProcessPoolExecutor(max_workers=min(20, len(self.metadatas))) as pool:
-            futures: list[Future[tuple[int, AlphaReport, str, str]]] = []
+            futures: list[Future[tuple[int, AlphaReport, str, str] | None]] = []
             for i, factor in enumerate(self.metadatas):
                 f = pool.submit(self.run_one, factor, i)
                 futures.append(f)
 
             for f in as_completed(futures):
-                code, report, path, err = f.result()
-                (passed if code == 2 else failed if code == 1 else skipped).append((report, path, err))
+                ...
+                # code, report, path, err = f.result() or (2, report, path, err)
+                # (passed if code == 2 else failed if code == 1 else skipped).append((report, path, err))
 
         banner("检测汇总")
         info(f"✔ 通过 : {len(passed):>4}")
@@ -187,7 +177,7 @@ class CheckerPipeline:
         warn(f"⚠ 跳过 : {len(skipped):>4}")
         bottom()
 
-        self.classify(passed, failed, skipped)
+        # self.classify(passed, failed, skipped)
 
 
 def run_entry(args):

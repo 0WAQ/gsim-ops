@@ -19,6 +19,12 @@ class CorrResult:
         self.high_corr_count = high_corr_count
         self.unbeaten_example = unbeaten_example
 
+    def __repr__(self):
+        return f"bcorr={self.max_bcorr}, {self.metrics}"
+    
+    def __str__(self):
+        return f"bcorr={self.max_bcorr}, {self.metrics}"
+
 class CorrResults:
     def __init__(self):
         self.results: Dict[AlphaMetadata, CorrResult | str] = {}

@@ -1,12 +1,18 @@
-#!/usr/bin/env python3
-"""
-因子相关性检测脚本 - 精简版 (集成用)
-"""
-import sys
+from .base import *
 from ...common.config import Config
 from ...common.runner import Runner
 from ...common.alpha.metadata import AlphaMetadata
 from ...common.alpha.results.correlation import *
+
+
+class CorrelationSkip(CheckSkip):
+    def __init__(self, *args: object):
+        super().__init__("correlation", *args)
+
+class CorrelationFail(CheckFail):
+    def __init__(self, *args: object):
+        super().__init__("correlation", *args)
+
 
 class CorrelationChecker:
     def __init__(self, config: Config):
@@ -42,45 +48,42 @@ class CorrelationChecker:
         
         return win_count >= 2
     
-    def check_one(self, factor: AlphaMetadata) -> tuple[CorrStatus, str, CorrResult | None]:
+    def check(self, factor: AlphaMetadata) -> CorrResult:
         # 1. 运行 bcorr
         corrs = Runner.run_bcorr(factor.pnl_file, self.config)
         if corrs is None:
-            return CorrStatus.ERROR, "bcorr 运行失败", None
+            raise CorrelationSkip("bcorr 运行失败")
         if not corrs:
-            return CorrStatus.ERROR, "无相关性数据", None
+            raise CorrelationSkip("无相关性数据")
 
         # 2. 获取当前因子指标
         metrics = Runner.run_simsummary(factor.pnl_file, self.config)
         if not metrics:
-            return CorrStatus.ERROR, "无法获取因子指标", None
+            raise CorrelationSkip("无法获取因子指标")
         
         # 3. 找出最大相关系数
-        max_corr_factor, max_corr_raw = max(corrs, key=lambda x: abs(x[1]))
-        max_corr = abs(max_corr_raw)
+        max_corr_factor, max_corr = max(corrs, key=lambda x: abs(x[1]))
         
         # 4. 如果相关性低，直接通过
-        if max_corr < self.corr_threshold:
-            result = CorrResult(max_corr, max_corr_factor, metrics, 0)
-            return CorrStatus.PASS, "", result
+        if abs(max_corr) < self.corr_threshold:
+            return CorrResult(max_corr, max_corr_factor, metrics, 0)
 
         # 5. 找出所有高相关因子
-        high_corr_factors = [(fname, abs(corr)) for fname, corr in corrs 
+        high_corr_factors = [(factor_name, abs(corr)) for factor_name, corr in corrs 
                             if abs(corr) >= self.corr_threshold]
         
         # 6. 检查是否能打败所有高相关因子
-        beat_all = True
-        unbeaten_factors: list[tuple[str, float, Metrics]] = []
-        
         for competitor_name, corr in high_corr_factors:
-            other = self._get_prod_factor_metrics(competitor_name)
-            if not other:
+            competitor_metrices = self._get_prod_factor_metrics(competitor_name)
+            if not competitor_metrices:
                 continue
-            if not self._check_beat(metrics, other):
-                beat_all = False
-                unbeaten_factors.append((competitor_name, corr, other))
-        
-        return CorrStatus.BEAT if beat_all else CorrStatus.FAIL, "", \
-               CorrResult(max_corr, max_corr_factor,
-                        metrics, len(high_corr_factors),
-                        unbeaten_factors[0] if unbeaten_factors else None)
+
+            # 未打败
+            if not self._check_beat(metrics, competitor_metrices):
+                raise CorrelationFail(CorrResult(
+                                        max_corr, max_corr_factor,
+                                        metrics, len(high_corr_factors),
+                                        (competitor_name, corr, competitor_metrices)))
+
+        return CorrResult(max_corr, max_corr_factor,
+                          metrics, len(high_corr_factors))
