@@ -5,6 +5,20 @@ from pathlib import Path
 from .config import Config
 from .metrics import Metrics
 
+
+class BacktestError(Exception):
+    def __init__(self, *args: object):
+        self.stage = "backtest"
+        super().__init__(*args)
+
+    def __repr__(self):
+        if len(self.args) == 0:
+            return ""
+        if len(self.args) > 1:
+            return repr(self.args[0])
+        return repr(self.args)
+
+
 class Runner:
     @staticmethod
     def run_bcorr(pnl_file: Path, config: Config) -> list[tuple[str, float]] | None:
@@ -62,17 +76,13 @@ class Runner:
             return None
 
     @staticmethod
-    def run_backtest(xml_file: Path, config: Config) -> tuple[bool, str]:
-        try:
-            result = subprocess.run(
-                [config.python_path, config.run_script, xml_file],
-                capture_output=True,
-                text=True,
-                timeout=config.timeout
-            )
-            return result.returncode == 0, \
-                   result.stderr
-        except subprocess.TimeoutExpired as e:
-            return False, str(e)
-        except Exception as e:
-            return False, str(e)
+    def run_backtest(xml_file: Path, config: Config):
+        result = subprocess.run(
+            [config.python_path, config.run_script, xml_file],
+            capture_output=True,
+            text=True,
+            timeout=config.timeout
+        )
+
+        if result.returncode != 0:
+            raise BacktestError(result.stderr)

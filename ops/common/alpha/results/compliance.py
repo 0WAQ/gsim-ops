@@ -1,14 +1,14 @@
 import numpy as np
-from enum import Enum
 from typing import Dict
+from .base import *
 from ..metadata import AlphaMetadata
 
-class CompStatus(Enum):
+class CompStatus(Status):
     PASS = 1
     FAIL = 2
     SKIP = 3
 
-class CompResult:
+class CompResult(Result):
     def __init__(self, avg_long_pct: np.float64, avg_short_pct: np.float64,
                  long_count: int, short_count: int,
                  total_checked: int = 0):
@@ -19,7 +19,7 @@ class CompResult:
         self.total_checked = total_checked
 
 
-class CompResults:
+class CompResults(Results):
     def __init__(self):
         self.results: Dict[AlphaMetadata, CompResult | str] = {}
 

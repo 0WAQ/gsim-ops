@@ -1,11 +1,10 @@
-from enum import Enum
+from .base import *
 
-
-class PointStatus(Enum):
+class PointStatus(Status):
     ...
 
-class PointResult:
+class PointResult(Result):
     ...
 
-class PointResults:
+class PointResults(Results):
     ...

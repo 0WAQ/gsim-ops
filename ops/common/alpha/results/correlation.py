@@ -1,15 +1,15 @@
-from enum import Enum
 from typing import Dict
+from .base import *
 from ...metrics import Metrics
 from ..metadata import AlphaMetadata
 
-class CorrStatus(Enum):
+class CorrStatus(Status):
     PASS = 1
     BEAT = 2
     FAIL = 3
     ERROR = 4
 
-class CorrResult:
+class CorrResult(Result):
     def __init__(self, max_bcorr: float, max_bcorr_factor: str,
             metrics: Metrics, high_corr_count: int,
             unbeaten_example: tuple[str, float, Metrics] | None = None):
@@ -25,7 +25,7 @@ class CorrResult:
     def __str__(self):
         return f"bcorr={self.max_bcorr}, {self.metrics}"
 
-class CorrResults:
+class CorrResults(Results):
     def __init__(self):
         self.results: Dict[AlphaMetadata, CorrResult | str] = {}
 
