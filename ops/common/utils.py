@@ -73,7 +73,7 @@ class Local:
 
 class Gsim:
     @staticmethod
-    def run_backtest(xml_path: str):
+    def run_backtest(xml_path: Path):
         try:
             python = "/usr/local/gsim/.venv/bin/python"
             run_py = "/usr/local/gsim/run.py"

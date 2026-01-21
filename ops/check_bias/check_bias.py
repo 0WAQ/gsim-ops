@@ -1,12 +1,10 @@
 import os
 import re
-import sys
 import shutil
-import multiprocessing as mp
-from glob import glob
+from pathlib import Path
 from datetime import datetime, timedelta
 from .xml import do_xml
-from ..common.utils import BacktestError, Local, Gsim, debug
+from ..common.utils import BacktestError, Gsim
 
 DATA_FIREWALL_CODE = """\
 class AlphaData:
@@ -116,21 +114,21 @@ class DataFirewall:
 
 
 def run_check_bias(args):
-    src = args.dropbox_path
-    dst = args.target_path
+    src: Path = args.dropbox_path
+    dst: Path = args.target_path
 
     # TODO: remove dst/user
-    if os.path.exists(dst):
+    if dst.exists():
         shutil.rmtree("/mnt/storage/work/wbai/check_bias")
 
-    if not os.path.exists(dst):
+    if not dst.exists():
         os.makedirs(dst)
 
-    user_src = os.path.join(src, args.unix_id)
+    user_src: Path = src / args.user
     args.user_src = user_src
 
     # 拷贝到临时目录
-    user_dst = os.path.join(dst, args.unix_id)
+    user_dst: Path = dst / args.user
     args.user_dst = user_dst
 
     start_date = datetime.strptime(args.start_date, "%Y%m%d")
@@ -139,8 +137,8 @@ def run_check_bias(args):
     dates = []
     if end_date is None:
         cur_date = args.start_date
-        cur_path = os.path.join(user_src, cur_date)
-        if not Local.check_is_dir(cur_path):
+        cur_path = user_src / cur_date
+        if not cur_path.is_dir():
             print(f"WARN: {cur_path} doesn't exist")
             return  # TODO: return
 
@@ -148,8 +146,8 @@ def run_check_bias(args):
     else:
         for t in range(int((end_date - start_date).days) + 1):
             cur_date = (start_date + timedelta(1) * t).strftime("%Y%m%d")
-            cur_path = os.path.join(user_src, cur_date)
-            if not Local.check_is_dir(cur_path):
+            cur_path: Path = user_src / cur_date
+            if not cur_path.is_dir():
                 print(f"WARN: {cur_path} doesn't exist")
                 continue
 
@@ -157,19 +155,19 @@ def run_check_bias(args):
 
     args.dates = dates
     for date in dates:
-        user_date_src = os.path.join(user_src, date)
-        user_date_dst = os.path.join(user_dst, date)
-        if not os.path.exists(user_date_src):
+        user_date_src: Path = user_src / date
+        user_date_dst: Path = user_dst / date
+        if not user_date_src.exists():
             print(f"{user_date_src} doesn't exist")
             continue
 
-        if not os.path.exists(user_date_dst):
+        if not user_date_dst.exists():
             shutil.copytree(user_date_src, user_date_dst)
 
     do_check_bias(args)
 
 
-def inject_datafirewall(py_file):
+def inject_datafirewall(py_file: Path):
     with open(py_file, "r", encoding="utf-8") as f:
         content = f.read(-1)
     new_content = DATA_FIREWALL_CODE + content
@@ -189,30 +187,28 @@ def inject_datafirewall(py_file):
 
 def do_check_bias(args):
     # TODO: to list?
-    users = [args.unix_id]
+    users: list[str] = [args.user]
 
-    os.makedirs(f"/mnt/storage/work/wbai/check_bias/result/{args.unix_id}", exist_ok=True)
+    os.makedirs(f"/mnt/storage/work/wbai/check_bias/result/{args.user}", exist_ok=True)
 
     # 遍历 users
     for user in users:
-        user_path = os.path.join(args.target_path, user)
-        if not os.path.exists(user_path):
+        user_path: Path = args.target_path / user
+        if not user_path.exists():
             continue
 
         # 遍历 dates
         for date in args.dates:
-            user_date_path = os.path.join(user_path, date)
-            if not os.path.exists(user_date_path):
+            user_date_path: Path = user_path / date
+            if not user_date_path:
                 continue
 
             f = open(f"/mnt/storage/work/wbai/check_bias/result/{args.unix_id}/{date}", "w+")
 
             # 遍历 Alpha
-            for alpha in os.listdir(user_date_path):
-                if not alpha.startswith("Alpha"):
+            for alpha_path in user_date_path.iterdir():
+                if not alpha_path.name.startswith("Alpha"):
                     continue
-
-                alpha_path = os.path.join(user_date_path, alpha)
 
                 # 修改 xml
                 py_path, xml_path = do_xml(alpha_path)

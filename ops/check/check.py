@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import shutil
 from pathlib import Path
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed 
@@ -11,11 +12,13 @@ from ..common.alpha.metadatas import AlphaMetadatas
 from ..common.alpha.results.compliance import *
 from ..common.alpha.results.correlation import *
 from ..common.alpha.results.checkpoint import *
+from ..common.alpha.results.checkbias import *
+from ..common.utils import date_range
 
 from .checker.base import *
-from .checker.modify_xml import do_main as modify_xml
 from .checker.compliance_checker import ComplianceChecker
 from .checker.checkpoint_checker import CheckpointChecker
+from .checker.checkbias_checker import CheckbiasChecker
 from .checker.correlation_checker import CorrelationChecker
 
 
@@ -28,14 +31,26 @@ class CheckerPipeline:
 
         self.config = Config.load(config_path)
         
-        # TODO:
-        modify_xml(users, start, end, self.config)
+        for user in users:
+            src_dir = self.config.dropbox_path / user
+            root_dir = self.config.dropbox_path_target / user
+            os.makedirs(root_dir, exist_ok=True)
+
+            for date_str in date_range(start, end):
+                src_date_dir = src_dir / date_str
+                if not src_date_dir.is_dir():
+                    continue
+                dst_date_dir = root_dir / date_str
+                if dst_date_dir.exists():
+                    shutil.rmtree(dst_date_dir)
+                shutil.copytree(src_date_dir, dst_date_dir)
 
         self.metadatas = AlphaMetadatas(self.config.dropbox_path_target, users, start, end, factor)
 
         self.compliance_checker = ComplianceChecker(config=self.config)
         self.correlation_checker = CorrelationChecker(config=self.config)
         self.checkpoint_checker = CheckpointChecker(config=self.config)
+        self.checkbias_checker = CheckbiasChecker(config=self.config)
 
 
     def to_lib(self, factor: AlphaMetadata):
@@ -69,9 +84,14 @@ class CheckerPipeline:
         print(f"{bar} checking ", end=""); highlight(f"{factor.key}")
         
         try:
-            # 1. Short Backtest
-            Runner.run_backtest(factor.xml_file, self.config)
-            info(f"  ✔  {factor.key} short backtest succeed")
+            factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'false'
+            factor.xml_config["gsim"]['Universe']['@startdate'] = "20241201"
+            factor.xml_config["gsim"]['Universe']['@enddate'] = "20241231"
+            factor.save()
+
+            # 1. Checkbias (Short Backtest)
+            self.checkbias_checker.check(factor)
+            info(f"  ✔  {factor.key} checkbias passed")
 
             # 2. Checkpoint
             self.checkpoint_checker.check(factor)
@@ -84,6 +104,7 @@ class CheckerPipeline:
 
             factor.xml_config["gsim"]["Universe"]["@startdate"] = "20150101"
             factor.xml_config["gsim"]["Universe"]["@enddate"]   = "20241231"
+            factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'true'
             factor.save()
 
             # 4. Long Backtest
@@ -101,6 +122,7 @@ class CheckerPipeline:
             # 7. Archive
             self.to_lib(factor)
             return True
+
         except CheckSkip as e:
             warn(f"  ⚠  {factor.key} {e.stage} skipped. ({str(e)})")
             return False
@@ -115,7 +137,7 @@ class CheckerPipeline:
         banner("因子检测")
 
         passed = failed = 0
-        with ProcessPoolExecutor(max_workers=min(20, len(self.metadatas))) as pool:
+        with ProcessPoolExecutor(max_workers=min(20, max(1, len(self.metadatas)))) as pool:
             futures: list[Future[bool]] = []
             for i, factor in enumerate(self.metadatas):
                 f = pool.submit(self.run_one, factor, i)
@@ -140,10 +162,10 @@ def run_entry(args):
     config_path: Path = args.config_path
     factor: str | None = args.factor_name
 
-    notifier = CheckerPipeline(
+    pipline = CheckerPipeline(
         users=users, start=start, end=end,
         config_path=config_path,
         factor=factor
     )
-    notifier.run()
+    pipline.run()
 

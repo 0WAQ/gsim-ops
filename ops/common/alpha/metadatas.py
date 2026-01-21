@@ -34,10 +34,6 @@ class AlphaMetadatas:
                     for factor_dir in date_path.iterdir():
                         if not factor_dir.name.startswith("Alpha"):
                             continue
-                        if factor and factor == factor_dir.name:
-                            md = AlphaMetadata(user, date, factor_dir)
-                            self._flat[md.key] = md
-                            return
 
                         try:
                             md = AlphaMetadata(user, date, factor_dir)

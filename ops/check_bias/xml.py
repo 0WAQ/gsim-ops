@@ -1,22 +1,19 @@
-import os
 import sys
 import xmltodict
-from glob import glob
+from pathlib import Path
 
-def do_xml(alpha_path: str) -> tuple[str, ...]:
+def do_xml(alpha_path: Path) -> tuple[Path, Path]:
     PNL_DIR = alpha_path
 
-    py_path: str | None = None
-    xml_path: str | None = None
+    py_path: Path | None = None
+    xml_path: Path | None = None
 
     # 寻找 .py 和 .xml
-    _tmp = glob(os.path.join(alpha_path, "*.py"))
-    if len(_tmp) != 0:
-        py_path = _tmp[0]
+    for path in alpha_path.glob("*.py"):
+        py_path = path
 
-    _tmp = glob(os.path.join(alpha_path, "*.xml"))
-    if len(_tmp) != 0:
-        xml_path = _tmp[0]
+    for path in alpha_path.glob("*.xml"):
+        xml_path = path
 
     if xml_path is None or py_path is None:
         print("Not found xml or py file")
