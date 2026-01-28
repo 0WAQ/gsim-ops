@@ -63,11 +63,6 @@ class CheckerPipeline:
 
     def to_recycle(self, factor: AlphaMetadata, e: CheckFail):
         try:
-            # TODO:
-            from .checker.correlation_checker import CorrelationFail
-            if isinstance(e, CorrelationFail):
-                return 1
-
             dst_dir = self.config.recycle / factor.key.user \
                         / e.stage / factor.key.date / factor.name
             dst_dir.parent.mkdir(parents=True, exist_ok=True)
