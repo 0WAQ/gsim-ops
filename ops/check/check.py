@@ -45,6 +45,11 @@ class CheckerPipeline:
                     shutil.rmtree(dst_date_dir)
                 shutil.copytree(src_date_dir, dst_date_dir)
 
+        self.config.alpha_src.parent.mkdir(exist_ok=True)
+        self.config.alpha_src.mkdir(exist_ok=True)
+        self.config.alpha_dump.mkdir(exist_ok=True)
+        self.config.alpha_pnl.mkdir(exist_ok=True)
+
         self.metadatas = AlphaMetadatas(self.config.dropbox_path_target, users, start, end, factor)
 
         self.compliance_checker = ComplianceChecker(config=self.config)
@@ -57,7 +62,7 @@ class CheckerPipeline:
         try:
             shutil.move(factor.dir, self.config.alpha_src)
             shutil.move(factor.alpha_dir, self.config.alpha_dump)
-            shutil.move(factor.pnl_file, self.config.alpha_pnl)
+            shutil.move(factor.pnl_file, self.config.alpha_pnl / factor.name)
         except Exception:
             ...
 
