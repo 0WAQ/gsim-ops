@@ -109,6 +109,10 @@ class DataFirewall:
                 truncated_data = self._data[:self._di]
             return getattr(truncated_data, name)
 
+        @property
+        def data(self):
+            return self
+
 """
 
 class CheckbiasSkip(CheckSkip):

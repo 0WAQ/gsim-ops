@@ -141,8 +141,8 @@ class CheckerPipeline:
             for f in as_completed(futures):
                 code = f.result()
                 match code:
-                    case 0: passed += 1
-                    case 1: failed += 1
+                    case True: passed += 1
+                    case False: failed += 1
 
         banner("检测汇总")
         info(f"✔ 通过 : {passed:>4}")
