@@ -32,11 +32,28 @@ class Runner:
             if result.returncode != 0:
                 return None
 
+            # pnl_prod
             corrs: list[tuple[str, float]] = []
             for line in result.stdout.strip().split('\n'):
                 match = re.match(r"^(\S+)\s+([-\d.]+)", line.strip())
                 if match:
                     corrs.append((match.group(1), float(match.group(2))))
+
+            # alphalib
+            result = subprocess.run(
+                [config.bcorr_script, str(pnl_file), str(config.pnl_alphalib)],
+                capture_output=True,
+                text=True,
+                timeout=config.timeout
+            )
+            if result.returncode != 0:
+                return None
+            for line in result.stdout.strip().split('\n'):
+                match = re.match(r"^(\S+)\s+([-\d.]+)", line.strip())
+                if match:
+                    corrs.append((match.group(1), float(match.group(2))))
+
+
             return corrs
     
         except Exception:
