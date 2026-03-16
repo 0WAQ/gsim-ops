@@ -27,6 +27,11 @@ class Config:
         self.bcorr_script = Path(config["script"]["bcorr_script"])
         self.feishu_script = Path(config["script"]["feishu_script"])
         
+        # backtest
+        self.stats = config["backtest"]["stats"]
+        self.thres = "90"
+
+
         # authors:  # TODO:
         self.authors: dict[str, dict[str, str]] = config["authors"]
         self.summary_emails: dict[str, list[str]] = config["notification"]["summary_emails"]

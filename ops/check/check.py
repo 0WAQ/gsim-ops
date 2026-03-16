@@ -150,8 +150,10 @@ class CheckerPipeline:
                     case False: failed += 1
 
         banner("检测汇总")
-        info(f"✔ 通过 : {passed:>4}")
-        error(f"✘ 未通过 : {failed:>4}")
+        if passed >= 0:
+            info(f"✔ 通过 : {passed:>4}")
+        if failed > 0:
+            error(f"✘ 未通过 : {failed:>4}")
         bottom()
 
 

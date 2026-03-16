@@ -27,6 +27,11 @@ script:
   bcorr_script: /usr/local/gsim/dataops/bcorr
   feishu_script: /mnt/storage/work/wbai/gsim-ops/jiance/feishu_send.py
 
+backtest:
+  stats: StatsBench
+  thres: 90
+  index_ret: aindexeodprices.s_dq_pctchange_000852
+
 # checker
 checker:
   # 合规性检测
