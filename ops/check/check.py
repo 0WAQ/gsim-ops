@@ -117,7 +117,7 @@ class CheckerPipeline:
 
             # 6. Correlation
             self.correlation_checker.check(factor)
-            info(f"✔  {factor.key} correlation passed")
+            info(f"  ✔  {factor.key} correlation passed")
             
             # 7. Archive
             self.to_lib(factor)

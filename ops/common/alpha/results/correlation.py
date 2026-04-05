@@ -10,19 +10,26 @@ class CorrStatus(Status):
     ERROR = 4
 
 class CorrResult(Result):
-    def __init__(self, max_bcorr: float, max_bcorr_factor: str,
-            metrics: Metrics, high_corr_count: int,
-            unbeaten_example: tuple[str, float, Metrics] | None = None):
+    def __init__(self,
+                metrics: Metrics, 
+                max_bcorr: float | None = None,
+                max_bcorr_factor: str | None = None,
+                high_corr_count: int | None = None,
+                unbeaten_example: tuple[str, float, Metrics] | None = None):
+        self.metrics = metrics
         self.max_bcorr = max_bcorr
         self.max_bcorr_factor = max_bcorr_factor
-        self.metrics = metrics
         self.high_corr_count = high_corr_count
         self.unbeaten_example = unbeaten_example
 
     def __repr__(self):
+        if self.max_bcorr is None:
+            return f"{self.metrics}"
         return f"bcorr={self.max_bcorr}, {self.metrics}"
     
     def __str__(self):
+        if self.max_bcorr is None:
+            return f"{self.metrics}"
         return f"bcorr={self.max_bcorr}, {self.metrics}"
 
 class CorrResults(Results):

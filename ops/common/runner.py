@@ -81,10 +81,11 @@ class Runner:
         
             try:
                 ret = float(parts[4])
+                tvr = float(parts[5])
                 shrp_raw = parts[6]
                 shrp = float(shrp_raw.split('(')[0].strip())
                 fitness = float(parts[9])
-                return Metrics(ret, shrp, fitness)
+                return Metrics(ret, tvr, shrp, fitness)
                 
             except (ValueError, IndexError) as e:
                 return None

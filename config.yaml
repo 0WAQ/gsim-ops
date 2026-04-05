@@ -28,6 +28,7 @@ script:
   bcorr_script: /usr/local/gsim/dataops/bcorr
   feishu_script: /home/wbai/gsim-ops/jiance/feishu_send.py
 
+# TODO:
 backtest:
   stats: StatsBench
   thres: 90
@@ -50,6 +51,9 @@ checker:
   # 相关性检测
   correlation:
     enabled: true
+    ret%: 10.0
+    tvr%: 40.0
+    shrp: 2.0
     corr_threshold: 0.7     # 相关性阈值 (< 0.7 为低相关)
 
 
