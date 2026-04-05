@@ -18,7 +18,7 @@ Example:
     parser.add_argument("--start-date", "-s", default=today.strftime("%Y%m%d"))
     parser.add_argument("--end-date", "-e", default=today.strftime("%Y%m%d"))
     parser.add_argument("--factor-name", "-f", type=str, default=None)
-    parser.add_argument("--config-path", "-c", type=Path, default='/mnt/storage/work/wbai/gsim-ops/config.yaml')
+    parser.add_argument("--config-path", "-c", type=Path, default='/home/wbai/gsim-ops/config.yaml')
     
 
     parser.set_defaults(func=run_entry)

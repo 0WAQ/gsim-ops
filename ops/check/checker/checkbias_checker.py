@@ -6,6 +6,8 @@ from ops.common.alpha.metadata import AlphaMetadata
 from ops.common.alpha.results.checkbias import *
 
 DATA_FIREWALL_CODE = """\
+import numpy as np
+
 class AlphaData:
     pass
 
@@ -36,12 +38,9 @@ class DataFirewall:
         originals = {}
         for attr in attrs_to_protect:
             if hasattr(instance, attr):
-                # 保存
                 originals[attr] = getattr(instance, attr)
                 if originals[attr] is None:
                     continue
-
-                # 截断
                 setattr(instance, attr, self._SafeProxy(originals[attr], di, ti, attr))
 
         try:
@@ -77,6 +76,18 @@ class DataFirewall:
                 if index >= max_pos or index < 0:
                     raise IndexError(f"{self._attr} looking forward!!!")
 
+        def _truncate(self, raw):
+            arr = np.asarray(raw)
+            if arr.ndim == 0:
+                return arr
+            elif arr.ndim == 1:
+                return arr[:self._di]
+            else:
+                if self._ti is None:
+                    return arr[:self._di]
+                else:
+                    return arr[:self._di, :self._ti]
+
         def __getitem__(self, key):
             di = ti = None
             if isinstance(key, tuple):
@@ -89,29 +100,35 @@ class DataFirewall:
             self.check(di, self._di)
             if self._ti is not None:
                 self.check(ti, self._ti)
+            
             if isinstance(self._data, AlphaData):
-                if ti is None:
-                    truncated_data = self._data.raw_data[:self._di]
-                else:
-                    truncated_data = self._data.raw_data[:self._di, :self._ti]
+                truncated_data = self._truncate(self._data.raw_data)
             else:
-                if ti is None:
-                    truncated_data = self._data[:self._di]
-                else:
-                    truncated_data = self._data[:self._di, :self._ti]
+                truncated_data = self._truncate(self._data)
+            
+            if truncated_data.ndim == 0:
+                return truncated_data
             return truncated_data[key]
 
         def __getattr__(self, name):
-            if isinstance(self._data, AlphaData):
-                raw = self._data.raw_data
-                truncated_data = AlphaData(raw[:self._di])
-            else:
-                truncated_data = self._data[:self._di]
-            return getattr(truncated_data, name)
-
-        @property
-        def data(self):
-            return self
+            # 先获取原始属性
+            original_attr = getattr(self._data, name)
+            
+            # 尝试转换并截断
+            try:
+                arr = np.asarray(original_attr)
+                if arr.ndim == 0:
+                    return original_attr
+                elif arr.ndim == 1:
+                    return arr[:self._di]
+                else:
+                    if self._ti is None:
+                        return arr[:self._di]
+                    else:
+                        return arr[:self._di, :self._ti]
+            except (TypeError, ValueError):
+                # 无法转换为数组，直接返回原始属性
+                return original_attr
 
 """
 

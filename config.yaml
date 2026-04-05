@@ -26,7 +26,7 @@ script:
   run_script: /usr/local/gsim/run_cp.py
   simsummary_script: /usr/local/gsim/tools/simsummary.py
   bcorr_script: /usr/local/gsim/dataops/bcorr
-  # feishu_script: /home/wbai/gsim-ops/jiance/feishu_send.py
+  feishu_script: /home/wbai/gsim-ops/jiance/feishu_send.py
 
 backtest:
   stats: StatsBench

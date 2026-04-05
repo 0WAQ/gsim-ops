@@ -37,17 +37,18 @@ class AlphaMetadata:
         self.checkpoint_dir = checkpoint_dir
         # TODO: other metadata
 
+    # TODO: default
     def _modify_always(self):
-        self.xml_config["gsim"]['Constants']['@niodatapath'] = "/datasvc/data/cc2"
+        self.xml_config["gsim"]['Constants']['@niodatapath'] = "/datasvc/data/cc"
         self.xml_config["gsim"]['Constants']['@checkpointDays'] = '5'
-        self.xml_config["gsim"]["Constants"]["@checkpointDir"] = f"/mnt/storage/work/wbai/alpha/dropbox/checkpoint/{self.name}/"
-        os.makedirs("/mnt/storage/work/wbai/alpha/dropbox/checkpoint", exist_ok=True)
+        self.xml_config["gsim"]["Constants"]["@checkpointDir"] = f"/home/wbai/alpha/dropbox/checkpoint/{self.name}/"
+        os.makedirs("/home/wbai/alpha/dropbox/checkpoint", exist_ok=True)
         
         self.xml_config["gsim"]['Modules']['Alpha']['@module'] = self.py_file
         self.xml_config["gsim"]['Portfolio']['Stats']['@module'] = 'StatsLongShort'
         self.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaFile'] = 'true'
-        self.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaDir'] = "/mnt/storage/work/wbai/alpha/dropbox/alpha"
-        self.xml_config["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = "/mnt/storage/work/wbai/alpha/dropbox/pnl"
+        self.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaDir'] = "/home/wbai/alpha/dropbox/alpha"
+        self.xml_config["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = "/home/wbai/alpha/dropbox/pnl"
         self.xml_config["gsim"]["Portfolio"]["Stats"]["@dumpPnl"] = 'true'
         self.save()
 
