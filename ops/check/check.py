@@ -103,7 +103,7 @@ class CheckerPipeline:
             shutil.rmtree(factor.checkpoint_dir, ignore_errors=True)
 
             factor.xml_config["gsim"]["Universe"]["@startdate"] = "20150101"
-            factor.xml_config["gsim"]["Universe"]["@enddate"]   = "20241231"
+            factor.xml_config["gsim"]["Universe"]["@enddate"]   = "20251231"
             factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'true'
             factor.save()
 
