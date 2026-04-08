@@ -9,8 +9,5 @@ wheels/
 # Virtual environments
 .venv
 
-# opencode
-AGENTS.md
-
 # temp
 tools/
