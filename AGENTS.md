@@ -66,6 +66,29 @@ Uses `ProcessPoolExecutor` for parallel execution (max 20 workers).
   - Compliance thresholds (max_position_pct: 0.05, min_stocks: 50)
   - Correlation threshold: 0.7
 
+## Key Concepts
+
+### 1. Gsim Backtest Framework
+Located at `/usr/local/gsim/`. The core backtesting engine that ops interacts with.
+
+### 2. User Factor Workspace
+Users write factors in:
+```
+/mnt/storage/dropbox/{unix_id}/{yyyymmdd}/Alpha{UnixId}{FactorName}/
+```
+- `{unix_id}` - User's Unix ID (e.g., `wbai`, `chaoqun`)
+- `{yyyymmdd}` - Date folder (e.g., `20251030`)
+- `Alpha{UnixId}{FactorName}` - Factor directory (e.g., `AlphaWbaiMomentum`)
+
+### 3. Factor Library (after ops processing)
+Located at `/mnt/storage/alphalib/`:
+```
+/mnt/storage/alphalib/
+├── alpha_src/      # Factor source code
+├── alpha_dump/     # Daily target positions per factor
+└── alpha_feature/  # Aggregated alpha_dump data
+```
+
 ## Architecture
 
 ```
@@ -116,3 +139,83 @@ These are hardcoded server paths - do not change:
 /mnt/storage/alphalib/alpha_pnl    # Alpha PNL archive
 /tmp/alphalib/                     # Temp alpha dump
 ```
+
+## Planned Features
+
+### 1. Factor Storage & Management
+
+#### Factor Metadata Management
+- [ ] Factor registry (name, author, create date, status)
+- [ ] Factor versioning (track updates to same factor)
+- [ ] Tags/categories (momentum, value, technical, etc.)
+
+#### Factor Lifecycle
+- [ ] Enable/disable factors (soft delete)
+- [ ] Archive/unarchive factors
+- [ ] Expired factor cleanup policy
+
+#### Factor Query
+- [ ] `ops list` - List all factors (filter by author, date, status)
+- [ ] `ops info <factor>` - View factor details
+- [ ] `ops search <keyword>` - Search factors
+
+#### Factor Export/Sync
+- [ ] Export factor to specified directory
+- [ ] Multi-machine factor sync
+- [ ] Backup/restore
+
+#### Data Integrity
+- [ ] Detect missing dates in alpha_dump
+- [ ] Validate consistency between source code and positions
+- [ ] Periodic health checks
+
+### 2. Factor Analysis
+
+#### Correlation Analysis
+- [ ] Factor-to-factor correlation matrix
+- [ ] Correlation clustering / grouping
+- [ ] Redundancy detection (auto-flag highly correlated factors)
+
+#### Performance Attribution
+- [ ] PNL decomposition (by sector, market cap, etc.)
+- [ ] Alpha decay analysis
+- [ ] Turnover analysis
+
+#### Risk Analysis
+- [ ] Max drawdown calculation
+- [ ] Volatility metrics
+- [ ] VaR / CVaR estimation
+
+### 3. Factor Combination
+
+#### Multi-Factor Synthesis
+- [ ] Factor weighting schemes (equal, IC-weighted, optimization-based)
+- [ ] Factor blending / ensemble
+- [ ] Dynamic weight adjustment
+
+#### Factor Orthogonalization
+- [ ] Residualization (remove correlation)
+- [ ] PCA-based decomposition
+- [ ] Gram-Schmidt orthogonalization
+
+#### Portfolio Optimization
+- [ ] Mean-variance optimization
+- [ ] Risk parity
+- [ ] Constraint handling (sector, position limits)
+
+### 4. Production Deployment
+
+#### Signal Generation
+- [ ] Daily signal/position generation from factor library
+- [ ] Signal smoothing / filtering
+- [ ] Transaction cost modeling
+
+#### Scheduling & Automation
+- [ ] Cron-based daily runs
+- [ ] Failure alerting (email, Feishu)
+- [ ] Run history and logs
+
+#### Monitoring
+- [ ] Live PNL tracking
+- [ ] Factor health dashboard
+- [ ] Anomaly detection (sudden performance drop)
