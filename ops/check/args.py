@@ -3,6 +3,8 @@ from pathlib import Path
 from datetime import datetime
 from .check import run_entry
 from ..common.utils import LowerAction
+from ..common.config import get_default_config_path
+
 
 def add_check_subparser(subparser: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparser.add_parser(
@@ -11,14 +13,16 @@ def add_check_subparser(subparser: argparse._SubParsersAction):
         epilog="""\
 Example:
     ops check -u wbai -s 20260101 -e 20260101
-""")
-    
+""",
+    )
+
     today = datetime.today()
     parser.add_argument("--user", "-u", required=True, type=str, action=LowerAction)
     parser.add_argument("--start-date", "-s", default=today.strftime("%Y%m%d"))
     parser.add_argument("--end-date", "-e", default=today.strftime("%Y%m%d"))
     parser.add_argument("--factor-name", "-f", type=str, default=None)
-    parser.add_argument("--config-path", "-c", type=Path, default='/home/wbai/gsim-ops/config.yaml')
-    
+    parser.add_argument(
+        "--config-path", "-c", type=Path, default=get_default_config_path()
+    )
 
     parser.set_defaults(func=run_entry)
