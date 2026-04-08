@@ -20,10 +20,10 @@ def highlight(msg, *args, **kw):
 
 def banner(title):
     """顶部横幅"""
-    line = "━" * 70
+    line = "━" * 72
     print(Fore.CYAN + line)
     print(Fore.CYAN + f"▌ {title:^66} ▌")
     print(Fore.CYAN + line)
 
 def bottom():
-    print(Fore.CYAN + "━" * 70)
+    print(Fore.CYAN + "━" * 72)

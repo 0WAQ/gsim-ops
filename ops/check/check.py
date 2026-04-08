@@ -60,6 +60,10 @@ class CheckerPipeline:
 
     def to_lib(self, factor: AlphaMetadata):
         try:
+            factor.xml_config["gsim"]["Modules"]["Alpha"] = f"/mnt/storage/alphalib/alpha_src/{factor.name}/{factor.name}.py"
+            factor.xml_config["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = "/tmp/alphalib/alpha_pnl"
+            factor.xml_config["gsim"]["Portfolio"]["Alpha"]["@dumpAlphaDir"] = "/tmp/alphalib/alpha_dump"
+
             shutil.move(factor.dir, self.config.alpha_src)
             shutil.move(factor.alpha_dir, self.config.alpha_dump)
             shutil.move(factor.pnl_file, self.config.alpha_pnl / factor.name)
