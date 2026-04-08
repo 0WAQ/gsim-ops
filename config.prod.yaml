@@ -1,0 +1,97 @@
+users:
+  wbai: wenbo@graceim.ai
+  chaoqun: chaoqun@graceim.ai
+  mhe: muyang@graceim.ai
+
+# 基础路径配置
+path:
+  dropbox_path: /mnt/storage/dropbox/
+  dropbox_path_target: /home/wbai/alpha/dropbox
+  pnl_prod_path: /usr/local/gsim/pnl_prod
+  pnl_pool_path: /usr/local/gsim/pnl_pool
+  pnl_alphalib: /mnt/storage/alphalib/alpha_pnl
+  python_path: /usr/local/gsim/.venv/bin/python
+
+  pnl_path: /home/wbai/alpha/dropbox/pnl
+  alpha_path: /home/wbai/alpha/dropbox/alpha
+  checkpoint_path: /home/wbai/alpha/dropbox/checkpoint
+
+  alpha_src: /mnt/storage/alphalib/alpha_src
+  alpha_dump: /mnt/storage/alphalib/alpha_dump
+  alpha_pnl: /mnt/storage/alphalib/alpha_pnl
+  recycle: /mnt/storage/recycle
+
+# 脚本
+script:
+  run_script: /usr/local/gsim/run_cp.py
+  simsummary_script: /usr/local/gsim/tools/simsummary.py
+  bcorr_script: /usr/local/gsim/dataops/bcorr
+  feishu_script: /home/wbai/gsim-ops/jiance/feishu_send.py
+
+# TODO:
+backtest:
+  stats: StatsBench
+  thres: 90
+  index_ret: aindexeodprices.s_dq_pctchange_000852
+
+# checker
+checker:
+  # 合规性检测
+  compliance:
+    enabled: true
+    max_position_pct: 0.05  # 个股最大持仓比例 (5%)
+    min_total_stocks: 100   # 多空最小持股数量
+    min_long_stocks: 50     # 多头最小持股数量
+    min_short_stocks: 50    # 空头最小持股数量
+
+  # 断点检测
+  checkpoint:
+    enabled: true
+
+  # 相关性检测
+  correlation:
+    enabled: true
+    ret%: 10.0
+    tvr%: 40.0
+    shrp: 2.0
+    corr_threshold: 0.7     # 相关性阈值 (< 0.7 为低相关)
+
+
+# 邮件通知配置
+notification:
+  # 汇总邮件收件人 (可多个)
+  summary_emails:
+   - wenbo@graceim.ai
+   # - yong@graceim.ai
+  
+  # 是否发送个人邮件
+  send_author_email: false
+
+# 作者邮箱映射
+authors:
+  wbai:
+    name: wbai
+    email: wenbo@graceim.ai
+  chaoqun:
+    name: chaoqun
+    email: chaoqun@graceim.ai
+  mhe:
+    name: mhe
+    email: muyang@graceim.ai
+  lzhang:
+    name: lzhang
+    email: linghao@graceim.ai
+  fguo:
+    name: fguo
+    email: fubin@graceim.ai
+  jzhang:
+    name: jzhang
+    email: junjie@graceim.ai
+
+# 运行模式
+mode:
+  max_workers: 16
+  dry_run: false       # 测试模式 (不发送邮件)
+  timeout: 1800
+  dates:
+    - '20251030'
