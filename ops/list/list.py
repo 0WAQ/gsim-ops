@@ -51,7 +51,7 @@ def print_json(factors: list[FactorInfo]):
 def run_list(args):
     """Run the list command."""
     scanner = LibraryScanner.from_config_path(args.config_path)
-    factors = scanner.scan()
+    factors = scanner.scan(refresh=args.refresh)
     
     # Filter by author if specified
     if args.user:

@@ -165,23 +165,19 @@ These are hardcoded server paths - do not change:
 
 ## Performance Considerations
 
-### Index Caching (TODO)
+### Index Caching
 
-当前 `ops list` 和 `ops info` 每次都扫描目录，因子数量多时会很慢。
+`ops list` 使用 JSON 索引缓存加速查询：
 
-**计划方案：JSON 索引缓存**
 ```
-/mnt/storage/alphalib/
-├── .index.json          # 缓存索引文件
-├── alpha_src/
-├── alpha_dump/
-└── alpha_feature/
+~/.cache/ops/
+├── {config_hash}.index.json   # 按 config 路径 hash 区分
 ```
 
-- 首次扫描生成 `.index.json`
-- 后续直接读索引，秒级响应
-- `ops list --refresh` 强制重建索引
-- 可选：检测目录 mtime 自动判断是否需要刷新
+- 缓存有效期：1 小时（`INDEX_MAX_AGE_SECONDS = 3600`）
+- 过期后自动重建
+- `ops list --refresh` 强制刷新缓存
+- 性能：无缓存 ~1.7s → 有缓存 ~0.26s
 
 ## Planned Features
 
@@ -190,7 +186,7 @@ These are hardcoded server paths - do not change:
 #### Factor Metadata Management
 - [x] `ops list` - List all factors (filter by author, date, status)
 - [x] `ops info <factor>` - View factor details
-- [ ] Index caching for fast queries
+- [x] Index caching for fast queries
 - [ ] Factor registry (name, author, create date, status)
 - [ ] Factor versioning (track updates to same factor)
 - [ ] Tags/categories (momentum, value, technical, etc.)
