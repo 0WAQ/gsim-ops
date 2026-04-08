@@ -39,10 +39,9 @@ The main entry point is `ops/main.py`. Current active subcommands:
 | Subcommand | Purpose | Module |
 |------------|---------|--------|
 | `check` | Alpha factor validation pipeline | `ops/check/` |
-| `check-bias` | Bias checking | `ops/check_bias/` |
 | `cp` | Dropbox file transfer + compilation | `ops/cp/` |
 
-Note: `scp` and `compiler` subcommands exist but are commented out in `main.py`.
+Deprecated subcommands: `scp`, `compiler` - all commented out in `main.py`.
 
 ## Check Pipeline (ops check)
 
@@ -81,7 +80,6 @@ ops/
 ├── check/            # Factor validation pipeline
 │   ├── check.py      # Main pipeline orchestrator
 │   └── checker/      # Compliance, checkpoint, correlation checkers
-├── check_bias/       # Bias checking
 ├── compiler/         # Factor compilation (commented out)
 ├── cp/               # Dropbox transfer + compile
 └── scp/              # SCP transfer (commented out)

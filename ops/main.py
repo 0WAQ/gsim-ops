@@ -3,7 +3,6 @@ from .compiler import add_compiler_subparser
 from .scp import add_scp_subparser
 from .cp import add_cp_subparser
 from .check import add_check_subparser
-from .check_bias import add_check_bias_subparser
 
 
 def main():
@@ -18,7 +17,6 @@ def main():
     # add_scp_subparser(subparsers)
     add_cp_subparser(subparsers)
     add_check_subparser(subparsers)
-    add_check_bias_subparser(subparsers)
 
     args = parser.parse_args()
     args.func(args)
