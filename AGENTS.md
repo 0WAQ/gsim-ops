@@ -105,6 +105,82 @@ Located at `/mnt/storage/alphalib/`:
 └── alpha_feature/  # Aggregated alpha_dump data
 ```
 
+### 4. Factor Directory Structure
+Each factor in `alpha_src/` contains:
+```
+AlphaXxx/
+├── AlphaXxx.py           # Factor code (inherits gsim.AlphaBase)
+├── Config.Xxx.xml        # gsim config file
+└── Readme.Xxx.txt        # Backtest report (PNL, correlation, etc.)
+```
+
+**Factor Code (.py)**:
+- Inherits `gsim.AlphaBase`
+- Uses `DataRegistry.getData('table.column')` to fetch data
+- Implements `generate(di)` method to produce alpha signal
+
+**Config (.xml)** - Key sections:
+- `<Data>` modules: Declares available data (BUT unreliable - QRs copy-paste all)
+- `<Description>`: Metadata (author, category, universe, delay)
+- `<Operations>`: Post-processing chain (Decay, Rank, Neutralize)
+
+**Data Source Tracking**:
+- **DO NOT trust XML `<Data>` declarations** - QRs include all modules by default
+- **Parse Python code** for actual usage: extract `dr.getData('xxx')` calls
+
+### 5. Gsim Data Structure
+
+**Data Layer Overview**:
+```
+/datasvc/
+├── rawdata/           # 原始数据（parquet/csv）
+│   ├── ashareeodprices/
+│   ├── AShareMoneyFlow/
+│   ├── asharebalancesheet/
+│   ├── Interval5m/
+│   └── ...
+├── data/cc/           # 缓存数据（memmap .npy）- gsim 直接读取
+│   ├── __universe/    # 日期和股票索引
+│   ├── ashareeodprices/
+│   ├── Interval5m/
+│   └── ...
+└── template/          # 配置模板（包含所有 Data 模块定义）
+    └── config.read_cache.xml
+```
+
+**Universe Files** (`/datasvc/data/cc/__universe/`):
+- `Dates.npy` - Trading dates index (int64, shape: ~3900)
+- `Instruments.npy` - Stock codes index (U32, shape: ~5484)
+
+**Feature Files** (memmap, ~7.6GB each):
+- Shape: `[di][ti][ii]` = `[dates][time_periods][instruments]`
+- `di` - Date index (0-3899)
+- `ti` - Time index (0-48, 5-minute intervals)
+- `ii` - Instrument index (0-5483)
+
+**Common Data Sources**:
+| Type | Source ID | Example |
+|------|-----------|---------|
+| 日线K线 | `ashareeodprices` | `dr.getData('ashareeodprices.s_dq_close')` |
+| 资金流 | `AShareMoneyFlow` | `dr.getData('AShareMoneyFlow.net_inflow_rate_volume')` |
+| 财务报表 | `asharebalancesheet`, `ashareincome`, `asharecashflow` | `dr.getData('asharebalancesheet.accounts_payable')` |
+| 分析师预期 | `ashareconsensusrollingdata_*` | `dr.getData('ashareconsensusrollingdata_CAGR.est_eps')` |
+| 5分钟K线 | `Interval5m` | `dr.getData('Interval5m.close')` |
+| 指数行情 | `aindexeodprices` | `dr.getData('aindexeodprices.s_dq_pctchange_000905')` |
+
+### 6. Gsim Tools
+```bash
+# Run backtest
+/usr/local/gsim/.venv/bin/python /usr/local/gsim/run.py config.xml
+
+# PNL summary
+/usr/local/gsim/.venv/bin/python /usr/local/gsim/tools/simsummary.py /path/to/pnl
+
+# Correlation test
+/usr/local/gsim/dataops/bcorr pnl1 pnl2
+/usr/local/gsim/dataops/bcorr pnl1 pnl_folder/
+```
+
 ## Architecture
 
 ```
@@ -187,6 +263,8 @@ These are hardcoded server paths - do not change:
 - [x] `ops list` - List all factors (filter by author, date, status)
 - [x] `ops info <factor>` - View factor details
 - [x] Index caching for fast queries
+- [ ] Factor data sources (解析 Python 代码中 `dr.getData()` 调用) ← **next: plan factor-management-enhance**
+- [ ] PNL metrics in info/list (从 simsummary 获取, 不信任 Readme) ← **next**
 - [ ] Factor registry (name, author, create date, status)
 - [ ] Factor versioning (track updates to same factor)
 - [ ] Tags/categories (momentum, value, technical, etc.)
@@ -205,6 +283,7 @@ These are hardcoded server paths - do not change:
 - [ ] Backup/restore
 
 #### Data Integrity
+- [ ] `ops health` - Factor library health check ← **next: plan factor-management-enhance**
 - [ ] Detect missing dates in alpha_dump
 - [ ] Validate consistency between source code and positions
 - [ ] Periodic health checks
