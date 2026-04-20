@@ -112,5 +112,5 @@ class ComplianceChecker:
         return CompResult(np.mean([p.long_pct for p in positions], dtype=np.float64),
                           np.mean([p.short_pct for p in positions], dtype=np.float64),
                           np.mean([p.long_count for p in positions], dtype=int),
-                          np.mean([p.short_pct for p in positions], dtype=int),
+                          np.mean([p.short_count for p in positions], dtype=int),
                           len(npy_files))
