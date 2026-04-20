@@ -123,6 +123,24 @@ Located at `/usr/local/gsim/`. The core backtesting engine that ops interacts wi
 /usr/local/gsim/dataops/bcorr pnl1 pnl_folder/
 ```
 
+### NIO Data Types (`/usr/local/gsim/gsim/utils/NioData.py`)
+
+`dr.getData()` returns NIO objects, not raw numpy arrays. NIO is gsim's data container wrapping `np.ndarray` / `np.memmap`:
+
+| Type | Dim | Shape |
+|------|-----|-------|
+| `NIO_VECTOR` | 1D | `(N,)` |
+| `NIO_MATRIX` | 2D | `(N, M)` — dates × instruments |
+| `NIO_CUBE` | 3D | `(N, D, M)` — dates × time_periods × instruments |
+
+All inherit from `NIO_BASE`, which stores the underlying array in `.data` and delegates `__getitem__`/`__setitem__` to it.
+
+**Two data access patterns in factor code**:
+1. `self.xxx = dr.getData('...')` → attribute is a NIO object, access via `self.xxx[di]` (NIO delegates to `.data`)
+2. `self.xxx = dr.getData('...').data` → attribute is `np.ndarray` or `np.memmap` directly (`memmap` is an `ndarray` subclass)
+
+**Important**: NIO's numpy wrapper is incomplete, so many researchers use `.data` to get the raw array for easier computation.
+
 ### User Factor Workspace
 
 Users write factors in:
