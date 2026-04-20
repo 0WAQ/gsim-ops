@@ -1,4 +1,5 @@
 import os
+import re
 import yaml
 from pathlib import Path
 from typing import Dict, Any
@@ -84,7 +85,39 @@ class Config:
         self.timeout: int = config["mode"]["timeout"]
 
     @staticmethod
+    def _resolve_vars(raw: Dict[str, Any]) -> Dict[str, Any]:
+        """Resolve ${var_name} references in config values.
+
+        Variables are defined in the 'vars' block and can be overridden
+        by environment variables with OPS_ prefix (e.g. OPS_GSIM_HOME).
+        """
+        vars_block = raw.pop("vars", {})
+        if not vars_block:
+            return raw
+
+        # Environment variables override: OPS_GSIM_HOME -> gsim_home
+        for key in vars_block:
+            env_key = f"OPS_{key.upper()}"
+            env_val = os.environ.get(env_key)
+            if env_val:
+                vars_block[key] = env_val
+
+        pattern = re.compile(r"\$\{(\w+)\}")
+
+        def replace(val):
+            if isinstance(val, str):
+                return pattern.sub(lambda m: vars_block.get(m.group(1), m.group(0)), val)
+            if isinstance(val, dict):
+                return {k: replace(v) for k, v in val.items()}
+            if isinstance(val, list):
+                return [replace(v) for v in val]
+            return val
+
+        return replace(raw) # type: ignore
+
+    @staticmethod
     def load(config_path: Path) -> "Config":
         with config_path.open("r", encoding="utf-8") as f:
             raw = yaml.safe_load(f.read())
+        raw = Config._resolve_vars(raw)
         return Config(raw)

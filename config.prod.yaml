@@ -3,29 +3,35 @@ users:
   chaoqun: chaoqun@graceim.ai
   mhe: muyang@graceim.ai
 
-# 基础路径配置
+# 基础路径变量 (可通过环境变量覆盖: OPS_GSIM_HOME, OPS_STORAGE, OPS_WORKSPACE)
+vars:
+  gsim_home: /usr/local/gsim
+  storage: /mnt/storage
+  workspace: /home/wbai/alpha
+
+# 路径配置
 path:
-  dropbox_path: /mnt/storage/dropbox/
-  dropbox_path_target: /home/wbai/alpha/dropbox
-  pnl_prod_path: /usr/local/gsim/pnl_prod
-  pnl_pool_path: /usr/local/gsim/pnl_pool
-  pnl_alphalib: /mnt/storage/alphalib/alpha_pnl
-  python_path: /usr/local/gsim/.venv/bin/python
+  dropbox_path: ${storage}/dropbox/
+  dropbox_path_target: ${workspace}/dropbox
+  pnl_prod_path: ${gsim_home}/pnl_prod
+  pnl_pool_path: ${gsim_home}/pnl_pool
+  pnl_alphalib: ${storage}/alphalib/alpha_pnl
+  python_path: ${gsim_home}/.venv/bin/python
 
-  pnl_path: /home/wbai/alpha/dropbox/pnl
-  alpha_path: /home/wbai/alpha/dropbox/alpha
-  checkpoint_path: /home/wbai/alpha/dropbox/checkpoint
+  pnl_path: ${workspace}/dropbox/pnl
+  alpha_path: ${workspace}/dropbox/alpha
+  checkpoint_path: ${workspace}/dropbox/checkpoint
 
-  alpha_src: /mnt/storage/alphalib/alpha_src
-  alpha_dump: /mnt/storage/alphalib/alpha_dump
-  alpha_pnl: /mnt/storage/alphalib/alpha_pnl
-  recycle: /mnt/storage/recycle
+  alpha_src: ${storage}/alphalib/alpha_src
+  alpha_dump: ${storage}/alphalib/alpha_dump
+  alpha_pnl: ${storage}/alphalib/alpha_pnl
+  recycle: ${storage}/recycle
 
 # 脚本
 script:
-  run_script: /usr/local/gsim/run_cp.py
-  simsummary_script: /usr/local/gsim/tools/simsummary.py
-  bcorr_script: /usr/local/gsim/dataops/bcorr
+  run_script: ${gsim_home}/run_cp.py
+  simsummary_script: ${gsim_home}/tools/simsummary.py
+  bcorr_script: ${gsim_home}/dataops/bcorr
   feishu_script: /home/wbai/gsim-ops/jiance/feishu_send.py
 
 # TODO:
@@ -63,7 +69,7 @@ notification:
   summary_emails:
    - wenbo@graceim.ai
    # - yong@graceim.ai
-  
+
   # 是否发送个人邮件
   send_author_email: false
 
