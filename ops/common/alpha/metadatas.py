@@ -2,11 +2,12 @@ from typing import Dict
 from pathlib import Path
 from .key import AlphaKey
 from .metadata import AlphaMetadata
+from ..config import Config
 from ..utils import date_range
 
 
 class AlphaMetadatas:
-    def __init__(self, dropbox_path_target: Path, users: list[str], start: str, end: str, factor: str | None=None):
+    def __init__(self, dropbox_path_target: Path, users: list[str], start: str, end: str, config: Config, factor: str | None=None):
         self.dropbox_path_target = dropbox_path_target
         self.users = users
         self.start = start
@@ -20,7 +21,7 @@ class AlphaMetadatas:
                 if not factor_dir.exists() and not factor_dir.is_dir():
                     assert "factor wrong"
                 try:
-                    md = AlphaMetadata(user, start, factor_dir)
+                    md = AlphaMetadata(user, start, factor_dir, config)
                     self._flat[md.key] = md
                 except Exception as e:
                     ...
@@ -36,7 +37,7 @@ class AlphaMetadatas:
                             continue
 
                         try:
-                            md = AlphaMetadata(user, date, factor_dir)
+                            md = AlphaMetadata(user, date, factor_dir, config)
                             self._flat[md.key] = md
                         except Exception as e: # TODO: diy exception
                             ...
@@ -50,7 +51,7 @@ class AlphaMetadatas:
     def __getitem__(self, key: AlphaKey):
 
         return self._flat[key]
-    
+
     def __setitem__(self, key: AlphaKey, value: AlphaMetadata):
         self._flat[key] = value
 

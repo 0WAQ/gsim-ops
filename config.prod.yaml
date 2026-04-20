@@ -21,6 +21,7 @@ path:
   pnl_path: ${workspace}/dropbox/pnl
   alpha_path: ${workspace}/dropbox/alpha
   checkpoint_path: ${workspace}/dropbox/checkpoint
+  nio_data_path: /datasvc/data/cc
 
   alpha_src: ${storage}/alphalib/alpha_src
   alpha_dump: ${storage}/alphalib/alpha_dump

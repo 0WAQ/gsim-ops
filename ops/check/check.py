@@ -50,7 +50,7 @@ class CheckerPipeline:
         self.config.alpha_dump.mkdir(exist_ok=True)
         self.config.alpha_pnl.mkdir(exist_ok=True)
 
-        self.metadatas = AlphaMetadatas(self.config.dropbox_path_target, users, start, end, factor)
+        self.metadatas = AlphaMetadatas(self.config.dropbox_path_target, users, start, end, self.config, factor)
 
         self.compliance_checker = ComplianceChecker(config=self.config)
         self.correlation_checker = CorrelationChecker(config=self.config)

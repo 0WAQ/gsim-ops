@@ -62,6 +62,11 @@ class Config:
         self.alpha_pnl = Path(config["path"]["alpha_pnl"])
         self.recycle = Path(config["path"]["recycle"])
 
+        self.pnl_path = Path(config["path"]["pnl_path"])
+        self.alpha_path = Path(config["path"]["alpha_path"])
+        self.checkpoint_path = Path(config["path"]["checkpoint_path"])
+        self.nio_data_path = Path(config["path"]["nio_data_path"])
+
         # script
         self.run_script = Path(config["script"]["run_script"])
         self.simsummary_script = Path(config["script"]["simsummary_script"])

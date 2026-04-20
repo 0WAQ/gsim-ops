@@ -1,17 +1,18 @@
-import os
 import re
 import xmltodict
 from pathlib import Path
 from .key import AlphaKey
+from ..config import Config
 
 
 class AlphaMetadata:
-    def __init__(self, user: str, date: str, factor_dir: Path):
+    def __init__(self, user: str, date: str, factor_dir: Path, config: Config):
         self.dir = factor_dir
+        self.config = config
 
         if not self.dir.exists():
             raise
-        
+
         self.xml_file = list(self.dir.glob("*.xml"))[0]
         self.py_file = list(self.dir.glob("*.py"))[0]
         self.readme_file = None # TODO: readme
@@ -21,7 +22,7 @@ class AlphaMetadata:
 
         self.name: str = self.xml_config["gsim"]["Portfolio"]["Alpha"]["@id"]
         self._modify_always()
-        
+
         self.start_date: str = self.xml_config["gsim"]["Universe"]["@startdate"]
         self.end_date: str = self.xml_config["gsim"]["Universe"]["@enddate"]
         self.checkpoint_days: str = self.xml_config["gsim"]["Constants"]["@checkpointDays"]
@@ -37,18 +38,19 @@ class AlphaMetadata:
         self.checkpoint_dir = checkpoint_dir
         # TODO: other metadata
 
-    # TODO: default
     def _modify_always(self):
-        self.xml_config["gsim"]['Constants']['@niodatapath'] = "/datasvc/data/cc"
+        self.xml_config["gsim"]['Constants']['@niodatapath'] = str(self.config.nio_data_path)
         self.xml_config["gsim"]['Constants']['@checkpointDays'] = '5'
-        self.xml_config["gsim"]["Constants"]["@checkpointDir"] = f"/home/wbai/alpha/dropbox/checkpoint/{self.name}/"
-        os.makedirs("/home/wbai/alpha/dropbox/checkpoint", exist_ok=True)
-        
+        self.xml_config["gsim"]["Constants"]["@checkpointDir"] = str(self.config.checkpoint_path / self.name) + "/"
+        self.config.checkpoint_path.mkdir(parents=True, exist_ok=True)
+
         self.xml_config["gsim"]['Modules']['Alpha']['@module'] = self.py_file
+
+        # TODO:
         self.xml_config["gsim"]['Portfolio']['Stats']['@module'] = 'StatsLongShort'
         self.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaFile'] = 'true'
-        self.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaDir'] = "/home/wbai/alpha/dropbox/alpha"
-        self.xml_config["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = "/home/wbai/alpha/dropbox/pnl"
+        self.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaDir'] = str(self.config.alpha_path)
+        self.xml_config["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = str(self.config.pnl_path)
         self.xml_config["gsim"]["Portfolio"]["Stats"]["@dumpPnl"] = 'true'
         self.save()
 
@@ -69,7 +71,7 @@ class AlphaMetadata:
             for year in sorted(self.alpha_dir.glob("*")):
                 if not year.is_dir() or not re.match(r"^\d{4}$", year.name):
                     continue
-                
+
                 for month in sorted(year.glob("*")):
                     if not month.is_dir() or not re.match(r"^\d{2}$", month.name):
                         continue
@@ -78,7 +80,7 @@ class AlphaMetadata:
         except Exception as e:
             ...
         return npy_files
-    
+
     def get_last_v1npy_file(self) -> Path | None:
         try:
             last_year_dir = sorted(self.alpha_dir.glob('*'), reverse=True)[0]
