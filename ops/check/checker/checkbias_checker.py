@@ -10,9 +10,17 @@ FIREWALL_FILE = Path(__file__).parent / "firewall.py"
 
 
 class _GenerateDecoratorInjector(ast.NodeTransformer):
+    def __init__(self, delay: int):
+        self.delay = delay
+
     def visit_FunctionDef(self, node):
         if node.name == 'generate' and node.args.args and node.args.args[0].arg == 'self':
-            node.decorator_list.insert(0, ast.Name(id='DataFirewall', ctx=ast.Load()))
+            decorator = ast.Call(
+                func=ast.Name(id='DataFirewall', ctx=ast.Load()),
+                args=[],
+                keywords=[ast.keyword(arg='delay', value=ast.Constant(value=self.delay))]
+            )
+            node.decorator_list.insert(0, decorator)
         return node
 
 
@@ -39,7 +47,7 @@ class CheckbiasChecker(Checker):
 
             firewall_code = FIREWALL_FILE.read_text(encoding="utf-8")
             tree = ast.parse(orignal_content)
-            tree = _GenerateDecoratorInjector().visit(tree)
+            tree = _GenerateDecoratorInjector(delay=factor.delay).visit(tree)
             ast.fix_missing_locations(tree)
             new_content = firewall_code + "\n" + ast.unparse(tree)
 

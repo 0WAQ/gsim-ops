@@ -21,6 +21,7 @@ class AlphaMetadata:
             self.xml_config = xmltodict.parse(f.read())
 
         self.name: str = self.xml_config["gsim"]["Portfolio"]["Alpha"]["@id"]
+        self.delay: int = int(self.xml_config["gsim"]["Portfolio"]["Alpha"].get("@delay", 1))
         self._modify_always()
 
         self.start_date: str = self.xml_config["gsim"]["Universe"]["@startdate"]
