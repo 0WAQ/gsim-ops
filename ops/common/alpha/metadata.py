@@ -47,7 +47,8 @@ class AlphaMetadata:
         self.xml_config["gsim"]['Modules']['Alpha']['@module'] = self.py_file
 
         # TODO:
-        self.xml_config["gsim"]['Portfolio']['Stats']['@module'] = 'StatsLongShort'
+        self.xml_config["gsim"]['Portfolio']['Stats']['@module'] = 'StatsSimpleV5'
+        self.xml_config["gsim"]['Portfolio']['Stats']['@mode'] = '0'
         self.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaFile'] = 'true'
         self.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaDir'] = str(self.config.alpha_path)
         self.xml_config["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = str(self.config.pnl_path)
