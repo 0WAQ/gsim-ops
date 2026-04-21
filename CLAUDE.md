@@ -242,6 +242,16 @@ AlphaXxx/
 | 5-min K-line | `Interval5m` | `dr.getData('Interval5m.close')` |
 | Index prices | `aindexeodprices` | `dr.getData('aindexeodprices.s_dq_pctchange_000905')` |
 
+## Known Technical Debt (Deferred)
+
+- **Stub files**: `core/alpha/results/base.py`, `results/checkpoint.py`, `results/checkbias.py` — placeholder, implement when needed
+- **Dead code**: `infra/notify/email.py` is commented out — implement or delete later
+- **Debug residual**: `utils/func.py` has a `debug()` with infinite loop — remove when cleaning up
+- **Feishu credentials hardcoded**: `infra/notify/feishu_send.py` has APP_ID/APP_SECRET in source — move to config/env later
+- **BacktestError duplicate**: `utils/exception/exception.py` (stub) vs `infra/gsim/runner.py` (real) — consolidate to one location
+- **Checker inheritance inconsistent**: `ComplianceChecker` and `CorrelationChecker` don't inherit `Checker` base class — unify
+- **`core/alpha/metadata.py` has I/O**: `_modify_always()`, `save()`, `get_v2npy_files()` do file I/O in core layer — extract to services/infra
+
 ## Plans
 
 ### Architecture Refactor (Not Started)
