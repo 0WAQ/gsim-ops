@@ -6,7 +6,7 @@ import subprocess as sp
 from pathlib import Path
 from typing import Optional
 
-from .exception import BacktestError
+from .exception.exception import BacktestError
 
 
 class LowerAction(argparse.Action):
