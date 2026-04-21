@@ -1,6 +1,7 @@
 import numpy as np
 
 DELAY0_MAX_TI = 44  # exclusive: ti <= 43 (14:30) allowed for delay=0
+ALWAYS_ALLOW_DI = {'valid'}  # attributes known before market open (defined in AlphaBase)
 
 
 class DataFirewall:
@@ -51,9 +52,12 @@ class DataFirewall:
             self._data = obj.data if (hasattr(obj, 'data') and isinstance(obj.data, np.ndarray)) else obj
             self._ndim = self._data.ndim
 
+            # valid: always allow di (defined in AlphaBase, known before market open)
             # delay=0 + 3D data: allow accessing di, but enforce ti <= 43
             # otherwise: di is future, cannot access
-            if delay == 0 and self._ndim >= 3:
+            if attr_name in ALWAYS_ALLOW_DI:
+                self._max_di = di + 1
+            elif delay == 0 and self._ndim >= 3:
                 self._max_di = di + 1  # exclusive: can access di
             else:
                 self._max_di = di      # exclusive: cannot access di
