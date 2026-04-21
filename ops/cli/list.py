@@ -49,6 +49,26 @@ Example:
         help="Refresh metrics by running simsummary on all factors",
     )
     parser.add_argument(
+        "--refresh-datasources",
+        action="store_true",
+        help="Refresh data sources by parsing factor code",
+    )
+    parser.add_argument(
+        "--show-tables",
+        action="store_true",
+        help="Show tables column in output",
+    )
+    parser.add_argument(
+        "--show-fields",
+        action="store_true",
+        help="Show fields column in output",
+    )
+    parser.add_argument(
+        "--filter-by",
+        type=str,
+        help="Filter conditions separated by commas (e.g., table=ashareeodprices,ret>30,shrp>1.5)",
+    )
+    parser.add_argument(
         "--sort",
         "-s",
         type=str,

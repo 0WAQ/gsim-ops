@@ -12,7 +12,7 @@ from ops.infra.config import Config
 from ops.core.metrics import Metrics
 
 
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 INDEX_MAX_AGE_SECONDS = 3600  # 1 hour
 CACHE_DIR = Path.home() / ".cache" / "ops"
 
@@ -32,6 +32,7 @@ class FactorInfo:
     has_pnl: bool
     dump_days: int
     metrics: Metrics | None = None
+    datasources: dict | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -43,6 +44,7 @@ class FactorInfo:
             "has_pnl": self.has_pnl,
             "dump_days": self.dump_days,
             "metrics": self.metrics.to_dict() if self.metrics else None,
+            "datasources": self.datasources,
         }
 
     @classmethod
@@ -57,6 +59,7 @@ class FactorInfo:
             has_pnl=data["has_pnl"],
             dump_days=data["dump_days"],
             metrics=Metrics.from_dict(metrics_data) if metrics_data else None,
+            datasources=data.get("datasources"),
         )
 
 

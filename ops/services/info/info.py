@@ -1,6 +1,7 @@
 from colorama import Fore, Style, init
 from ops.core.library import LibraryScanner
 from ops.services.list.metrics import load_metrics
+from ops.services.list.datasource import load_datasources
 
 
 init(autoreset=True)
@@ -50,5 +51,16 @@ def run_info(args):
         print(f"    {'fitness:':<12} {metrics.fitness:.2f}")
     else:
         print(f"    {'—  (run ops list --refresh-metrics to fetch)'}")
+
+    # Data Sources
+    ds_map = load_datasources(args.config_path)
+    ds = ds_map.get(factor.name)
+    print()
+    print(Fore.YELLOW + "  Data Sources:")
+    if ds:
+        print(f"    {'Tables:':<12} {', '.join(ds.get('tables', []))}")
+        print(f"    {'Fields:':<12} {', '.join(ds.get('fields', []))}")
+    else:
+        print(f"    {'—  (run ops list --refresh-datasources to fetch)'}")
 
     print(Fore.CYAN + separator)
