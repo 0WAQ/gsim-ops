@@ -1,10 +1,7 @@
 import argparse
-from .compiler import add_compiler_subparser
-from .scp import add_scp_subparser
-from .cp import add_cp_subparser
-from .check import add_check_subparser
-from .list import add_list_subparser
-from .info import add_info_subparser
+from ops.cli.check import add_check_subparser
+from ops.cli.list import add_list_subparser
+from ops.cli.info import add_info_subparser
 
 
 def main():
@@ -17,9 +14,7 @@ def main():
     subparsers = parser.add_subparsers(
         title="sub-command", dest="sub-command", required=True
     )
-    # add_compiler_subparser(subparsers)
-    # add_scp_subparser(subparsers)
-    add_cp_subparser(subparsers)
+
     add_check_subparser(subparsers)
     add_list_subparser(subparsers)
     add_info_subparser(subparsers)
