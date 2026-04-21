@@ -6,6 +6,7 @@ from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner
+from ops.services.list.metrics import update_metrics
 from ops.utils.logger.log import *
 from ops.utils.func import date_range
 from ops.core.alpha.metadata import AlphaMetadata
@@ -30,6 +31,7 @@ class CheckerPipeline:
                  factor: str | None=None):
 
         self.config = Config.load(config_path)
+        self.config_path = config_path
         
         for user in users:
             src_dir = self.config.dropbox_path / user
@@ -124,7 +126,10 @@ class CheckerPipeline:
             info(f"  ✔  {factor.key} correlation passed")
             
             # 7. Archive
+            metrics = Runner.run_simsummary(factor.pnl_file, self.config)
             self.to_lib(factor)
+            if metrics:
+                update_metrics(self.config_path, factor.name, metrics)
             return True
 
         except CheckSkip as e:

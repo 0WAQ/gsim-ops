@@ -16,6 +16,8 @@ Example:
     ops list              # List all factors
     ops list -u wbai      # List factors by author
     ops list --refresh    # Force refresh index cache
+    ops list --refresh-metrics  # Refresh metrics from simsummary
+    ops list --sort shrp  # Sort by Sharpe ratio
     ops list --format json
 """,
     )
@@ -40,6 +42,24 @@ Example:
         "-r",
         action="store_true",
         help="Force refresh index cache",
+    )
+    parser.add_argument(
+        "--refresh-metrics",
+        action="store_true",
+        help="Refresh metrics by running simsummary on all factors",
+    )
+    parser.add_argument(
+        "--sort",
+        "-s",
+        type=str,
+        choices=["ret", "shrp", "mdd", "tvr", "fitness", "dump_days"],
+        help="Sort by field (descending)",
+    )
+    parser.add_argument(
+        "-n",
+        type=int,
+        default=None,
+        help="Limit output to first N factors",
     )
     parser.add_argument(
         "--config-path", "-c", type=Path, default=get_default_config_path()

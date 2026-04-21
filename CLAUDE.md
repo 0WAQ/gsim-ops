@@ -35,14 +35,13 @@ Entry point: `ops/main.py` (argparse dispatcher). Each subcommand lives in its o
 
 | Subcommand | Purpose | Module |
 |------------|---------|--------|
-| `check` | Alpha factor validation pipeline | `ops/check/` |
-| `cp` | Dropbox file transfer via SSH | `ops/cp/` |
-| `list` | List factors in the library | `ops/list/` |
-| `info` | Show factor details | `ops/info/` |
+| `check` | Alpha factor validation pipeline | `ops/services/check/` |
+| `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
+| `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 
-Deprecated subcommands (`scp`, `compiler`) are commented out in `main.py`.
+Removed subcommands: `cp`, `scp`, `compiler`.
 
-### Check Pipeline (`ops/check/`)
+### Check Pipeline (`ops/services/check/`)
 
 `CheckerPipeline` in `check.py` runs 6 stages sequentially per factor:
 
@@ -51,13 +50,13 @@ Deprecated subcommands (`scp`, `compiler`) are commented out in `main.py`.
 3. **Long Backtest** - Full historical (20150101-20251231)
 4. **Compliance** - Position limits (max 5% per stock), min stock counts (50 long, 50 short, 100 total)
 5. **Correlation** - Factor correlation < 0.7 threshold against existing library
-6. **Archive** - Pass: move to library; Fail: move to recycle folder
+6. **Archive** - Run simsummary, save metrics to index, move to library; Fail: move to recycle folder
 
 Uses `ProcessPoolExecutor` (max 20 workers) for parallel factor checking.
 
-Checkers inherit from `Checker` ABC in `ops/check/checker/base.py`. Failures raise `CheckFail`; skippable issues raise `CheckSkip`.
+Checkers inherit from `Checker` ABC in `ops/services/check/checker/base.py`. Failures raise `CheckFail`; skippable issues raise `CheckSkip`.
 
-#### Checkbias DataFirewall (`ops/check/checker/firewall.py`)
+#### Checkbias DataFirewall (`ops/services/check/checker/firewall.py`)
 
 Uses AST to inject `@DataFirewall(delay=X)` decorator onto the factor's `generate` method. At runtime, DataFirewall wraps all ndarray/NIO attributes in `_SafeProxy` which enforces forward-looking access rules:
 
@@ -72,13 +71,37 @@ Exceptions:
 
 The delay value is read from the factor's XML: `<Alpha delay="0">`. The AST injector (`_GenerateDecoratorInjector`) matches any `generate(self, ...)` signature (daily and intraday factors).
 
-### Common Infrastructure (`ops/common/`)
+### Common Infrastructure
 
-- **config.py**: `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var -> `./config.yaml` -> project root `config.yaml`. Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables (`OPS_GSIM_HOME`, `OPS_STORAGE`, `OPS_WORKSPACE`).
-- **alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code. Constructor calls `_modify_always()` which modifies XML on disk (paths from config, not hardcoded).
-- **runner.py**: `Runner` static methods shell out to gsim tools (`run_backtest`, `run_simsummary`, `run_bcorr`) via `subprocess.run` with 30-min timeout.
-- **library.py**: `LibraryScanner` scans `alpha_src/` with JSON index caching at `~/.cache/ops/` (1-hour TTL, `INDEX_MAX_AGE_SECONDS = 3600`). `--refresh` forces rebuild. Performance: ~1.7s cold -> ~0.26s cached.
-- **ssh.py**: Paramiko-based SSH client.
+Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (orchestration) → `core/` (data models) + `infra/` (I/O, external systems). `utils/` for shared utilities.
+
+- **infra/config.py**: `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var -> `./config.prod.yaml` -> project root `config.prod.yaml`. Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables (`OPS_GSIM_HOME`, `OPS_STORAGE`, `OPS_WORKSPACE`).
+- **core/alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code. Constructor calls `_modify_always()` which modifies XML on disk (paths from config, not hardcoded).
+- **core/library.py**: `LibraryScanner` scans `alpha_src/` with JSON index caching at `~/.cache/ops/` (1-hour TTL, `INDEX_MAX_AGE_SECONDS = 3600`). `--refresh` forces rebuild.
+- **core/metrics.py**: `Metrics` dataclass (ret, tvr, shrp, mdd, fitness). Serialization keys use `ret%`, `tvr%`, `mdd%` to indicate percentage fields.
+- **infra/gsim/runner.py**: `Runner` static methods shell out to gsim tools (`run_backtest`, `run_simsummary`, `run_bcorr`) via `subprocess.run` with configurable timeout.
+- **infra/ssh.py**: Paramiko-based SSH client.
+
+### Factor Metrics
+
+Metrics (ret%, shrp, mdd%, tvr%, fitness) are obtained via `simsummary` and cached in `~/.cache/ops/{hash}.metrics.json`.
+
+**Two update paths**:
+- **Batch**: `ops list --refresh-metrics` — runs simsummary on all factors with PNL files, writes full index
+- **Incremental**: `ops check` — after a factor passes all checks and before archiving, runs simsummary and appends to index via `update_metrics()`
+
+**Usage**:
+```bash
+ops list --refresh-metrics         # Batch refresh all metrics
+ops list --sort shrp -n 10         # Top 10 by Sharpe
+ops info AlphaXxx                  # Shows metrics if cached
+```
+
+**simsummary output columns** (whitespace-separated):
+```
+dates long short pnl ret% tvr% shrp(IR) dd% win fitness ddStart ddEnd
+[0]   [1]  [2]   [3] [4]  [5]  [6] [7]  [8] [9] [10]   [11]    [12]
+```
 
 ### Dual Config Strategy
 
@@ -364,8 +387,8 @@ Enhance factor management: data source parsing, PNL metrics extraction, health c
 
 | Wave | Tasks | Description |
 |------|-------|-------------|
-| 1 | 1-2 | Data source parser (`ops/common/datasource.py`), enhance `Metrics` with `dd` field and `from_pnl()` class method |
-| 2 | 3-5 | Integrate into `LibraryScanner` (new fields + cache version bump), enhance `ops info` and `ops list` output |
+| 1 | 1-2 | Data source parser (`ops/common/datasource.py`), ~~enhance `Metrics` with `dd` field and `from_pnl()` class method~~ ✅ done |
+| 2 | 3-5 | ~~Integrate into `LibraryScanner` (new fields + cache version bump), enhance `ops info` and `ops list` output~~ ✅ done |
 | 3 | 6-7 | New `ops health` command: orphan factors, dump gaps, PNL missing, source missing, file integrity |
 
 **Health check output format**:
@@ -387,7 +410,10 @@ Summary: 7 OK | 2 WARNING | 1 ERROR
 - [x] `ops info <factor>` - View factor details
 - [x] Index caching for fast queries
 - [ ] Factor data sources (parse `dr.getData()` from Python code)
-- [ ] PNL metrics in info/list (from simsummary, not Readme)
+- [x] PNL metrics in info/list (ret%, shrp, mdd%, tvr%, fitness from simsummary)
+- [x] Batch metrics refresh (`ops list --refresh-metrics`)
+- [x] Incremental metrics update (saved during `ops check` archive step)
+- [x] Sort and limit (`ops list --sort shrp -n 10`)
 - [ ] `ops health` - Factor library health check
 - [ ] Factor registry, versioning, tags/categories
 - [ ] `ops search <keyword>`

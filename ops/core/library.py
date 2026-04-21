@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from ops.infra.config import Config
+from ops.core.metrics import Metrics
 
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 INDEX_MAX_AGE_SECONDS = 3600  # 1 hour
 CACHE_DIR = Path.home() / ".cache" / "ops"
 
@@ -30,6 +31,7 @@ class FactorInfo:
     pnl_path: Path
     has_pnl: bool
     dump_days: int
+    metrics: Metrics | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -40,10 +42,12 @@ class FactorInfo:
             "pnl_path": str(self.pnl_path),
             "has_pnl": self.has_pnl,
             "dump_days": self.dump_days,
+            "metrics": self.metrics.to_dict() if self.metrics else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FactorInfo":
+        metrics_data = data.get("metrics")
         return cls(
             name=data["name"],
             author=data["author"],
@@ -52,6 +56,7 @@ class FactorInfo:
             pnl_path=Path(data["pnl_path"]),
             has_pnl=data["has_pnl"],
             dump_days=data["dump_days"],
+            metrics=Metrics.from_dict(metrics_data) if metrics_data else None,
         )
 
 
