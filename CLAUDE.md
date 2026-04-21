@@ -57,10 +57,25 @@ Uses `ProcessPoolExecutor` (max 20 workers) for parallel factor checking.
 
 Checkers inherit from `Checker` ABC in `ops/check/checker/base.py`. Failures raise `CheckFail`; skippable issues raise `CheckSkip`.
 
+#### Checkbias DataFirewall (`ops/check/checker/firewall.py`)
+
+Uses AST to inject `@DataFirewall(delay=X)` decorator onto the factor's `generate` method. At runtime, DataFirewall wraps all ndarray/NIO attributes in `_SafeProxy` which enforces forward-looking access rules:
+
+| Factor delay | Data dimension | Rule |
+|-------------|---------------|------|
+| >= 1 | Any | Cannot access `data[di]` (only `data[:di]`) |
+| 0 | 2D `[di, ii]` (daily) | Cannot access `data[di]` (daily data unknown until EOD) |
+| 0 | 3D `[di, ti, ii]` (intraday) | Can access `data[di, :44, :]` (up to 14:30, ti <= 43) |
+
+Exceptions:
+- `self.valid` (in `ALWAYS_ALLOW_DI` set): always allows `[di]` access — tradability info is known before market open
+
+The delay value is read from the factor's XML: `<Alpha delay="0">`. The AST injector (`_GenerateDecoratorInjector`) matches any `generate(self, ...)` signature (daily and intraday factors).
+
 ### Common Infrastructure (`ops/common/`)
 
-- **config.py**: `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var -> `./config.yaml` -> project root `config.yaml`.
-- **alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code. **Warning**: constructor has side effects (`_modify_always()` modifies XML on disk).
+- **config.py**: `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var -> `./config.yaml` -> project root `config.yaml`. Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables (`OPS_GSIM_HOME`, `OPS_STORAGE`, `OPS_WORKSPACE`).
+- **alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code. Constructor calls `_modify_always()` which modifies XML on disk (paths from config, not hardcoded).
 - **runner.py**: `Runner` static methods shell out to gsim tools (`run_backtest`, `run_simsummary`, `run_bcorr`) via `subprocess.run` with 30-min timeout.
 - **library.py**: `LibraryScanner` scans `alpha_src/` with JSON index caching at `~/.cache/ops/` (1-hour TTL, `INDEX_MAX_AGE_SECONDS = 3600`). `--refresh` forces rebuild. Performance: ~1.7s cold -> ~0.26s cached.
 - **ssh.py**: Paramiko-based SSH client.
@@ -245,24 +260,28 @@ Restructure from current flat layout to layered architecture. All existing comma
 **Target structure**:
 ```
 ops/
-├── core/                  # Pure business logic (no filesystem/subprocess)
-│   ├── models.py          # All data models (AlphaKey, FactorInfo, Metrics, CheckResult...)
-│   └── checker/           # Checkers (pure rule evaluation)
-│       ├── base.py        # CheckFail/CheckSkip + Checker ABC
-│       ├── compliance.py  # Input: ndarray, not file paths
-│       ├── checkpoint.py
-│       ├── checkbias.py   # DataFirewall injection logic
-│       └── correlation.py
+├── core/                  # Data models + pure computation (no I/O)
+│   ├── alpha.py           # AlphaKey, AlphaMetadata (no disk write in constructor)
+│   ├── metrics.py         # Metrics, CheckResult
+│   └── library.py         # FactorInfo and related models
 │
 ├── services/              # Orchestration: combines core + infra
-│   ├── library.py         # Factor library ops (scan, get, filter, health)
-│   ├── check.py           # Check pipeline (read files -> call checkers -> archive)
-│   └── gsim.py            # Gsim interaction (backtest, simsummary, bcorr)
+│   ├── check.py           # Check pipeline scheduling (read files -> call checkers -> archive)
+│   ├── checker/           # All 6 checkers together (they are pipeline stages)
+│   │   ├── base.py        # CheckFail/CheckSkip + Checker ABC
+│   │   ├── checkbias.py   # DataFirewall AST injection + backtest
+│   │   ├── checkpoint.py  # Breakpoint validation
+│   │   ├── backtest.py    # Long backtest
+│   │   ├── compliance.py  # Position limits check
+│   │   ├── correlation.py # Factor correlation check
+│   │   ├── archive.py     # Pass/fail archiving
+│   │   └── firewall.py    # DataFirewall + _SafeProxy
+│   ├── gsim.py            # Gsim interaction (merge Runner+Gsim, single BacktestError)
+│   └── library.py         # Factor library ops (scan, get, filter)
 │
 ├── infra/                 # Infrastructure: file I/O, external systems
-│   ├── config.py          # Config loading + path resolution
+│   ├── config.py          # Config loading + path resolution + ${var} substitution
 │   ├── cache.py           # Index cache (~/.cache/ops/)
-│   ├── xml.py             # XML read/write (extracted from AlphaMetadata)
 │   ├── notify.py          # Feishu/email notifications
 │   └── ssh.py             # SSH connections (username from config, not hardcoded)
 │
@@ -274,30 +293,31 @@ ops/
 │   ├── cp.py              # ops cp
 │   └── fmt.py             # Table/color/progress output utilities
 │
-├── api/                   # (Future) Web API layer
-│
 └── utils.py               # Common utilities (date_range, md5sum, LowerAction)
 ```
 
-**Design principle**: CLI and future API both call the same services layer. Core logic has no I/O dependencies.
+**Design principles**:
+- CLI and future API both call the same services layer
+- Core has no I/O dependencies; services handle all I/O
+- All 6 checkers live together in `services/checker/` (they are pipeline stages, not independent modules)
+- Gradual migration: new code imports old code during transition, delete old modules one by one (no big-bang delete wave)
+- No empty placeholder directories (no `api/` until needed)
 
-**Execution plan** (7 waves, 17 tasks):
+**Execution plan** (5 waves, 14 tasks):
 
 | Wave | Tasks | Description |
 |------|-------|-------------|
-| 1 | 1-2 | Create directory structure + `core/models.py`, extract `ops/utils.py` |
-| 2 | 3-7 | Migrate infra layer: config, cache, xml (extract from AlphaMetadata), ssh, notify |
-| 3 | 8 | Migrate `core/checker/` (all checkers, pure rule evaluation) |
-| 4 | 9-11 | Create services: `gsim.py` (merge Runner+Gsim), `library.py`, `check.py` |
-| 5 | 12-15 | Migrate CLI: `fmt.py`, `main.py`, `list.py`, `info.py`, `check.py`, `cp.py` |
-| 6 | 16 | Delete old code (common/, check/, list/, info/, cp/, compiler/, scp/) |
-| 7 | 17 | Full verification + fix imports |
+| 1 | 1-3 | Skeleton: directory structure, `ops/utils.py`, `core/` models (alpha, metrics, library) |
+| 2 | 4-7 | Infra layer: config, cache, ssh, notify |
+| 3 | 8-10 | Services: `gsim.py` (merge Runner+Gsim), `checker/` (all 6 stages + firewall), `check.py` (pipeline), `library.py` |
+| 4 | 11-13 | CLI: `fmt.py`, `main.py` + entry point update, subcommands (list, info, check, cp) |
+| 5 | 14 | Delete old code incrementally + full verification + fix imports |
 
 **Key migration details**:
-- Task 1: Merge data models from `common/alpha/key.py`, `common/library.py`, `common/metrics.py`, `common/alpha/results/`, `common/alpha/report.py` into `core/models.py`
-- Task 5 (xml.py): `_modify_always()` side effect extracted as `prepare_for_check()` standalone function, called explicitly by `services/check.py` instead of in constructor
-- Task 9 (gsim.py): Merge `common/runner.py` Runner + `common/utils.py` Gsim into single `GsimService` class, single `BacktestError`
-- Task 13: Update `pyproject.toml` entry point to `ops.cli.main:main`
+- Task 1: Split models by domain — `core/alpha.py` (AlphaKey, AlphaMetadata), `core/metrics.py`, `core/library.py` (FactorInfo)
+- Task 1: `AlphaMetadata.__init__` no longer writes to disk; `_modify_always()` extracted as `prepare_for_check()` in `services/check.py`
+- Task 8: Merge `common/runner.py` Runner + `common/utils.py` Gsim into single `GsimService` class, single `BacktestError`
+- Task 12: Update `pyproject.toml` entry point to `ops.cli.main:main`
 
 **Verification after each wave**:
 ```bash

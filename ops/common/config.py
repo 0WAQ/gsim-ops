@@ -18,8 +18,8 @@ def get_default_config_path() -> Path:
     """
     Get default config path with priority:
     1. Environment variable OPS_CONFIG
-    2. ./config.yaml (current directory)
-    3. {project_root}/config.yaml
+    2. ./config.prod.yaml (current directory)
+    3. {project_root}/config.prod.yaml
     """
     # 1. Environment variable
     env_config = os.environ.get("OPS_CONFIG")
@@ -29,12 +29,12 @@ def get_default_config_path() -> Path:
             return env_path
 
     # 2. Current directory
-    cwd_config = Path.cwd() / "config.yaml"
+    cwd_config = Path.cwd() / "config.prod.yaml"
     if cwd_config.exists():
         return cwd_config
 
     # 3. Project root
-    project_config = get_project_root() / "config.yaml"
+    project_config = get_project_root() / "config.prod.yaml"
     if project_config.exists():
         return project_config
 

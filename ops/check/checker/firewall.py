@@ -3,7 +3,7 @@ import numpy as np
 DELAY0_MAX_TI = 44  # exclusive: ti <= 43 (14:30) allowed for delay=0
 ALWAYS_ALLOW_DI = {'valid'}  # attributes known before market open (defined in AlphaBase)
 
-
+# TODO: 适配其它类型
 class DataFirewall:
     def __init__(self, delay=1):
         self.delay = delay
