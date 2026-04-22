@@ -128,6 +128,9 @@ class DataFirewall:
                 return truncated_data
             return truncated_data[key]
 
+        def __setitem__(self, key, value):
+            self._data[key] = value
+
         def __getattr__(self, name):
             original_attr = getattr(self._obj, name)
             if name == 'data':
