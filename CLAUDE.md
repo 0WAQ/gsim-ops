@@ -18,7 +18,8 @@ uv run ops list --author wbai        # Filter by author
 uv run ops list --refresh            # Force rebuild index cache
 uv run ops list --format json        # JSON output
 uv run ops info <factor-name>        # Show factor details
-uv run ops cp                        # Copy factors from remote dropbox
+uv run ops health                    # Factor library health check
+uv run ops health --fix              # Auto-refresh missing metrics/datasources
 ```
 
 No test suite exists. Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
@@ -38,6 +39,7 @@ Entry point: `ops/main.py` (argparse dispatcher). Each subcommand lives in its o
 | `check` | Alpha factor validation pipeline | `ops/services/check/` |
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
+| `health` | Factor library health check | `ops/cli/health.py` + `ops/services/health/` |
 
 Removed subcommands: `cp`, `scp`, `compiler`.
 
@@ -447,7 +449,7 @@ Summary: 7 OK | 2 WARNING | 1 ERROR
 - [x] Batch metrics refresh (`ops list --refresh-metrics`)
 - [x] Incremental metrics update (saved during `ops check` archive step)
 - [x] Sort and limit (`ops list --sort shrp -n 10`)
-- [ ] `ops health` - Factor library health check
+- [x] `ops health` - Factor library health check
 - [ ] Factor registry, versioning, tags/categories
 - [ ] `ops search <keyword>`
 - [ ] Enable/disable, archive/unarchive factors

@@ -1,7 +1,9 @@
 import argparse
+
 from ops.cli.check import add_check_subparser
 from ops.cli.list import add_list_subparser
 from ops.cli.info import add_info_subparser
+from ops.cli.health import add_health_subparser
 
 
 def main():
@@ -18,6 +20,7 @@ def main():
     add_check_subparser(subparsers)
     add_list_subparser(subparsers)
     add_info_subparser(subparsers)
+    add_health_subparser(subparsers)
 
     args = parser.parse_args()
     args.func(args)
