@@ -140,6 +140,7 @@ class CheckerPipeline:
             self.to_recycle(factor, e)
             return False
         except Exception as e:
+            error(f"  ✘  {factor.key} failed. ({e})")
             return False
 
     def run(self):
