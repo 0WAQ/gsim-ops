@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import shutil
 from pathlib import Path
@@ -10,18 +9,17 @@ from ops.services.list.metrics import update_metrics
 from ops.utils.logger.log import *
 from ops.utils.func import date_range
 from ops.core.alpha.metadata import AlphaMetadata
-from ops.core.alpha.metadatas import AlphaMetadatas
 from ops.core.alpha.results.compliance import *
 from ops.core.alpha.results.correlation import *
 from ops.core.alpha.results.checkpoint import *
 from ops.core.alpha.results.checkbias import *
 
+from .xml_prepare import *
 from .checker.base import *
 from .checker.compliance_checker import ComplianceChecker
 from .checker.checkpoint_checker import CheckpointChecker
 from .checker.checkbias_checker import CheckbiasChecker
 from .checker.correlation_checker import CorrelationChecker
-
 
 class CheckerPipeline:
     def __init__(self,
@@ -32,7 +30,22 @@ class CheckerPipeline:
 
         self.config = Config.load(config_path)
         self.config_path = config_path
-        
+        self.config.alpha_src.parent.mkdir(exist_ok=True)
+        self.config.alpha_src.mkdir(exist_ok=True)
+        self.config.alpha_dump.mkdir(exist_ok=True)
+        self.config.alpha_pnl.mkdir(exist_ok=True)
+
+        self._copy_from_dropbox(users, start, end)
+        self.metadatas = self._scan_factors(users, start, end, factor)
+        for md in self.metadatas:
+            prepare_for_initial(md, self.config)
+
+        self.compliance_checker = ComplianceChecker(config=self.config)
+        self.correlation_checker = CorrelationChecker(config=self.config)
+        self.checkpoint_checker = CheckpointChecker(config=self.config)
+        self.checkbias_checker = CheckbiasChecker(config=self.config)
+
+    def _copy_from_dropbox(self, users: list[str], start: str, end: str):
         for user in users:
             src_dir = self.config.dropbox_path / user
             root_dir = self.config.dropbox_path_target / user
@@ -47,41 +60,47 @@ class CheckerPipeline:
                     shutil.rmtree(dst_date_dir)
                 shutil.copytree(src_date_dir, dst_date_dir)
 
-        self.config.alpha_src.parent.mkdir(exist_ok=True)
-        self.config.alpha_src.mkdir(exist_ok=True)
-        self.config.alpha_dump.mkdir(exist_ok=True)
-        self.config.alpha_pnl.mkdir(exist_ok=True)
+    def _scan_factors(self, users: list[str], start: str, end: str,
+                      factor_name: str|None=None) -> list[AlphaMetadata]:
+        
+        mds: list[AlphaMetadata] = []
 
-        self.metadatas = AlphaMetadatas(self.config.dropbox_path_target, users, start, end, self.config, factor)
+        if factor_name is not None:
+            assert start == end, "start must equal to end"
+            for user in users:
+                factor_dir = self.config.dropbox_path_target / user / start / factor_name
+                if factor_dir.exists() and factor_dir.is_dir():
+                    md = AlphaMetadata(user, start, factor_dir, self.config)
+                    mds.append(md)
+                    break
+        else:
+            for user in users:
+                root_dir = self.config.dropbox_path_target / user
+                for date in date_range(start, end):
+                    date_path = root_dir / date
+                    if not date_path.exists() or not date_path.is_dir():
+                        continue
+                    for factor_dir in date_path.iterdir():
+                        if not factor_dir.name.startswith("Alpha"):
+                            continue
 
-        self.compliance_checker = ComplianceChecker(config=self.config)
-        self.correlation_checker = CorrelationChecker(config=self.config)
-        self.checkpoint_checker = CheckpointChecker(config=self.config)
-        self.checkbias_checker = CheckbiasChecker(config=self.config)
+                        md = AlphaMetadata(user, date, factor_dir, self.config)
+                        mds.append(md)
 
+        return mds
 
     def to_lib(self, factor: AlphaMetadata):
-        try:
-            factor.xml_config["gsim"]["Modules"]["Alpha"] = f"/mnt/storage/alphalib/alpha_src/{factor.name}/{factor.name}.py"
-            factor.xml_config["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = "/tmp/alphalib/alpha_pnl"
-            factor.xml_config["gsim"]["Portfolio"]["Alpha"]["@dumpAlphaDir"] = "/tmp/alphalib/alpha_dump"
-
-            shutil.move(factor.dir, self.config.alpha_src)
-            shutil.move(factor.alpha_dir, self.config.alpha_dump)
-            shutil.move(factor.pnl_file, self.config.alpha_pnl / factor.name)
-        except Exception:
-            ...
+        shutil.move(factor.dir, self.config.alpha_src)
+        shutil.move(factor.alpha_dir, self.config.alpha_dump)
+        shutil.move(factor.pnl_file, self.config.alpha_pnl / factor.name)
 
     def to_recycle(self, factor: AlphaMetadata, e: CheckFail):
-        try:
-            dst_dir = self.config.recycle / factor.key.user \
-                        / e.stage / factor.key.date / factor.name
-            dst_dir.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(factor.dir, dst_dir)
-            with open(dst_dir / "reason.txt", 'w') as f:
-                f.write(str(e))
-        except Exception:
-            ...
+        dst_dir = self.config.recycle / factor.key.user \
+                    / e.stage / factor.key.date / factor.name
+        dst_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(factor.dir, dst_dir)
+        with open(dst_dir / "reason.txt", 'w') as f:
+            f.write(str(e))
 
     def run_one(self, factor: AlphaMetadata, i: int) -> bool:
         total = len(self.metadatas)
@@ -90,43 +109,30 @@ class CheckerPipeline:
         print(f"{bar} checking ", end=""); highlight(f"{factor.key}")
         
         try:
-            factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'false'
-            factor.xml_config["gsim"]['Universe']['@startdate'] = "20241201"
-            factor.xml_config["gsim"]['Universe']['@enddate'] = "20241231"
-            factor.save()
-
             # 1. Checkbias (Short Backtest)
+            prepare_for_checkbias(factor)
             self.checkbias_checker.check(factor)
             info(f"  ✔  {factor.key} checkbias passed")
 
             # 2. Checkpoint
+            prepare_for_checkpoint(factor) # TODO: now, do nothing
             self.checkpoint_checker.check(factor)
+            self.checkpoint_checker.clean(factor)
             info(f"  ✔  {factor.key} checkpoint passed")
 
-            # 3. Clean and Change XML
-            shutil.rmtree(factor.alpha_dir, ignore_errors=True)
-            Path(factor.pnl_file).unlink(missing_ok=True)
-            shutil.rmtree(factor.checkpoint_dir, ignore_errors=True)
-
-            factor.xml_config["gsim"]["Universe"]["@startdate"] = "20150101"
-            factor.xml_config["gsim"]["Universe"]["@enddate"]   = "20251231"
-            factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'true'
-            factor.save()
-
-            # 4. Long Backtest
-            Runner.run_backtest(factor.xml_file, self.config)
-            info(f"  ✔  {factor.key} long backtest succeed")
-
-            # 5. Compliance
+            # 3. Compliance (Long Backtest)
+            prepare_for_compliance(factor)
             self.compliance_checker.check(factor)
             info(f"  ✔  {factor.key} compliance passed")
 
-            # 6. Correlation
+            # 4. Correlation
+            prepare_for_correlation(factor)
             self.correlation_checker.check(factor)
             info(f"  ✔  {factor.key} correlation passed")
             
-            # 7. Archive
+            # 5. Archive
             metrics = Runner.run_simsummary(factor.pnl_file, self.config)
+            prepare_for_archive(factor)
             self.to_lib(factor)
             if metrics:
                 update_metrics(self.config_path, factor.name, metrics)
@@ -137,6 +143,7 @@ class CheckerPipeline:
             return False
         except CheckFail as e:
             error(f"  ✘  {factor.key} {e.stage} failed. ({str(e)})")
+            prepare_for_recycle(factor) # TODO: now, do nothing
             self.to_recycle(factor, e)
             return False
         except Exception as e:

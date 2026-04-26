@@ -1,3 +1,6 @@
+import shutil
+from pathlib import Path
+
 from .base import *
 from ops.utils.func import md5sum
 from ops.infra.config import Config
@@ -45,3 +48,8 @@ class CheckpointChecker(Checker):
             raise CheckpointFail()
 
         return PointResult()
+    
+    def clean(self, factor: AlphaMetadata):
+        shutil.rmtree(factor.alpha_dir, ignore_errors=True)
+        Path(factor.pnl_file).unlink(missing_ok=True)
+        shutil.rmtree(factor.checkpoint_dir, ignore_errors=True)

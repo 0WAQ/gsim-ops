@@ -60,7 +60,21 @@ Checkers inherit from `Checker` ABC in `ops/services/check/checker/base.py`. Fai
 
 #### Checkbias DataFirewall (`ops/services/check/checker/firewall.py`)
 
-Uses AST to inject `@DataFirewall(delay=X)` decorator onto the factor's `generate` method. At runtime, DataFirewall wraps all ndarray/NIO attributes in `_SafeProxy` which enforces forward-looking access rules:
+Uses AST to inject `@DataFirewall(delay=X, data_attrs={...})` decorator onto the factor's `generate` method.
+
+**AST analysis** (`checkbias_checker.py`):
+1. `_GetDataAttrCollector` scans the factor's `__init__` for `self.xxx = dr.getData(...)` and `self.xxx = dr.getData(...).data` assignments
+2. Collected attribute names + `ALWAYS_GUARD = {'valid'}` form the `data_attrs` set
+3. `_GenerateDecoratorInjector` injects `@DataFirewall(delay=X, data_attrs={...})` onto `generate`
+
+**Runtime**: DataFirewall only wraps attributes in `data_attrs` with `_SafeProxy`. User-created buffers (`np.zeros`, `np.full`, `.copy()`, etc.) are never wrapped — only `dr.getData()` results are subject to forward-looking checks.
+
+**`_SafeProxy` behavior**:
+- `__getitem__`: validates date index against `max_di`, truncates data along axis 0 for ndim >= 2 (1D arrays not truncated — may be instrument-dimension)
+- `__setitem__`: delegates directly to underlying data (supports `self.alpha[idx] = value`)
+- `__getattr__`: truncates sub-arrays (`.data`, ndarray attributes); returns original value for metadata (`.shape`, `.dtype`, `.ndim`) to avoid breaking buffer allocation
+
+**Forward-looking access rules**:
 
 | Factor delay | Data dimension | Rule |
 |-------------|---------------|------|
@@ -71,14 +85,14 @@ Uses AST to inject `@DataFirewall(delay=X)` decorator onto the factor's `generat
 Exceptions:
 - `self.valid` (in `ALWAYS_ALLOW_DI` set): always allows `[di]` access — tradability info is known before market open
 
-The delay value is read from the factor's XML: `<Alpha delay="0">`. The AST injector (`_GenerateDecoratorInjector`) matches any `generate(self, ...)` signature (daily and intraday factors).
+The delay value is read from the factor's XML: `<Alpha delay="0">`.
 
 ### Common Infrastructure
 
 Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (orchestration) → `core/` (data models) + `infra/` (I/O, external systems). `utils/` for shared utilities.
 
 - **infra/config.py**: `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var -> `./config.prod.yaml` -> project root `config.prod.yaml`. Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables (`OPS_GSIM_HOME`, `OPS_STORAGE`, `OPS_WORKSPACE`).
-- **core/alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code. Constructor calls `_modify_always()` which modifies XML on disk (paths from config, not hardcoded).
+- **core/alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code. Constructor calls `_modify_always()` which modifies XML on disk (paths from config, not hardcoded). `_modify_always` also updates per-Data module `niodatapath` for L2 data (replaces `/datasvc/data/cc/` prefix with config's `nio_data_path`).
 - **core/library.py**: `LibraryScanner` scans `alpha_src/` with JSON index caching at `~/.cache/ops/` (1-hour TTL, `INDEX_MAX_AGE_SECONDS = 3600`). `--refresh` forces rebuild.
 - **core/metrics.py**: `Metrics` dataclass (ret, tvr, shrp, mdd, fitness). Serialization keys use `ret%`, `tvr%`, `mdd%` to indicate percentage fields.
 - **infra/gsim/runner.py**: `Runner` static methods shell out to gsim tools (`run_backtest`, `run_simsummary`, `run_bcorr`) via `subprocess.run` with configurable timeout.
@@ -437,6 +451,34 @@ ERROR: 1 factor has dump date gaps
 Summary: 7 OK | 2 WARNING | 1 ERROR
 ```
 
+### Factor Lifecycle Architecture (Next)
+
+Factor lifecycle: `提交(submitted) → 验证中(checking) → 入库(active) / 拒绝(rejected) → 监控(monitored) → 衰减(decaying) → 废弃(retired)`.
+
+**Phase 1: 状态管理 + 通知自动化**
+
+State tracking integrated into `CheckerPipeline`; structured Feishu notifications on check pass/fail; new `ops submit` and `ops status` commands.
+
+New modules:
+| File | Purpose |
+|------|---------|
+| `core/state.py` | `FactorStatus` enum, `CheckRecord`, `FactorRecord` dataclass |
+| `infra/store/base.py` | `StateStore` ABC |
+| `infra/store/json_store.py` | JSON file backend (`~/.cache/ops/factor_state.json`), fcntl locking |
+| `infra/notify/notifier.py` | Wraps `FeishuBot`, typed methods: `notify_check_passed()`, `notify_check_failed()` |
+| `services/submit/submit.py` | Validate dropbox structure, record state, optionally trigger check |
+| `services/status/status.py` | Query factor state by name/author |
+| `cli/submit.py` | `ops submit -u wang -s 20250420` |
+| `cli/status.py` | `ops status [AlphaXxx] [-u author]` |
+
+Modified: `services/check/check.py` (~15 lines: state transitions + notify), `main.py` (register subcommands).
+
+**Phase 2: 因子质量监控** — Rolling IC/IR, coverage, autocorrelation, correlation drift. SQLite replaces JSON store. `ops monitor` command (cron). Threshold alerts via Feishu.
+
+**Phase 3: 计算编排** — Factor DAG, incremental updates, retry/alerting. `ops run`, `ops retire`, `ops recheck`.
+
+**Phase 4: 服务化** — FastAPI over services layer, Redis cache, Streamlit/Grafana dashboard.
+
 ## Roadmap
 
 ### Factor Storage & Management
@@ -450,10 +492,27 @@ Summary: 7 OK | 2 WARNING | 1 ERROR
 - [x] Incremental metrics update (saved during `ops check` archive step)
 - [x] Sort and limit (`ops list --sort shrp -n 10`)
 - [x] `ops health` - Factor library health check
+- [ ] Factor state tracking (submitted/checking/active/rejected lifecycle)
+- [ ] `ops submit` - Structured factor submission from dropbox
+- [ ] `ops status` - Query factor lifecycle state
 - [ ] Factor registry, versioning, tags/categories
-- [ ] `ops search <keyword>`
 - [ ] Enable/disable, archive/unarchive factors
-- [ ] Multi-machine factor sync, backup/restore
+
+### Factor Lifecycle & Monitoring
+- [ ] Automated Feishu notifications on check pass/fail
+- [ ] Rolling IC / IC_IR monitoring (20/60 day windows)
+- [ ] Factor coverage monitoring (sudden drop = data source failure)
+- [ ] Factor autocorrelation monitoring (spike = factor death)
+- [ ] Correlation drift detection
+- [ ] `ops monitor` command (cron-based)
+- [ ] Threshold-based decay alerts
+
+### Computation & Orchestration
+- [ ] Factor computation DAG with dependency tracking
+- [ ] Incremental update vs full recompute
+- [ ] Retry with exponential backoff
+- [ ] `ops run` for orchestrated factor computation
+- [ ] Batch operations: `ops retire`, `ops recheck`
 
 ### Factor Analysis
 - [ ] Factor-to-factor correlation matrix, clustering, redundancy detection
@@ -465,7 +524,10 @@ Summary: 7 OK | 2 WARNING | 1 ERROR
 - [ ] Factor orthogonalization (residualization, PCA, Gram-Schmidt)
 - [ ] Portfolio optimization (mean-variance, risk parity, constraints)
 
-### Production Deployment
+### Production & Service
+- [ ] FastAPI wrapper over services layer
+- [ ] Redis cache layer
+- [ ] Streamlit/Grafana dashboard
 - [ ] Daily signal/position generation, smoothing, transaction cost modeling
-- [ ] Cron scheduling, failure alerting (email, Feishu), run history
+- [ ] Cron scheduling, failure alerting, run history
 - [ ] Live PNL tracking, health dashboard, anomaly detection

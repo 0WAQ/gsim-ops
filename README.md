@@ -13,7 +13,9 @@ uv sync
 ```bash
 uv run ops --help
 uv run ops check --help
-uv run ops cp --help
+uv run ops list --help
+uv run ops info --help
+uv run ops health --help
 ```
 
 ## Subcommands
@@ -21,7 +23,9 @@ uv run ops cp --help
 | Command | Description |
 |---------|-------------|
 | `check` | Factor validation pipeline (bias, checkpoint, backtest, compliance, correlation) |
-| `cp` | Copy factors from dropbox and compile |
+| `list`  | List factors in library (filter, sort, metrics, datasources) |
+| `info`  | Show factor details (metadata, metrics, data sources) |
+| `health`| Factor library health check (orphans, missing PNL/metrics/datasources) |
 
 ## Factor Workflow
 
@@ -30,85 +34,24 @@ User Workspace                    ops check                     Factor Library
 /mnt/storage/dropbox/    ──────────────────────────────►    /mnt/storage/alphalib/
   {user}/{date}/Alpha*/         6-stage validation              alpha_src/
                                                                 alpha_dump/
-                                                                alpha_feature/
+                                                                alpha_pnl/
 ```
 
-## Roadmap
+### Validation Pipeline (ops check)
 
-### 1. Factor Storage & Management
+1. **Checkbias** — Short backtest with DataFirewall (AST-injected) to detect forward-looking bias
+2. **Checkpoint** — Breakpoint validation (5 days)
+3. **Long Backtest** — Full historical (20150101-20251231)
+4. **Compliance** — Position limits (max 5% per stock, min 50 long/short, 100 total)
+5. **Correlation** — Factor correlation < 0.7 against existing library
+6. **Archive** — Save metrics, move to library
 
-#### Factor Metadata Management
-- [ ] Factor registry (name, author, create date, status)
-- [ ] Factor versioning (track updates to same factor)
-- [ ] Tags/categories (momentum, value, technical, etc.)
+### Examples
 
-#### Factor Lifecycle
-- [ ] Enable/disable factors (soft delete)
-- [ ] Archive/unarchive factors
-- [ ] Expired factor cleanup policy
-
-#### Factor Query
-- [ ] `ops list` - List all factors (filter by author, date, status)
-- [ ] `ops info <factor>` - View factor details
-- [ ] `ops search <keyword>` - Search factors
-
-#### Factor Export/Sync
-- [ ] Export factor to specified directory
-- [ ] Multi-machine factor sync
-- [ ] Backup/restore
-
-#### Data Integrity
-- [ ] Detect missing dates in alpha_dump
-- [ ] Validate consistency between source code and positions
-- [ ] Periodic health checks
-
-### 2. Factor Analysis
-
-#### Correlation Analysis
-- [ ] Factor-to-factor correlation matrix
-- [ ] Correlation clustering / grouping
-- [ ] Redundancy detection (auto-flag highly correlated factors)
-
-#### Performance Attribution
-- [ ] PNL decomposition (by sector, market cap, etc.)
-- [ ] Alpha decay analysis
-- [ ] Turnover analysis
-
-#### Risk Analysis
-- [ ] Max drawdown calculation
-- [ ] Volatility metrics
-- [ ] VaR / CVaR estimation
-
-### 3. Factor Combination
-
-#### Multi-Factor Synthesis
-- [ ] Factor weighting schemes (equal, IC-weighted, optimization-based)
-- [ ] Factor blending / ensemble
-- [ ] Dynamic weight adjustment
-
-#### Factor Orthogonalization
-- [ ] Residualization (remove correlation)
-- [ ] PCA-based decomposition
-- [ ] Gram-Schmidt orthogonalization
-
-#### Portfolio Optimization
-- [ ] Mean-variance optimization
-- [ ] Risk parity
-- [ ] Constraint handling (sector, position limits)
-
-### 4. Production Deployment
-
-#### Signal Generation
-- [ ] Daily signal/position generation from factor library
-- [ ] Signal smoothing / filtering
-- [ ] Transaction cost modeling
-
-#### Scheduling & Automation
-- [ ] Cron-based daily runs
-- [ ] Failure alerting (email, Feishu)
-- [ ] Run history and logs
-
-#### Monitoring
-- [ ] Live PNL tracking
-- [ ] Factor health dashboard
-- [ ] Anomaly detection (sudden performance drop)
+```bash
+uv run ops check -u wbai -s 20260401 -e 20260415          # Validate factors
+uv run ops list --sort shrp -n 10                          # Top 10 by Sharpe
+uv run ops list --filter-by "ret>30,tables=ashare*"        # Filter by metrics/tables
+uv run ops info AlphaXxx                                   # Factor details
+uv run ops health --fix                                    # Auto-fix missing metrics
+```
