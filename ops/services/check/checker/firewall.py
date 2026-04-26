@@ -129,13 +129,12 @@ class DataFirewall:
             self._data[key] = value
 
         def __getattr__(self, name):
-            original_attr = getattr(self._obj, name)
             if name == 'data':
+                return self._truncate(getattr(self._obj, name))
+            original_attr = getattr(self._obj, name)
+            if isinstance(original_attr, np.ndarray):
                 return self._truncate(original_attr)
-            try:
-                arr = np.asarray(original_attr)
-                if arr.ndim == 0:
-                    return original_attr
-                return self._truncate(arr)
-            except (TypeError, ValueError):
-                return original_attr
+            truncated = self._truncate(self._data)
+            if hasattr(truncated, name):
+                return getattr(truncated, name)
+            return original_attr
