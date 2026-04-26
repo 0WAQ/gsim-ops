@@ -40,7 +40,9 @@ class AlphaMetadata:
         # TODO: other metadata
 
     def _modify_always(self):
-        self.xml_config["gsim"]['Constants']['@niodatapath'] = str(self.config.nio_data_path)
+        nio_data_path = str(self.config.nio_data_path)
+        self.xml_config["gsim"]['Constants']['@niodatapath'] = nio_data_path
+        self._update_data_niodatapath(nio_data_path)
         self.xml_config["gsim"]['Constants']['@checkpointDays'] = '5'
         self.xml_config["gsim"]["Constants"]["@checkpointDir"] = str(self.config.checkpoint_path / self.name) + "/"
         self.config.checkpoint_path.mkdir(parents=True, exist_ok=True)
@@ -55,6 +57,16 @@ class AlphaMetadata:
         self.xml_config["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = str(self.config.pnl_path)
         self.xml_config["gsim"]["Portfolio"]["Stats"]["@dumpPnl"] = 'true'
         self.save()
+
+    def _update_data_niodatapath(self, nio_data_path: str):
+        modules = self.xml_config["gsim"]["Modules"]
+        data_items = modules.get("Data", [])
+        if isinstance(data_items, dict):
+            data_items = [data_items]
+        for item in data_items:
+            old = item.get("@niodatapath")
+            if old and old.startswith("/datasvc/data/cc/"):
+                item["@niodatapath"] = nio_data_path + "/" + old[len("/datasvc/data/cc/"):]
 
     def parse(self):
         ...
