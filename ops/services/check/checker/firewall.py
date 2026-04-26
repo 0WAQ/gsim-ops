@@ -104,12 +104,9 @@ class DataFirewall:
 
         def _truncate(self, arr):
             arr = np.asarray(arr)
-            if arr.ndim == 0:
+            if arr.ndim <= 1:
                 return arr
-            elif arr.ndim == 1:
-                return arr[:self._max_di]
-            else:
-                return arr[:self._max_di]
+            return arr[:self._max_di]
 
         def __getitem__(self, key):
             di_key = ti_key = None
