@@ -5,8 +5,9 @@ ALWAYS_ALLOW_DI = {'valid'}  # attributes known before market open (defined in A
 
 # TODO: 适配其它类型
 class DataFirewall:
-    def __init__(self, delay=1):
+    def __init__(self, delay=1, data_attrs=None):
         self.delay = delay
+        self.data_attrs = data_attrs or set()
 
     def __call__(self, func):
         self.func = func
@@ -25,15 +26,13 @@ class DataFirewall:
         ti = args[2] if len(args) > 2 else None
 
         originals = {}
-        for attr_name, attr_val in instance.__dict__.items():
+        for attr_name in self.data_attrs:
+            attr_val = getattr(instance, attr_name, None)
             if attr_val is None:
                 continue
-            is_ndarray = isinstance(attr_val, np.ndarray)
-            is_nio = hasattr(attr_val, 'data') and isinstance(attr_val.data, np.ndarray)
-            if is_ndarray or is_nio:
-                originals[attr_name] = attr_val
-                setattr(instance, attr_name,
-                        self._SafeProxy(attr_val, di, ti, attr_name, self.delay))
+            originals[attr_name] = attr_val
+            setattr(instance, attr_name,
+                    self._SafeProxy(attr_val, di, ti, attr_name, self.delay))
 
         try:
             return self.func(*args, **kwargs)
