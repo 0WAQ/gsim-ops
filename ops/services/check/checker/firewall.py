@@ -134,7 +134,4 @@ class DataFirewall:
             original_attr = getattr(self._obj, name)
             if isinstance(original_attr, np.ndarray):
                 return self._truncate(original_attr)
-            truncated = self._truncate(self._data)
-            if hasattr(truncated, name):
-                return getattr(truncated, name)
             return original_attr
