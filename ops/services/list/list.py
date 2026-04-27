@@ -151,8 +151,8 @@ def run_list(args):
             return
         factors = apply_filters(factors, filters)
 
-    if args.sort and args.sort in SORT_KEYS:
-        factors.sort(key=SORT_KEYS[args.sort], reverse=True)
+    if args.sort_by and args.sort_by in SORT_KEYS:
+        factors.sort(key=SORT_KEYS[args.sort_by], reverse=True)
 
     if args.n is not None:
         factors = factors[:args.n]

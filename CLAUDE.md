@@ -11,7 +11,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 uv sync                              # Install dependencies (uses uv, not pip)
 uv run ops --help                    # CLI help
-uv run ops check <factors>           # Run 6-stage validation pipeline
+uv run ops submit -u wbai -s 20260401            # Submit a day's factors from dropbox
+uv run ops submit -u wbai -s 20260401 -f Alpha   # Submit one factor
+uv run ops check                                 # Run 6-stage pipeline on staging
+uv run ops status AlphaXxx                       # Query factor lifecycle state
+uv run ops status -u wbai --status submitted     # Filter by author/state
+uv run ops backfill --dry-run                    # Preview backfill on alpha_src/
+uv run ops backfill                              # Generate meta.json + ACTIVE for legacy factors
 uv run ops list                      # List factors in library (staging)
 uv run ops list -c config.prod.yaml  # List factors in production library
 uv run ops list --author wbai        # Filter by author
@@ -36,7 +42,10 @@ Entry point: `ops/main.py` (argparse dispatcher). Each subcommand lives in its o
 
 | Subcommand | Purpose | Module |
 |------------|---------|--------|
-| `check` | Alpha factor validation pipeline | `ops/services/check/` |
+| `submit` | Copy factors from dropbox to staging, generate `meta.json`, mark SUBMITTED | `ops/services/submit/` |
+| `check` | Alpha factor validation pipeline (runs in-place on staging) | `ops/services/check/` |
+| `status` | Query factor lifecycle state | `ops/services/status/` |
+| `backfill` | One-shot: generate `meta.json` + ACTIVE for existing factors in `alpha_src/` | `ops/services/backfill/` |
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `health` | Factor library health check | `ops/cli/health.py` + `ops/services/health/` |
@@ -86,6 +95,44 @@ Exceptions:
 - `self.valid` (in `ALWAYS_ALLOW_DI` set): always allows `[di]` access — tradability info is known before market open
 
 The delay value is read from the factor's XML: `<Alpha delay="0">`.
+
+### Factor Lifecycle
+
+State machine: `SUBMITTED → CHECKING → ACTIVE | REJECTED → (DECAYING → RETIRED)`.
+
+**Flow**:
+```
+dropbox/{user}/{date}/AlphaXxx/      (QR-owned, read-only source)
+    │  ops submit  → parse_factor() → write meta.json + state=SUBMITTED
+    ▼
+staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
+    │  ops check   → in-place pipeline run
+    ├── pass ──► alpha_src/AlphaXxx/                  state=ACTIVE
+    └── fail ──► recycle/{user}/{stage}/AlphaXxx/     state=REJECTED
+```
+
+**Two persistence layers**:
+- **`meta.json`** inside each factor directory — the factor's *identity card*. Fields: name, author, birthday, universe, category, delay, backdays, dump_alpha, has_intraday_curve, operations, declared_data_modules, datasources (fields+tables), code_lines, frequency, submitted_by, submitted_at. Travels with the factor through staging → alpha_src/recycle. Defined in `ops/core/factormeta.py`. Persistent — must not be regenerated lossily.
+- **`~/.cache/ops/factor_state.json`** — per-host lifecycle state (FactorRecord: name, author, status, updated_at, submitted_at/by, history of CheckRecord). JSON backend with fcntl locking; can be rebuilt from meta.json + directory location.
+
+**Author resolution** (`services/submit/parser.py`):
+1. XML `<Description author="...">`
+2. If author is in `_GENERIC_AUTHORS = {"gsim_users", "unknown", ""}` — fall back to `_infer_author_from_dir()` which strips the `Alpha` prefix and lowercases the leading word (`AlphaFguo20260303LLM010` → `fguo`)
+3. Else `"unknown"`
+
+**Backfill** (`services/backfill/backfill.py`): one-shot for the existing 2194 factors in `alpha_src/` — builds the npy_index once and reuses it across all `parse_factor()` calls (the optional `npy_index` param avoids 2194 redundant filesystem walks).
+
+**Modules**:
+| File | Purpose |
+|------|---------|
+| `core/state.py` | `FactorStatus` enum, `CheckRecord`, `FactorRecord` |
+| `core/factormeta.py` | `FactorMeta` dataclass + `META_VERSION` + load/save |
+| `infra/store/json_store.py` | JSON state backend, fcntl cross-process lock |
+| `services/submit/parser.py` | Parse xml/py → `FactorMeta` (author fallback, npy_index reuse) |
+| `services/submit/submit.py` | Scan dropbox → `copy_to_staging()` → `submit_one()` per factor |
+| `services/check/check.py` | `_scan_factors` reads staging; `to_lib`/`to_recycle` move + state transition |
+| `services/backfill/backfill.py` | Generate meta.json + ACTIVE for legacy `alpha_src/` factors |
+| `services/status/status.py` | Query/format state records |
 
 ### Common Infrastructure
 
@@ -160,12 +207,12 @@ Repeated keys AND together: `--filter-by "ret>20,ret<=30"`.
 ```yaml
 users:                             # User email mappings
 path:
-  dropbox_path:                    # Source dropbox (/mnt/storage/dropbox/)
-  dropbox_path_target:             # Local copy target
-  alpha_src:                       # Factor source code
+  dropbox_path:                    # Source dropbox (/mnt/storage/dropbox/, QR-owned, read-only)
+  staging:                         # ops-owned workspace for in-flight factors (flat layout)
+  alpha_src:                       # Factor source code (post-archive)
   alpha_dump:                      # Daily target positions per factor
   alpha_pnl:                       # Backtest results
-  recycle:                         # Failed factors destination
+  recycle:                         # Failed factors destination ({user}/{stage}/AlphaXxx/)
   pnl_prod_path:                   # Gsim production PNL
   pnl_alphalib:                    # Archive PNL
 script:
@@ -455,23 +502,9 @@ Summary: 7 OK | 2 WARNING | 1 ERROR
 
 Factor lifecycle: `提交(submitted) → 验证中(checking) → 入库(active) / 拒绝(rejected) → 监控(monitored) → 衰减(decaying) → 废弃(retired)`.
 
-**Phase 1: 状态管理 + 通知自动化**
+**Phase 1: 状态管理 + submit/status/backfill** ✅ done
 
-State tracking integrated into `CheckerPipeline`; structured Feishu notifications on check pass/fail; new `ops submit` and `ops status` commands.
-
-New modules:
-| File | Purpose |
-|------|---------|
-| `core/state.py` | `FactorStatus` enum, `CheckRecord`, `FactorRecord` dataclass |
-| `infra/store/base.py` | `StateStore` ABC |
-| `infra/store/json_store.py` | JSON file backend (`~/.cache/ops/factor_state.json`), fcntl locking |
-| `infra/notify/notifier.py` | Wraps `FeishuBot`, typed methods: `notify_check_passed()`, `notify_check_failed()` |
-| `services/submit/submit.py` | Validate dropbox structure, record state, optionally trigger check |
-| `services/status/status.py` | Query factor state by name/author |
-| `cli/submit.py` | `ops submit -u wang -s 20250420` |
-| `cli/status.py` | `ops status [AlphaXxx] [-u author]` |
-
-Modified: `services/check/check.py` (~15 lines: state transitions + notify), `main.py` (register subcommands).
+Implemented `ops submit` / `ops status` / `ops backfill`, state tracking integrated into `CheckerPipeline`, `meta.json` per factor as identity card. See [Factor Lifecycle](#factor-lifecycle) section above.
 
 **Phase 2: 因子质量监控** — Rolling IC/IR, coverage, autocorrelation, correlation drift. SQLite replaces JSON store. `ops monitor` command (cron). Threshold alerts via Feishu.
 
@@ -492,9 +525,10 @@ Modified: `services/check/check.py` (~15 lines: state transitions + notify), `ma
 - [x] Incremental metrics update (saved during `ops check` archive step)
 - [x] Sort and limit (`ops list --sort shrp -n 10`)
 - [x] `ops health` - Factor library health check
-- [ ] Factor state tracking (submitted/checking/active/rejected lifecycle)
-- [ ] `ops submit` - Structured factor submission from dropbox
-- [ ] `ops status` - Query factor lifecycle state
+- [x] Factor state tracking (submitted/checking/active/rejected lifecycle)
+- [x] `ops submit` - Structured factor submission from dropbox to staging
+- [x] `ops status` - Query factor lifecycle state
+- [x] `ops backfill` - One-shot meta.json + ACTIVE state for legacy factors
 - [ ] Factor registry, versioning, tags/categories
 - [ ] Enable/disable, archive/unarchive factors
 

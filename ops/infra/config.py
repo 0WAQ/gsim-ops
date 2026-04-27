@@ -51,7 +51,6 @@ class Config:
 
         # path
         self.dropbox_path = Path(config["path"]["dropbox_path"])
-        self.dropbox_path_target = Path(config["path"]["dropbox_path_target"])
         self.pnl_prod_path = Path(config["path"]["pnl_prod_path"])
         self.pnl_pool_path = Path(config["path"]["pnl_pool_path"])
         self.pnl_alphalib = Path(config["path"]["pnl_alphalib"])
@@ -60,6 +59,7 @@ class Config:
         self.alpha_src = Path(config["path"]["alpha_src"])
         self.alpha_dump = Path(config["path"]["alpha_dump"])
         self.alpha_pnl = Path(config["path"]["alpha_pnl"])
+        self.staging = Path(config["path"]["staging"])
         self.recycle = Path(config["path"]["recycle"])
 
         self.pnl_path = Path(config["path"]["pnl_path"])

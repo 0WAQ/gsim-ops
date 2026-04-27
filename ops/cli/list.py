@@ -69,8 +69,7 @@ Example:
         help="Filter conditions separated by commas (e.g., table=ashareeodprices,ret>30,shrp>1.5)",
     )
     parser.add_argument(
-        "--sort",
-        "-s",
+        "--sort-by",
         type=str,
         choices=["ret", "shrp", "mdd", "tvr", "fitness", "dump_days"],
         help="Sort by field (descending)",

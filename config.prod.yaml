@@ -12,7 +12,6 @@ vars:
 # 路径配置
 path:
   dropbox_path: ${storage}/dropbox/
-  dropbox_path_target: ${workspace}/dropbox
   pnl_prod_path: ${gsim_home}/pnl_prod
   pnl_pool_path: ${gsim_home}/pnl_pool
   pnl_alphalib: ${storage}/alphalib/alpha_pnl
@@ -26,6 +25,7 @@ path:
   alpha_src: ${storage}/alphalib/alpha_src
   alpha_dump: ${storage}/alphalib/alpha_dump
   alpha_pnl: ${storage}/alphalib/alpha_pnl
+  staging: ${storage}/alphalib/staging
   recycle: ${storage}/recycle
 
 # 脚本

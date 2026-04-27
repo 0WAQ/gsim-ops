@@ -6,7 +6,6 @@ users:
 # 基础路径配置
 path:
   dropbox_path: /mnt/storage/dropbox/
-  dropbox_path_target: /home/wbai/alpha/dropbox
   pnl_prod_path: /usr/local/gsim/pnl_prod
   pnl_pool_path: /usr/local/gsim/pnl_pool
   pnl_alphalib: /mnt/storage/alphalib/alpha_pnl

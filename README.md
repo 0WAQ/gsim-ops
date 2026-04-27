@@ -12,30 +12,41 @@ uv sync
 
 ```bash
 uv run ops --help
+uv run ops submit --help
 uv run ops check --help
+uv run ops status --help
 uv run ops list --help
 uv run ops info --help
 uv run ops health --help
+uv run ops backfill --help
 ```
 
 ## Subcommands
 
 | Command | Description |
 |---------|-------------|
-| `check` | Factor validation pipeline (bias, checkpoint, backtest, compliance, correlation) |
-| `list`  | List factors in library (filter, sort, metrics, datasources) |
-| `info`  | Show factor details (metadata, metrics, data sources) |
-| `health`| Factor library health check (orphans, missing PNL/metrics/datasources) |
+| `submit`  | Submit factors from dropbox to staging, generate `meta.json`, mark state=SUBMITTED |
+| `check`   | 6-stage validation pipeline (runs in staging, archives to library or recycle) |
+| `status`  | Query factor lifecycle state (submitted/active/rejected/...) |
+| `list`    | List factors in library (filter, sort, metrics, datasources) |
+| `info`    | Show factor details (metadata, metrics, data sources) |
+| `health`  | Factor library health check (orphans, missing PNL/metrics/datasources) |
+| `backfill`| One-shot: generate `meta.json` + ACTIVE state for existing factors in `alpha_src/` |
 
 ## Factor Workflow
 
 ```
-User Workspace                    ops check                     Factor Library
-/mnt/storage/dropbox/    ──────────────────────────────►    /mnt/storage/alphalib/
-  {user}/{date}/Alpha*/         6-stage validation              alpha_src/
-                                                                alpha_dump/
-                                                                alpha_pnl/
+dropbox/{user}/{date}/AlphaXxx/   (QR-owned, read-only source)
+    │  ops submit
+    ▼
+staging/AlphaXxx/  +  meta.json   (state=SUBMITTED, flat layout)
+    │  ops check
+    ├── pass ──► alpha_src/AlphaXxx/                  (state=ACTIVE)
+    └── fail ──► recycle/{user}/{stage}/AlphaXxx/     (state=REJECTED)
 ```
+
+State is tracked in `~/.cache/ops/factor_state.json` (JSON store, fcntl-locked).
+`meta.json` lives inside each factor directory and serves as the factor's identity card.
 
 ### Validation Pipeline (ops check)
 
@@ -49,7 +60,12 @@ User Workspace                    ops check                     Factor Library
 ### Examples
 
 ```bash
-uv run ops check -u wbai -s 20260401 -e 20260415          # Validate factors
+uv run ops submit -u wbai -s 20260401                      # Submit a day's factors
+uv run ops submit -u wbai -s 20260401 -f AlphaWbaiReversal # Submit one factor
+uv run ops check                                           # Check everything in staging
+uv run ops status AlphaWbaiReversal                        # Query one factor's state
+uv run ops status -u wbai --status submitted               # Filter by author/state
+uv run ops backfill --dry-run                              # Preview backfill on alpha_src/
 uv run ops list --sort shrp -n 10                          # Top 10 by Sharpe
 uv run ops list --filter-by "ret>30,tables=ashare*"        # Filter by metrics/tables
 uv run ops info AlphaXxx                                   # Factor details

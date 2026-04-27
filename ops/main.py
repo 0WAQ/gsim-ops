@@ -4,6 +4,9 @@ from ops.cli.check import add_check_subparser
 from ops.cli.list import add_list_subparser
 from ops.cli.info import add_info_subparser
 from ops.cli.health import add_health_subparser
+from ops.cli.submit import add_submit_subparser
+from ops.cli.status import add_status_subparser
+from ops.cli.backfill import add_backfill_subparser
 
 
 def main():
@@ -21,6 +24,9 @@ def main():
     add_list_subparser(subparsers)
     add_info_subparser(subparsers)
     add_health_subparser(subparsers)
+    add_submit_subparser(subparsers)
+    add_status_subparser(subparsers)
+    add_backfill_subparser(subparsers)
 
     args = parser.parse_args()
     args.func(args)

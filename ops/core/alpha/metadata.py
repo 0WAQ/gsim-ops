@@ -14,7 +14,6 @@ class AlphaMetadata:
 
         self.xml_file = list(self.dir.glob("*.xml"))[0]
         self.py_file = list(self.dir.glob("*.py"))[0]
-        self.readme_file = None # TODO: readme
 
         with open(self.xml_file) as f:
             self.xml_config = xmltodict.parse(f.read())
