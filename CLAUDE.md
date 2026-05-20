@@ -106,31 +106,68 @@ dropbox/{user}/{date}/AlphaXxx/      (QR-owned, read-only source)
     │  ops submit  → parse_factor() → write meta.json + state=SUBMITTED
     ▼
 staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
-    │  ops check   → in-place pipeline run
+    │  ops check   → reconcile → in-place pipeline run
     ├── pass ──► alpha_src/AlphaXxx/                  state=ACTIVE
     └── fail ──► recycle/{user}/{stage}/AlphaXxx/     state=REJECTED
 ```
 
+**A factor record is never deleted from state.json** — it transitions through statuses but stays. REJECTED records keep `last_fail_stage` / `last_fail_reason` for auditing. The only thing reconcile drops are pure orphans (status SUBMITTED/CHECKING with no files anywhere on disk).
+
 **Two persistence layers**:
 - **`meta.json`** inside each factor directory — the factor's *identity card*. Fields: name, author, birthday, universe, category, delay, backdays, dump_alpha, has_intraday_curve, operations, declared_data_modules, datasources (fields+tables), code_lines, frequency, submitted_by, submitted_at. Travels with the factor through staging → alpha_src/recycle. Defined in `ops/core/factormeta.py`. Persistent — must not be regenerated lossily.
 - **`~/.cache/ops/factor_state.json`** — per-host lifecycle state (FactorRecord: name, author, status, updated_at, submitted_at/by, history of CheckRecord). JSON backend with fcntl locking; can be rebuilt from meta.json + directory location.
+
+**Backfilled factors** (the 2551 legacy entries) have `submitted_at = null` and `submitted_by = null`. Their real submission time is not knowable — only `entered_at` (the moment backfill ran) is set. Code reading these fields must tolerate `None`.
 
 **Author resolution** (`services/submit/parser.py`):
 1. XML `<Description author="...">`
 2. If author is in `_GENERIC_AUTHORS = {"gsim_users", "unknown", ""}` — fall back to `_infer_author_from_dir()` which strips the `Alpha` prefix and lowercases the leading word (`AlphaFguo20260303LLM010` → `fguo`)
 3. Else `"unknown"`
 
-**Backfill** (`services/backfill/backfill.py`): one-shot for the existing 2194 factors in `alpha_src/` — builds the npy_index once and reuses it across all `parse_factor()` calls (the optional `npy_index` param avoids 2194 redundant filesystem walks).
+**XML normalization** (`services/submit/normalize.py`): submit auto-rewrites mismatched ids in-place so the factor is runnable from any location.
+- `Portfolio.Alpha.@id` → `{dir_name}` (e.g. `AlphaFguo20260520GA001`)
+- `Portfolio.Alpha.@module` → `{dir_name}Mod` (must match `Modules.Alpha.@id`, otherwise gsim can't find the class)
+- `Modules.Alpha.@id` → `{dir_name}Mod`
+- `Modules.Alpha.@module` stem → `{dir_name}`
+
+After `to_lib` / `to_recycle`, check rewrites `Modules.Alpha.@module` to the .py's new absolute path so the factor stays independently runnable from alpha_src or recycle. `__pycache__` is stripped before every move.
+
+**Checkbias firewall injection** (`services/check/checker/checkbias_checker.py`): never mutates the factor's original `.py`. Writes the injected source (firewall code + AST-decorated factor) to `{factor}_firewall.py`, points XML's `Modules.Alpha.@module` at the temp file for the backtest, and restores XML + deletes the temp in `finally`. A crash mid-injection therefore can't leave a half-decorated `.py` that double-decorates next run. AST also guards against pre-existing `@DataFirewall` decorators just in case.
+
+**Concurrency** (`infra/lock.py`): every submit / check operation on a factor acquires a non-blocking per-factor fcntl lock at `~/.cache/ops/locks/{name}.lock`. If contended, the caller logs a warning and skips (no queueing). This is *advisory* — protects against two `ops` processes racing on the same factor, not against external rm/mv.
+
+**Reconciliation** (`services/check/reconcile.py`): `ops check` runs a reconcile pass first. Walks every record in state.json against the filesystem (staging / alpha_src / recycle) and repairs drift caused by processes dying between a filesystem move and the matching state transition:
+
+| state status | location found in | action |
+|---|---|---|
+| SUBMITTED | staging | ok |
+| SUBMITTED | alpha_src | → ACTIVE (move done, state didn't catch up) |
+| SUBMITTED | recycle | → REJECTED |
+| SUBMITTED | nowhere | drop record |
+| CHECKING | staging | → SUBMITTED (crashed mid-check) |
+| CHECKING | alpha_src | → ACTIVE |
+| CHECKING | recycle | → REJECTED |
+| CHECKING | nowhere | drop record |
+| ACTIVE | not in alpha_src | warn (don't auto-fix — surprising) |
+| REJECTED | not in recycle | warn |
+
+Filesystem is the source of truth; reconcile only touches state.
+
+**Backfill** (`services/backfill/backfill.py`): one-shot for legacy factors in `alpha_src/` (originally 2194, now 2551 in prod) — builds the npy_index once and reuses it across all `parse_factor()` calls (the optional `npy_index` param avoids 2551 redundant filesystem walks). Skips records that already exist in state.
 
 **Modules**:
 | File | Purpose |
 |------|---------|
 | `core/state.py` | `FactorStatus` enum, `CheckRecord`, `FactorRecord` |
 | `core/factormeta.py` | `FactorMeta` dataclass + `META_VERSION` + load/save |
-| `infra/store/json_store.py` | JSON state backend, fcntl cross-process lock |
+| `infra/store/json_store.py` | JSON state backend, fcntl cross-process lock, atomic write |
+| `infra/lock.py` | Per-factor advisory fcntl lock (`factor_lock(name)` / `FactorLocked`) |
 | `services/submit/parser.py` | Parse xml/py → `FactorMeta` (author fallback, npy_index reuse) |
-| `services/submit/submit.py` | Scan dropbox → `copy_to_staging()` → `submit_one()` per factor |
-| `services/check/check.py` | `_scan_factors` reads staging; `to_lib`/`to_recycle` move + state transition |
+| `services/submit/normalize.py` | Auto-rewrite mismatched XML ids in-place |
+| `services/submit/submit.py` | Scan dropbox → `copy_to_staging()` → `submit_one()` per factor (factor_lock-wrapped) |
+| `services/check/check.py` | reconcile on startup; `_scan_factors` reads staging; `to_lib`/`to_recycle` clean __pycache__ + rewrite XML @module + state transition |
+| `services/check/reconcile.py` | state ↔ filesystem reconciliation |
+| `services/check/checker/checkbias_checker.py` | AST-inject DataFirewall into a temp `_firewall.py` (original .py untouched) |
 | `services/backfill/backfill.py` | Generate meta.json + ACTIVE for legacy `alpha_src/` factors |
 | `services/status/status.py` | Query/format state records |
 
@@ -502,9 +539,9 @@ Summary: 7 OK | 2 WARNING | 1 ERROR
 
 Factor lifecycle: `提交(submitted) → 验证中(checking) → 入库(active) / 拒绝(rejected) → 监控(monitored) → 衰减(decaying) → 废弃(retired)`.
 
-**Phase 1: 状态管理 + submit/status/backfill** ✅ done
+**Phase 1: 状态管理 + submit/status/backfill + 一致性** ✅ done
 
-Implemented `ops submit` / `ops status` / `ops backfill`, state tracking integrated into `CheckerPipeline`, `meta.json` per factor as identity card. See [Factor Lifecycle](#factor-lifecycle) section above.
+Implemented `ops submit` / `ops status` / `ops backfill`, state tracking in `CheckerPipeline`, `meta.json` per factor as identity card, per-factor advisory lock (`infra/lock.py`), and reconcile pass at check startup. See [Factor Lifecycle](#factor-lifecycle).
 
 **Phase 2: 因子质量监控** — Rolling IC/IR, coverage, autocorrelation, correlation drift. SQLite replaces JSON store. `ops monitor` command (cron). Threshold alerts via Feishu.
 
@@ -529,6 +566,8 @@ Implemented `ops submit` / `ops status` / `ops backfill`, state tracking integra
 - [x] `ops submit` - Structured factor submission from dropbox to staging
 - [x] `ops status` - Query factor lifecycle state
 - [x] `ops backfill` - One-shot meta.json + ACTIVE state for legacy factors
+- [x] Per-factor advisory lock (concurrent submit/check safety)
+- [x] State ↔ filesystem reconcile on check startup
 - [ ] Factor registry, versioning, tags/categories
 - [ ] Enable/disable, archive/unarchive factors
 
