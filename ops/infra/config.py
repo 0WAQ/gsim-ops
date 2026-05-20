@@ -59,6 +59,7 @@ class Config:
         self.alpha_src = Path(config["path"]["alpha_src"])
         self.alpha_dump = Path(config["path"]["alpha_dump"])
         self.alpha_pnl = Path(config["path"]["alpha_pnl"])
+        self.alpha_feature = Path(config["path"]["alpha_feature"])
         self.staging = Path(config["path"]["staging"])
         self.recycle = Path(config["path"]["recycle"])
 

@@ -26,6 +26,9 @@ uv run ops list --format json        # JSON output
 uv run ops info <factor-name>        # Show factor details
 uv run ops health                    # Factor library health check
 uv run ops health --fix              # Auto-refresh missing metrics/datasources
+uv run ops pack                      # Aggregate alpha_dump → alpha_feature (skip already-packed)
+uv run ops pack --force              # Rewrite all factors
+uv run ops pack --factor AlphaXxx    # Pack one factor
 ```
 
 No test suite exists. Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
@@ -49,6 +52,7 @@ Entry point: `ops/main.py` (argparse dispatcher). Each subcommand lives in its o
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `health` | Factor library health check | `ops/cli/health.py` + `ops/services/health/` |
+| `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
 
 Removed subcommands: `cp`, `scp`, `compiler`.
 
@@ -95,6 +99,30 @@ Exceptions:
 - `self.valid` (in `ALWAYS_ALLOW_DI` set): always allows `[di]` access — tradability info is known before market open
 
 The delay value is read from the factor's XML: `<Alpha delay="0">`.
+
+### Pack (`ops/services/pack/`)
+
+Aggregates per-date `.npy` dumps into per-factor matrices for downstream consumers.
+
+**Source**: `alpha_dump/AlphaXxx/{year}/{month}/{YYYYMMDD}{v1|v2}.npy` (each shape `(H,)`)
+**Target**: `alpha_feature/AlphaXxx.{v1|v2}.npy` — memmap, shape `(PACK_L, H)` = `(3900, 5484)`, float64
+
+**Offset rule**: Per-date file at date `D` is placed at row `date_to_idx[D] - 1`. Gsim stores the *next-day* signal computed at close of day `D` — when read back as a feature on day `D-1`'s row, it serves as the previous-day prediction.
+
+**Shape policy** (see `pack.py`):
+- `PACK_L = 3900` hardcoded — covers historical universe up to 20251231, matches the check pipeline's backtest end date
+- `H` derived from `__universe/Instruments.npy` at write time (currently 5484, stable for 1-2 years)
+- Rows with `di >= PACK_L` are silently skipped (future dates from daily incremental data don't belong in the historical pack)
+- Per-date arrays longer than `H` raise `ValueError`; shorter are placed at `[di, :h0]` with NaN right-padding (future-proofing for instrument growth)
+- **Daily incremental** (rows beyond 20251231) is a separate, not-yet-built path — pre-allocated buffer / generational files / zarr were considered
+
+**Two access paths**:
+1. **Batch CLI** (`ops pack`): scans `alpha_dump/`, skips already-packed unless `--force`, `ProcessPoolExecutor` parallel (default 10 workers), wraps each factor in `factor_lock`
+2. **Incremental from check** (`pack_one_incremental` called at end of `check.run_one`): if target memmap doesn't exist → falls back to full `pack_one`; otherwise opens `mode='r+'` and overwrites only requested date rows. Failures are non-fatal — warn and continue; `ops pack` will heal next run
+
+**Atomic write**: full rewrites go through `.{name}.{v}.npy.tmp` + `os.replace` so a crashed pack never leaves a partial file in the target path.
+
+**Verification**: after each `pack_one`, `verify_sample` picks up to `VERIFY_SAMPLES = 5` random per-date source files, reloads each, compares against the target memmap row within `ATOL = 1e-6` (NaN-aware). Any mismatch raises and marks the factor failed in the batch summary. `--no-verify` skips this.
 
 ### Factor Lifecycle
 
@@ -165,10 +193,11 @@ Filesystem is the source of truth; reconcile only touches state.
 | `services/submit/parser.py` | Parse xml/py → `FactorMeta` (author fallback, npy_index reuse) |
 | `services/submit/normalize.py` | Auto-rewrite mismatched XML ids in-place |
 | `services/submit/submit.py` | Scan dropbox → `copy_to_staging()` → `submit_one()` per factor (factor_lock-wrapped) |
-| `services/check/check.py` | reconcile on startup; `_scan_factors` reads staging; `to_lib`/`to_recycle` clean __pycache__ + rewrite XML @module + state transition |
+| `services/check/check.py` | reconcile on startup; `_scan_factors` reads staging; `to_lib`/`to_recycle` clean __pycache__ + rewrite XML @module + state transition; incremental pack after archive |
 | `services/check/reconcile.py` | state ↔ filesystem reconciliation |
 | `services/check/checker/checkbias_checker.py` | AST-inject DataFirewall into a temp `_firewall.py` (original .py untouched) |
 | `services/backfill/backfill.py` | Generate meta.json + ACTIVE for legacy `alpha_src/` factors |
+| `services/pack/pack.py` | Aggregate per-date alpha_dump → alpha_feature memmap; full + incremental + sampled verify |
 | `services/status/status.py` | Query/format state records |
 
 ### Common Infrastructure
@@ -568,6 +597,8 @@ Implemented `ops submit` / `ops status` / `ops backfill`, state tracking in `Che
 - [x] `ops backfill` - One-shot meta.json + ACTIVE state for legacy factors
 - [x] Per-factor advisory lock (concurrent submit/check safety)
 - [x] State ↔ filesystem reconcile on check startup
+- [x] `ops pack` - Aggregate alpha_dump → alpha_feature (batch + incremental from check)
+- [ ] Daily incremental pack path (rows > 20251231; buffer / generational / zarr — design pending)
 - [ ] Factor registry, versioning, tags/categories
 - [ ] Enable/disable, archive/unarchive factors
 

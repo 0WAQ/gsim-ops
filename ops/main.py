@@ -7,6 +7,7 @@ from ops.cli.health import add_health_subparser
 from ops.cli.submit import add_submit_subparser
 from ops.cli.status import add_status_subparser
 from ops.cli.backfill import add_backfill_subparser
+from ops.cli.pack import add_pack_subparser
 
 
 def main():
@@ -27,6 +28,7 @@ def main():
     add_submit_subparser(subparsers)
     add_status_subparser(subparsers)
     add_backfill_subparser(subparsers)
+    add_pack_subparser(subparsers)
 
     args = parser.parse_args()
     args.func(args)

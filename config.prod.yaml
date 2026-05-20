@@ -25,6 +25,7 @@ path:
   alpha_src: ${storage}/alphalib/alpha_src
   alpha_dump: ${storage}/alphalib/alpha_dump
   alpha_pnl: ${storage}/alphalib/alpha_pnl
+  alpha_feature: ${storage}/alphalib/alpha_feature
   staging: ${storage}/alphalib/staging
   recycle: ${storage}/recycle
 
