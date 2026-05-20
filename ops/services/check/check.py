@@ -1,5 +1,6 @@
 import shutil
 import traceback
+import xmltodict
 from datetime import datetime
 from pathlib import Path
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
@@ -89,8 +90,33 @@ class CheckerPipeline:
 
         return mds
 
+    def _clean_pycache(self, root: Path) -> None:
+        for p in root.rglob("__pycache__"):
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+
+    def _rewrite_module_path(self, dir: Path) -> None:
+        """Rewrite XML's Modules.Alpha.@module to point to the .py inside `dir`,
+        so the factor can be re-run from its new location.
+        """
+        xmls = list(dir.glob("*.xml"))
+        pys = list(dir.glob("*.py"))
+        if not xmls or not pys:
+            return
+        xml_file = xmls[0]
+        cfg = xmltodict.parse(xml_file.read_text(encoding="utf-8"))
+        modules_alpha = cfg.get("gsim", {}).get("Modules", {}).get("Alpha")
+        if isinstance(modules_alpha, dict):
+            modules_alpha["@module"] = str(pys[0])
+            xml_file.write_text(
+                xmltodict.unparse(cfg, pretty=True, encoding="utf-8", full_document=False),
+                encoding="utf-8",
+            )
+
     def to_lib(self, factor: AlphaMetadata):
+        self._clean_pycache(factor.dir)
         shutil.move(factor.dir, self.config.alpha_src)
+        self._rewrite_module_path(self.config.alpha_src / factor.dir.name)
         shutil.move(factor.alpha_dir, self.config.alpha_dump)
         shutil.move(factor.pnl_file, self.config.alpha_pnl / factor.name)
 
@@ -99,7 +125,9 @@ class CheckerPipeline:
         dst_dir.parent.mkdir(parents=True, exist_ok=True)
         if dst_dir.exists():
             shutil.rmtree(dst_dir)
+        self._clean_pycache(factor.dir)
         shutil.move(factor.dir, dst_dir)
+        self._rewrite_module_path(dst_dir)
         with open(dst_dir / "reason.txt", 'w') as f:
             f.write(str(e))
 
