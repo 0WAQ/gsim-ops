@@ -20,3 +20,7 @@ class StateStore(ABC):
 
     @abstractmethod
     def append_check(self, name: str, check: CheckRecord) -> None: ...
+
+    @abstractmethod
+    def delete(self, name: str) -> bool:
+        """Remove a record. Returns True if it existed."""

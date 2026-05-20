@@ -20,6 +20,7 @@ from ops.core.alpha.results.checkpoint import *
 from ops.core.alpha.results.checkbias import *
 
 from .xml_prepare import *
+from .reconcile import reconcile
 from .checker.base import *
 from .checker.compliance_checker import ComplianceChecker
 from .checker.checkpoint_checker import CheckpointChecker
@@ -252,6 +253,11 @@ class CheckerPipeline:
             return "error"
 
     def run(self):
+        banner("状态校验")
+        counts = reconcile(self.config, default_store())
+        summary = ", ".join(f"{k}={v}" for k, v in counts.items() if v)
+        info(summary or "无需修复")
+
         banner("因子检测")
 
         passed = failed = errored = locked = 0

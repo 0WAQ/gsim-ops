@@ -125,3 +125,12 @@ class JsonStateStore(StateStore):
             rec.updated_at = _now()
             records[name] = rec
             self._atomic_write(records)
+
+    def delete(self, name: str) -> bool:
+        with self._locked():
+            records = self._read_records()
+            if name not in records:
+                return False
+            del records[name]
+            self._atomic_write(records)
+            return True
