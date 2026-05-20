@@ -57,7 +57,7 @@ def prepare_for_correlation(factor: AlphaMetadata):
 def prepare_for_archive(factor: AlphaMetadata):
     try:
         # TODO: 修改硬编码
-        factor.xml_config["gsim"]["Modules"]["Alpha"] = f"/mnt/storage/alphalib/alpha_src/{factor.name}/{factor.name}.py"
+        factor.xml_config["gsim"]["Modules"]["Alpha"]["@module"] = f"/mnt/storage/alphalib/alpha_src/{factor.name}/{factor.name}.py"
         factor.xml_config["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = "/tmp/alphalib/alpha_pnl"
         factor.xml_config["gsim"]["Portfolio"]["Alpha"]["@dumpAlphaDir"] = "/tmp/alphalib/alpha_dump"
         save_xml(factor)
