@@ -6,6 +6,7 @@ from ops.infra.config import Config
 from ops.utils.func import date_range
 from ops.utils.logger.log import info, warn, error, highlight, banner, bottom
 from ops.infra.store import default_store, StateStore
+from ops.infra.lock import factor_lock, FactorLocked
 from ops.core.state import FactorRecord, FactorStatus
 from .parser import parse_factor
 from .normalize import normalize_factor_xml
@@ -115,7 +116,12 @@ def run_submit(args):
     for src, staged in zip(src_dirs, staging_dirs):
         submitted_by = user_of[src]
         print("submitting ", end=""); highlight(f"{staged.name}")
-        ok = submit_one(staged, submitted_by, config, store)
+        try:
+            with factor_lock(staged.name):
+                ok = submit_one(staged, submitted_by, config, store)
+        except FactorLocked:
+            warn(f"  ⚠  {staged.name} 已被另一个进程占用,跳过")
+            ok = False
         if ok:
             passed += 1
         else:

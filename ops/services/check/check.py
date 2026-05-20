@@ -8,6 +8,7 @@ from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner
 from ops.infra.store import default_store
+from ops.infra.lock import factor_lock, FactorLocked
 from ops.services.list.metrics import update_metrics
 from ops.utils.logger.log import *
 from ops.core.alpha.metadata import AlphaMetadata
@@ -158,12 +159,20 @@ class CheckerPipeline:
         ))
 
     def run_one(self, factor: AlphaMetadata, i: int) -> str:
-        """Returns one of: 'pass' | 'fail' | 'error'."""
+        """Returns one of: 'pass' | 'fail' | 'error' | 'locked'."""
         total = len(self.metadatas)
         prog  = (i + 1) / total
         bar   = f"[{i+1:>{len(str(total))}}/{total}] {prog:>6.1%}"
         print(f"{bar} checking ", end=""); highlight(f"{factor.key}")
 
+        try:
+            with factor_lock(factor.name):
+                return self._run_one_locked(factor)
+        except FactorLocked:
+            warn(f"  ⚠  {factor.key} 已被另一个进程占用,跳过")
+            return "locked"
+
+    def _run_one_locked(self, factor: AlphaMetadata) -> str:
         store = default_store()
         self._ensure_record(factor, store)
         check = CheckRecord(started_at=datetime.now().isoformat(timespec="seconds"))
@@ -245,7 +254,7 @@ class CheckerPipeline:
     def run(self):
         banner("因子检测")
 
-        passed = failed = errored = 0
+        passed = failed = errored = locked = 0
         with ProcessPoolExecutor(max_workers=min(20, max(1, len(self.metadatas)))) as pool:
             futures: list[Future[str]] = []
             for i, factor in enumerate(self.metadatas):
@@ -254,9 +263,10 @@ class CheckerPipeline:
 
             for f in as_completed(futures):
                 match f.result():
-                    case "pass":  passed  += 1
-                    case "fail":  failed  += 1
-                    case "error": errored += 1
+                    case "pass":   passed  += 1
+                    case "fail":   failed  += 1
+                    case "error":  errored += 1
+                    case "locked": locked  += 1
 
         banner("检测汇总")
         info(f"✔ 通过 : {passed:>4}")
@@ -264,6 +274,8 @@ class CheckerPipeline:
             error(f"✘ 未通过 : {failed:>4}")
         if errored > 0:
             warn(f"⚠ 异常 : {errored:>4}  (留在 staging,可 recheck)")
+        if locked > 0:
+            warn(f"⚠ 占用 : {locked:>4}  (被其他进程持有,跳过)")
         bottom()
 
 
