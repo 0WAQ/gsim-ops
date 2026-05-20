@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import fcntl
 import tempfile
 from contextlib import contextmanager
@@ -8,6 +9,9 @@ from pathlib import Path
 
 from ops.core.state import FactorRecord, FactorStatus, CheckRecord
 from .base import StateStore
+
+
+STALE_TMP_AGE_SECONDS = 3600
 
 
 def _now() -> str:
@@ -25,13 +29,18 @@ class JsonStateStore(StateStore):
             self.path.write_text("{}")
         if not self.lock_path.exists():
             self.lock_path.touch()
-        self._cleanup_stale_tmp()
 
     def _cleanup_stale_tmp(self) -> None:
-        """Remove orphan .tmp files from interrupted atomic writes."""
+        """Remove orphan .tmp files older than STALE_TMP_AGE_SECONDS.
+
+        Must be called while holding the lock — otherwise we may delete a tmp
+        file another process just created and is about to os.replace().
+        """
+        cutoff = time.time() - STALE_TMP_AGE_SECONDS
         for p in self.path.parent.glob(f".{self.path.name}.*.tmp"):
             try:
-                p.unlink()
+                if p.stat().st_mtime < cutoff:
+                    p.unlink()
             except OSError:
                 pass
 
@@ -40,6 +49,7 @@ class JsonStateStore(StateStore):
         with self.lock_path.open("r+") as lf:
             fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
             try:
+                self._cleanup_stale_tmp()
                 yield
             finally:
                 fcntl.flock(lf.fileno(), fcntl.LOCK_UN)

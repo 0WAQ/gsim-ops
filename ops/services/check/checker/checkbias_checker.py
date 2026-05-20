@@ -1,4 +1,5 @@
 import ast
+import xmltodict
 from pathlib import Path
 from .base import *
 from ops.infra.config import Config
@@ -8,6 +9,7 @@ from ops.core.alpha.results.checkbias import *
 
 FIREWALL_FILE = Path(__file__).parent / "firewall.py"
 ALWAYS_GUARD = {'valid'}
+FIREWALL_PY_SUFFIX = "_firewall.py"
 
 
 class _GenerateDecoratorInjector(ast.NodeTransformer):
@@ -81,16 +83,19 @@ class CheckbiasChecker(Checker):
         self.config = config
 
     def check(self, factor: AlphaMetadata):
-        orignal_content = None
+        """Inject DataFirewall into a sibling firewall .py (NOT the original),
+        point XML at it for the backtest, then restore XML + delete the temp.
+
+        The original factor .py is never mutated, so a killed/crashed run can't
+        leave it in a half-injected state that double-decorates on the next run.
+        """
+        firewall_py = factor.py_file.with_name(factor.py_file.stem + FIREWALL_PY_SUFFIX)
+        original_module = None
 
         try:
-            # 1. Inject DataFirewall via AST
-            with open(factor.py_file, "r", encoding="utf-8") as f:
-                orignal_content = f.read()
-
-            tree = ast.parse(orignal_content)
-
-            # Collect getData attribute names
+            # 1. Build injected source (firewall code + AST-decorated factor)
+            source = factor.py_file.read_text(encoding="utf-8")
+            tree = ast.parse(source)
             collector = _GetDataAttrCollector()
             collector.visit(tree)
             data_attrs = collector.attrs | ALWAYS_GUARD
@@ -98,19 +103,37 @@ class CheckbiasChecker(Checker):
             firewall_code = FIREWALL_FILE.read_text(encoding="utf-8")
             tree = _GenerateDecoratorInjector(delay=factor.delay, data_attrs=data_attrs).visit(tree)
             ast.fix_missing_locations(tree)
-            new_content = firewall_code + "\n" + ast.unparse(tree)
+            firewall_py.write_text(firewall_code + "\n" + ast.unparse(tree), encoding="utf-8")
 
-            with open(factor.py_file, 'w', encoding="utf-8") as f:
-                f.write(new_content)
+            # 2. Point XML at the firewall .py; save original @module to restore later
+            original_module = factor.xml_config["gsim"]["Modules"]["Alpha"].get("@module")
+            factor.xml_config["gsim"]["Modules"]["Alpha"]["@module"] = str(firewall_py)
+            factor.xml_file.write_text(
+                xmltodict.unparse(factor.xml_config, pretty=True, encoding="utf-8", full_document=False),
+                encoding="utf-8",
+            )
 
-            # 2. Short Backtest
+            # 3. Short Backtest
             Runner.run_backtest(factor.xml_file, self.config)
         except BacktestError as e:
             raise CheckbiasFail(e)
         except Exception as e:
             raise CheckbiasSkip(e)
-
         finally:
-            if orignal_content is not None:
-                with open(factor.py_file, 'w', encoding='utf-8') as f:
-                    f.write(orignal_content)
+            # Restore XML @module
+            if original_module is not None:
+                factor.xml_config["gsim"]["Modules"]["Alpha"]["@module"] = original_module
+                try:
+                    factor.xml_file.write_text(
+                        xmltodict.unparse(factor.xml_config, pretty=True, encoding="utf-8", full_document=False),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
+            # Remove the firewall temp .py (safe even if it never got written)
+            try:
+                firewall_py.unlink()
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
