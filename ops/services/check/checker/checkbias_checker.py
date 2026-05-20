@@ -19,6 +19,8 @@ class _GenerateDecoratorInjector(ast.NodeTransformer):
 
     def visit_FunctionDef(self, node):
         if node.name == 'generate' and node.args.args and node.args.args[0].arg == 'self':
+            if any(self._is_datafirewall(d) for d in node.decorator_list):
+                return node
             decorator = ast.Call(
                 func=ast.Name(id='DataFirewall', ctx=ast.Load()),
                 args=[],
@@ -31,6 +33,12 @@ class _GenerateDecoratorInjector(ast.NodeTransformer):
             )
             node.decorator_list.insert(0, decorator)
         return node
+
+    @staticmethod
+    def _is_datafirewall(deco) -> bool:
+        if isinstance(deco, ast.Call):
+            deco = deco.func
+        return isinstance(deco, ast.Name) and deco.id == 'DataFirewall'
 
 
 class _GetDataAttrCollector(ast.NodeVisitor):
