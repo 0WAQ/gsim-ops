@@ -1,4 +1,5 @@
 import shutil
+import traceback
 from datetime import datetime
 from pathlib import Path
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
@@ -128,7 +129,8 @@ class CheckerPipeline:
             submitted_by=submitted_by,
         ))
 
-    def run_one(self, factor: AlphaMetadata, i: int) -> bool:
+    def run_one(self, factor: AlphaMetadata, i: int) -> str:
+        """Returns one of: 'pass' | 'fail' | 'error'."""
         total = len(self.metadatas)
         prog  = (i + 1) / total
         bar   = f"[{i+1:>{len(str(total))}}/{total}] {prog:>6.1%}"
@@ -173,14 +175,18 @@ class CheckerPipeline:
             check.passed = True
             store.append_check(factor.name, check)
             store.transition(factor.name, FactorStatus.ACTIVE, entered_at=now)
-            return True
+            return "pass"
 
         except CheckSkip as e:
             warn(f"  ⚠  {factor.key} {e.stage} skipped. ({str(e)})")
             check.finished_at = datetime.now().isoformat(timespec="seconds")
             check.passed = None
+            check.failed_stage = e.stage
+            check.fail_reason = str(e)
             store.append_check(factor.name, check)
-            return False
+            # revert CHECKING → SUBMITTED, leave factor in staging for re-check
+            store.transition(factor.name, FactorStatus.SUBMITTED)
+            return "error"
         except CheckFail as e:
             error(f"  ✘  {factor.key} {e.stage} failed. ({str(e)})")
             prepare_for_recycle(factor) # TODO: now, do nothing
@@ -195,40 +201,41 @@ class CheckerPipeline:
                              rejected_at=now,
                              last_fail_stage=e.stage,
                              last_fail_reason=str(e))
-            return False
+            return "fail"
         except Exception as e:
-            error(f"  ✘  {factor.key} failed. ({e})")
-            now = datetime.now().isoformat(timespec="seconds")
-            check.finished_at = now
-            check.passed = False
-            check.fail_reason = str(e)
+            # Environment / framework bug — NOT a factor problem.
+            # Keep factor in staging, leave meta.json untouched, revert state to SUBMITTED.
+            error(f"  ✘  {factor.key} unexpected error: {e}")
+            traceback.print_exc()
+            check.finished_at = datetime.now().isoformat(timespec="seconds")
+            check.passed = None
+            check.fail_reason = f"unexpected: {e}"
             store.append_check(factor.name, check)
-            store.transition(factor.name, FactorStatus.REJECTED,
-                             rejected_at=now,
-                             last_fail_reason=str(e))
-            return False
+            store.transition(factor.name, FactorStatus.SUBMITTED)
+            return "error"
 
     def run(self):
         banner("因子检测")
 
-        passed = failed = 0
+        passed = failed = errored = 0
         with ProcessPoolExecutor(max_workers=min(20, max(1, len(self.metadatas)))) as pool:
-            futures: list[Future[bool]] = []
+            futures: list[Future[str]] = []
             for i, factor in enumerate(self.metadatas):
                 f = pool.submit(self.run_one, factor, i)
                 futures.append(f)
 
             for f in as_completed(futures):
-                code = f.result()
-                match code:
-                    case True: passed += 1
-                    case False: failed += 1
+                match f.result():
+                    case "pass":  passed  += 1
+                    case "fail":  failed  += 1
+                    case "error": errored += 1
 
         banner("检测汇总")
-        if passed >= 0:
-            info(f"✔ 通过 : {passed:>4}")
+        info(f"✔ 通过 : {passed:>4}")
         if failed > 0:
             error(f"✘ 未通过 : {failed:>4}")
+        if errored > 0:
+            warn(f"⚠ 异常 : {errored:>4}  (留在 staging,可 recheck)")
         bottom()
 
 

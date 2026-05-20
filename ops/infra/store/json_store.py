@@ -1,5 +1,7 @@
 import json
+import os
 import fcntl
+import tempfile
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -13,52 +15,76 @@ def _now() -> str:
 
 
 class JsonStateStore(StateStore):
-    """JSON-backed store. One file, fcntl-locked during read-modify-write."""
+    """JSON-backed store. Single fcntl lock over the full read-modify-write window."""
 
     def __init__(self, path: Path):
         self.path = path
+        self.lock_path = path.with_suffix(path.suffix + ".lock")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
             self.path.write_text("{}")
+        if not self.lock_path.exists():
+            self.lock_path.touch()
+        self._cleanup_stale_tmp()
+
+    def _cleanup_stale_tmp(self) -> None:
+        """Remove orphan .tmp files from interrupted atomic writes."""
+        for p in self.path.parent.glob(f".{self.path.name}.*.tmp"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
 
     @contextmanager
-    def _locked(self, mode: str):
-        with self.path.open(mode) as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    def _locked(self):
+        with self.lock_path.open("r+") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
             try:
-                yield f
+                yield
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
-    def _load_all(self) -> dict[str, FactorRecord]:
-        with self._locked("r") as f:
-            raw = json.loads(f.read() or "{}")
-        return {k: FactorRecord.from_dict(v) for k, v in raw.items()}
+    def _read_records(self) -> dict[str, FactorRecord]:
+        raw = self.path.read_text() or "{}"
+        data = json.loads(raw)
+        return {k: FactorRecord.from_dict(v) for k, v in data.items()}
 
-    def _save_all(self, records: dict[str, FactorRecord]) -> None:
+    def _atomic_write(self, records: dict[str, FactorRecord]) -> None:
         payload = {k: v.to_dict() for k, v in records.items()}
-        tmp = self.path.with_suffix(".tmp")
-        with tmp.open("w") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
+        fd, tmp = tempfile.mkstemp(
+            dir=str(self.path.parent),
+            prefix=f".{self.path.name}.",
+            suffix=".tmp",
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
                 json.dump(payload, f, indent=2, ensure_ascii=False)
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        tmp.replace(self.path)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            raise
 
     def get(self, name: str) -> FactorRecord | None:
-        return self._load_all().get(name)
+        with self._locked():
+            return self._read_records().get(name)
 
     def put(self, record: FactorRecord) -> None:
-        record.updated_at = _now()
-        records = self._load_all()
-        records[record.name] = record
-        self._save_all(records)
+        with self._locked():
+            record.updated_at = _now()
+            records = self._read_records()
+            records[record.name] = record
+            self._atomic_write(records)
 
     def list(self,
              author: str | None = None,
              status: FactorStatus | None = None) -> list[FactorRecord]:
-        out = list(self._load_all().values())
+        with self._locked():
+            out = list(self._read_records().values())
         if author is not None:
             out = [r for r in out if r.author == author]
         if status is not None:
@@ -66,24 +92,26 @@ class JsonStateStore(StateStore):
         return out
 
     def transition(self, name: str, to_status: FactorStatus, **updates) -> FactorRecord:
-        records = self._load_all()
-        rec = records.get(name)
-        if rec is None:
-            raise KeyError(f"factor not found: {name}")
-        rec.status = to_status
-        for k, v in updates.items():
-            setattr(rec, k, v)
-        rec.updated_at = _now()
-        records[name] = rec
-        self._save_all(records)
-        return rec
+        with self._locked():
+            records = self._read_records()
+            rec = records.get(name)
+            if rec is None:
+                raise KeyError(f"factor not found: {name}")
+            rec.status = to_status
+            for k, v in updates.items():
+                setattr(rec, k, v)
+            rec.updated_at = _now()
+            records[name] = rec
+            self._atomic_write(records)
+            return rec
 
     def append_check(self, name: str, check: CheckRecord) -> None:
-        records = self._load_all()
-        rec = records.get(name)
-        if rec is None:
-            raise KeyError(f"factor not found: {name}")
-        rec.check_history.append(check)
-        rec.updated_at = _now()
-        records[name] = rec
-        self._save_all(records)
+        with self._locked():
+            records = self._read_records()
+            rec = records.get(name)
+            if rec is None:
+                raise KeyError(f"factor not found: {name}")
+            rec.check_history.append(check)
+            rec.updated_at = _now()
+            records[name] = rec
+            self._atomic_write(records)
