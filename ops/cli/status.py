@@ -18,11 +18,8 @@ Example:
 """,
     )
 
-    parser.add_argument("name", nargs="?", default=None, type=str,
-                        help="factor name (omit to list all)")
-    parser.add_argument("--user", "-u", dest="author", default=None,
-                        type=str, action=LowerAction)
-    parser.add_argument("--status", "-s", default=None, type=str,
-                        choices=[s.value for s in FactorStatus])
+    parser.add_argument("name", nargs="?", default=None, type=str, help="factor name (omit to list all)")
+    parser.add_argument("--user", "-u", dest="author", default=None, type=str, action=LowerAction)
+    parser.add_argument("--status", "-s", default=None, type=str, choices=[s.value for s in FactorStatus])
 
     parser.set_defaults(func=run_status)

@@ -15,9 +15,8 @@ Example:
     ops backfill               # 执行
 """,
     )
-    parser.add_argument("--dry-run", action="store_true",
-                        help="只扫描不写入")
-    parser.add_argument(
-        "--config-path", "-c", type=Path, default=get_default_config_path()
-    )
+    
+    parser.add_argument("--dry-run", action="store_true", help="只扫描不写入")
+    parser.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
+    
     parser.set_defaults(func=run_backfill)

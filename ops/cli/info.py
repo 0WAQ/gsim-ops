@@ -17,11 +17,7 @@ Example:
 """,
     )
 
-    parser.add_argument(
-        "factor_name", type=str, help="Factor name (e.g., AlphaWbaiMomentum)"
-    )
-    parser.add_argument(
-        "--config-path", "-c", type=Path, default=get_default_config_path()
-    )
+    parser.add_argument("factor_name", type=str, help="Factor name (e.g., AlphaWbaiMomentum)")
+    parser.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
 
     parser.set_defaults(func=run_info)

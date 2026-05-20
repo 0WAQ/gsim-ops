@@ -23,8 +23,6 @@ Example:
     parser.add_argument("--start-date", "-s", default=today.strftime("%Y%m%d"))
     parser.add_argument("--end-date", "-e", default=None)
     parser.add_argument("--factor-name", "-f", type=str, default=None)
-    parser.add_argument(
-        "--config-path", "-c", type=Path, default=get_default_config_path()
-    )
+    parser.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
 
     parser.set_defaults(func=run_submit)

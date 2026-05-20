@@ -19,13 +19,9 @@ Example:
 """,
     )
 
-    parser.add_argument("--user", "-u", type=str, action=LowerAction,
-                        help="Filter by author")
-    parser.add_argument("--fix", action="store_true",
-                        help="Auto-refresh missing metrics/datasources")
-    parser.add_argument("--refresh", "-r", action="store_true",
-                        help="Force refresh index cache")
-    parser.add_argument("--config-path", "-c", type=Path,
-                        default=get_default_config_path())
+    parser.add_argument("--user", "-u", type=str, action=LowerAction, help="Filter by author")
+    parser.add_argument("--fix", action="store_true", help="Auto-refresh missing metrics/datasources")
+    parser.add_argument("--refresh", "-r", action="store_true", help="Force refresh index cache")
+    parser.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
 
     parser.set_defaults(func=run_health)
