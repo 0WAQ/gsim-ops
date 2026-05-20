@@ -8,6 +8,7 @@ from ops.utils.logger.log import info, warn, error, highlight, banner, bottom
 from ops.infra.store import default_store, StateStore
 from ops.core.state import FactorRecord, FactorStatus
 from .parser import parse_factor
+from .normalize import normalize_factor_xml
 
 
 META_FILENAME = "meta.json"
@@ -62,6 +63,7 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
                store: StateStore) -> bool:
     submitted_at = datetime.now().isoformat(timespec="seconds")
     try:
+        normalize_factor_xml(staging_dir)
         meta = parse_factor(staging_dir, config,
                             submitted_by=submitted_by, submitted_at=submitted_at)
     except SyntaxError as e:

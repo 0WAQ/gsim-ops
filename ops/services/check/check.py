@@ -83,7 +83,7 @@ class CheckerPipeline:
             if users and submitted_by not in users:
                 continue
 
-            date = (meta.submitted_at or "").replace("-", "")[:8] or "unknown"
+            date = str(meta.birthday) if meta.birthday else "unknown"
             md = AlphaMetadata(submitted_by, date, factor_dir, self.config)
             mds.append(md)
 
