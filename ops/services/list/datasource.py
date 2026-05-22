@@ -6,14 +6,15 @@ from pathlib import Path
 
 from ops.core.library import FactorInfo
 from ops.infra.config import Config
+from ops.infra.cache import cache_path
 
 DATASOURCES_VERSION = 1
-CACHE_DIR = Path.home() / ".cache" / "ops"
 
 
 def _get_datasources_path(config_path: Path) -> Path:
-    config_hash = hashlib.md5(str(config_path.resolve()).encode()).hexdigest()[:8]
-    return CACHE_DIR / f"{config_hash}.datasources.json"
+    legacy_hash = hashlib.md5(str(config_path.resolve()).encode()).hexdigest()[:8]
+    library_id = Config.load(config_path).library_id
+    return cache_path(library_id, "datasources.json", legacy_hash=legacy_hash)
 
 
 def _build_npy_index(nio_data_path: Path) -> dict[str, str]:
@@ -83,7 +84,7 @@ def load_datasources(config_path: Path) -> dict[str, dict]:
 
 def _save_datasources(config_path: Path, datasources: dict[str, dict]) -> None:
     path = _get_datasources_path(config_path)
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "version": DATASOURCES_VERSION,
         "created_at": time.time(),

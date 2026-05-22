@@ -29,6 +29,10 @@ uv run ops health --fix              # Auto-refresh missing metrics/datasources
 uv run ops pack                      # Aggregate alpha_dump → alpha_feature (skip already-packed)
 uv run ops pack --force              # Rewrite all factors
 uv run ops pack --factor AlphaXxx    # Pack one factor
+uv run ops sync push                 # Push data+state to rclone remote
+uv run ops sync push --dry-run       # Preview transfers
+uv run ops sync pull                 # Pull data+state from remote (bootstrap new server)
+uv run ops sync status               # rclone check local vs remote
 ```
 
 No test suite exists. Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
@@ -53,6 +57,7 @@ Entry point: `ops/main.py` (argparse dispatcher). Each subcommand lives in its o
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `health` | Factor library health check | `ops/cli/health.py` + `ops/services/health/` |
 | `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
+| `sync` | Push/pull factor library (data + state) across servers via rclone | `ops/cli/sync.py` + `ops/services/sync/` |
 
 Removed subcommands: `cp`, `scp`, `compiler`.
 
@@ -123,6 +128,43 @@ Aggregates per-date `.npy` dumps into per-factor matrices for downstream consume
 **Atomic write**: full rewrites go through `.{name}.{v}.npy.tmp` + `os.replace` so a crashed pack never leaves a partial file in the target path.
 
 **Verification**: after each `pack_one`, `verify_sample` picks up to `VERIFY_SAMPLES = 5` random per-date source files, reloads each, compares against the target memmap row within `ATOL = 1e-6` (NaN-aware). Any mismatch raises and marks the factor failed in the batch summary. `--no-verify` skips this.
+
+### Sync (`ops/services/sync/`)
+
+Cross-server factor library sync via rclone. Ships **data + state together** so a new machine bootstraps with `ops sync pull`.
+
+**Remote layout**:
+```
+<sync.remote>/<library_id>/
+├── alpha_src/
+├── alpha_dump/
+├── alpha_pnl/
+├── alpha_feature/
+└── .state/              # dotfile so it's hidden from casual `rclone ls`
+    ├── factor_state.json
+    ├── metrics.json
+    └── datasources.json
+```
+
+**`library_id`** (`Config.library_id`): defaults to `alpha_src.parent.name` (e.g. `alphalib`), overridable via `sync.library_id`. Two machines pointing at the same logical library get the same id regardless of absolute paths — which is what lets state files travel.
+
+**Cache layout** (`ops/infra/cache.py`):
+- Old: `~/.cache/ops/{md5(config_path)[:8]}.{index|metrics|datasources}.json` + `~/.cache/ops/factor_state.json`
+- New: `~/.cache/ops/lib/<library_id>/{index,metrics,datasources,factor_state}.json`
+- `cache_path(library_id, filename, legacy_hash=...)` resolves the new path and one-shot migrates any legacy file on first call — no manual migration step
+- `index.json` is **not** synced (1h TTL, regenerated on demand); locks (`~/.cache/ops/locks/`) are fcntl, per-machine, never synced
+
+**Per-subdir rclone tuning** (`sync.py:DATA_FLAGS`):
+| Subdir | Flags | Why |
+|---|---|---|
+| `alpha_dump` | `--transfers 32 --checkers 32 --fast-list` | Millions of tiny .npy files |
+| `alpha_feature` | `--transfers 8 --checksum` | Large memmap, content-stable |
+| `alpha_src`, `alpha_pnl` | defaults | Few small files |
+| `.state` | `--include factor_state.json --include metrics.json --include datasources.json` | Whitelist — never ship index.json or stray files |
+
+All subdirs use `rclone sync` (mirroring, deletes orphans on dest), so re-runs are self-healing — partial earlier transfers get reconciled.
+
+**Push/pull order**: data first, then state. If interrupted mid-transfer the safer drift is remote state lagging remote data (next reconcile recovers); the inverse leaves state referencing missing files.
 
 ### Factor Lifecycle
 
@@ -198,6 +240,8 @@ Filesystem is the source of truth; reconcile only touches state.
 | `services/check/checker/checkbias_checker.py` | AST-inject DataFirewall into a temp `_firewall.py` (original .py untouched) |
 | `services/backfill/backfill.py` | Generate meta.json + ACTIVE for legacy `alpha_src/` factors |
 | `services/pack/pack.py` | Aggregate per-date alpha_dump → alpha_feature memmap; full + incremental + sampled verify |
+| `services/sync/sync.py` | rclone push/pull/status for data + state to a remote |
+| `infra/cache.py` | `cache_path()` — ~/.cache/ops/lib/<library_id>/* with one-shot legacy hash migration |
 | `services/status/status.py` | Query/format state records |
 
 ### Common Infrastructure
@@ -598,6 +642,7 @@ Implemented `ops submit` / `ops status` / `ops backfill`, state tracking in `Che
 - [x] Per-factor advisory lock (concurrent submit/check safety)
 - [x] State ↔ filesystem reconcile on check startup
 - [x] `ops pack` - Aggregate alpha_dump → alpha_feature (batch + incremental from check)
+- [x] `ops sync` - Cross-server library sync via rclone (data + state, stable library_id replaces hash cache keys)
 - [ ] Daily incremental pack path (rows > 20251231; buffer / generational / zarr — design pending)
 - [ ] Factor registry, versioning, tags/categories
 - [ ] Enable/disable, archive/unarchive factors

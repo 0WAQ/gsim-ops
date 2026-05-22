@@ -90,6 +90,11 @@ class Config:
         self.dry_run: bool = config["mode"]["dry_run"]
         self.timeout: int = config["mode"]["timeout"]
 
+        # sync (optional)
+        sync_cfg: Dict[str, Any] = config.get("sync") or {}
+        self.sync_remote: str | None = sync_cfg.get("remote")
+        self.library_id: str = sync_cfg.get("library_id") or self.alpha_src.parent.name
+
     @staticmethod
     def _resolve_vars(raw: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve ${var_name} references in config values.

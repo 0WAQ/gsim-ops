@@ -9,17 +9,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from ops.infra.config import Config
+from ops.infra.cache import cache_path
 from ops.core.metrics import Metrics
 
 
 INDEX_VERSION = 3
 INDEX_MAX_AGE_SECONDS = 3600  # 1 hour
-CACHE_DIR = Path.home() / ".cache" / "ops"
 
 
-def _get_cache_path(config_path: Path) -> Path:
-    config_hash = hashlib.md5(str(config_path.resolve()).encode()).hexdigest()[:8]
-    return CACHE_DIR / f"{config_hash}.index.json"
+def _get_cache_path(config: Config, config_path: Path) -> Path:
+    legacy_hash = hashlib.md5(str(config_path.resolve()).encode()).hexdigest()[:8]
+    return cache_path(config.library_id, "index.json", legacy_hash=legacy_hash)
 
 
 @dataclass
@@ -72,7 +72,7 @@ class LibraryScanner:
         self.alpha_dump = config.alpha_dump
         self.alpha_pnl = config.alpha_pnl
         self.use_cache = use_cache
-        self._index_path = _get_cache_path(config_path)
+        self._index_path = _get_cache_path(config, config_path)
 
     @classmethod
     def from_config_path(
@@ -153,7 +153,7 @@ class LibraryScanner:
 
     def _save_index(self, factors: list[FactorInfo]) -> None:
         try:
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            self._index_path.parent.mkdir(parents=True, exist_ok=True)
             data = {
                 "version": INDEX_VERSION,
                 "created_at": time.time(),

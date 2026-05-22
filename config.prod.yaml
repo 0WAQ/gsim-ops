@@ -103,3 +103,8 @@ mode:
   timeout: 1800
   dates:
     - '20251030'
+
+# 跨服务器同步 (rclone)
+sync:
+  remote: 39000:external-sync
+  # library_id: alphalib      # 默认 = alpha_src.parent.name
