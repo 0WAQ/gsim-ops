@@ -2,6 +2,7 @@ import ast
 import json
 import hashlib
 import time
+from datetime import datetime
 from pathlib import Path
 
 from ops.core.library import FactorInfo
@@ -9,6 +10,10 @@ from ops.infra.config import Config
 from ops.infra.cache import cache_path
 
 DATASOURCES_VERSION = 1
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
 
 
 def _get_datasources_path(config_path: Path) -> Path:
@@ -85,10 +90,15 @@ def load_datasources(config_path: Path) -> dict[str, dict]:
 def _save_datasources(config_path: Path, datasources: dict[str, dict]) -> None:
     path = _get_datasources_path(config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    now = _now_iso()
+    stamped = {
+        name: {**entry, "updated_at": entry.get("updated_at") or now}
+        for name, entry in datasources.items()
+    }
     data = {
         "version": DATASOURCES_VERSION,
         "created_at": time.time(),
-        "datasources": datasources,
+        "datasources": stamped,
     }
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

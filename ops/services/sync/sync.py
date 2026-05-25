@@ -1,5 +1,8 @@
 """rclone-based cross-server factor library sync.
 
+Design: manifest-driven `rclone copy` (additive, never deletes) for data
++ per-record timestamp merge for the 3 state files.
+
 Remote layout (option A — state hidden under data root):
 
     <remote>/<library_id>/
@@ -15,91 +18,62 @@ Remote layout (option A — state hidden under data root):
 Local state lives at ~/.cache/ops/lib/<library_id>/; per-machine fcntl
 locks at ~/.cache/ops/locks/ are NEVER synced.
 """
+import json
+import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from ops.infra.config import Config
-from ops.infra.cache import library_cache_dir
+from ops.infra.cache import library_cache_dir, cache_path
+from ops.services.sync.manifest import (
+    SyncManifest,
+    ChangeSet,
+    FactorFingerprint,
+    FEATURE_VERSIONS,
+    load_manifest,
+    save_manifest,
+    scan_changes,
+    stat_factor,
+    list_factor_names,
+)
+from ops.services.sync.merge import MERGERS
 from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
 
 
 # Files inside ~/.cache/ops/lib/<library_id>/ that get synced.
-# index.json is intentionally NOT synced (1h TTL, cheap to regenerate).
+# index.json + sync_manifest.json are intentionally NOT synced.
 STATE_FILES = ("factor_state.json", "metrics.json", "datasources.json")
 
-# Per-subdir tuning.
 DATA_DIRS = ("alpha_src", "alpha_dump", "alpha_pnl", "alpha_feature")
 DATA_FLAGS: dict[str, list[str]] = {
-    "alpha_dump":    ["--transfers", "32", "--checkers", "32", "--fast-list"],
+    "alpha_dump":    ["--transfers", "32", "--checkers", "32"],
     "alpha_feature": ["--transfers", "8",  "--checksum"],
     "alpha_src":     [],
     "alpha_pnl":     [],
 }
 
 
-@dataclass
-class SyncTarget:
-    label: str
-    local: Path
-    remote: str
-    flags: list[str]
-
+# ───────────────────────── rclone wrappers ──────────────────────────────
 
 def _check_rclone() -> None:
     if shutil.which("rclone") is None:
         raise RuntimeError("rclone 未安装或不在 PATH 中")
 
 
-def _rclone(*args: str, dry_run: bool = False) -> int:
-    cmd = ["rclone", *args, "--progress", "--stats-one-line"]
+def _rclone(*args: str, dry_run: bool = False, capture: bool = False) -> tuple[int, str]:
+    cmd = ["rclone", *args]
+    if not capture:
+        cmd += ["--progress", "--stats-one-line"]
     if dry_run:
         cmd.append("--dry-run")
     info(f"  $ {' '.join(cmd)}")
-    return subprocess.run(cmd, check=False).returncode
-
-
-def _data_targets(config: Config) -> list[SyncTarget]:
-    base = f"{config.sync_remote}/{config.library_id}"
-    return [
-        SyncTarget(
-            label=name,
-            local=getattr(config, name),
-            remote=f"{base}/{name}",
-            flags=DATA_FLAGS.get(name, []),
-        )
-        for name in DATA_DIRS
-    ]
-
-
-def _state_target(config: Config) -> SyncTarget:
-    base = f"{config.sync_remote}/{config.library_id}"
-    return SyncTarget(
-        label=".state",
-        local=library_cache_dir(config.library_id),
-        remote=f"{base}/.state",
-        # only ship the 3 synced json files; skip index.json + anything else
-        flags=[a for f in STATE_FILES for a in ("--include", f)],
-    )
-
-
-def _run_targets(targets: list[SyncTarget], direction: str, dry_run: bool) -> int:
-    """direction: 'push' (local→remote) or 'pull' (remote→local)."""
-    failed = 0
-    for t in targets:
-        banner(f"{direction} {t.label}")
-        if direction == "push":
-            src, dst = str(t.local), t.remote
-        else:
-            src, dst = t.remote, str(t.local)
-        rc = _rclone("sync", src, dst, *t.flags, dry_run=dry_run)
-        if rc != 0:
-            error(f"  ✘ {t.label} rclone exit={rc}")
-            failed += 1
-        else:
-            info(f"  ✔ {t.label}")
-    return failed
+    if capture:
+        r = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        return r.returncode, r.stdout
+    return subprocess.run(cmd, check=False).returncode, ""
 
 
 def _require_remote(config: Config) -> None:
@@ -110,48 +84,360 @@ def _require_remote(config: Config) -> None:
         )
 
 
-def push(config: Config, *, data: bool = True, state: bool = True,
-         dry_run: bool = False) -> int:
-    _check_rclone()
-    _require_remote(config)
-    targets: list[SyncTarget] = []
-    if data:
-        targets.extend(_data_targets(config))
-    if state:
-        targets.append(_state_target(config))
-    if not targets:
-        warn("nothing to push (--data-only/--state-only 互斥?)")
-        return 0
-    return _run_targets(targets, "push", dry_run)
+def _remote_base(config: Config) -> str:
+    return f"{config.sync_remote}/{config.library_id}"
 
 
-def pull(config: Config, *, data: bool = True, state: bool = True,
-         dry_run: bool = False) -> int:
+# ───────────────────────── files_from build ─────────────────────────────
+
+def _build_files_from(changes: ChangeSet, kind: str, config: Config
+                      ) -> tuple[list[str], int]:
+    """Return (list of paths relative to <kind> dir, count of files)."""
+    paths: list[str] = []
+    if kind == "alpha_src":
+        for name in sorted(changes.alpha_src):
+            paths.extend(_list_files(config.alpha_src / name, prefix=name))
+    elif kind == "alpha_pnl":
+        for name in sorted(changes.alpha_pnl):
+            paths.extend(_list_files(config.alpha_pnl / name, prefix=name))
+    elif kind == "alpha_dump":
+        for name, dates in sorted(changes.alpha_dump.items()):
+            for d in dates:
+                paths.extend(_list_files(config.alpha_dump / name / d,
+                                          prefix=f"{name}/{d}"))
+    elif kind == "alpha_feature":
+        for name, versions in sorted(changes.alpha_feature.items()):
+            for v in versions:
+                paths.extend(_list_files(config.alpha_feature / name / v,
+                                          prefix=f"{name}/{v}"))
+    return paths, len(paths)
+
+
+def _list_files(root: Path, *, prefix: str) -> list[str]:
+    """List relative paths of files under root, prefixed with `prefix`."""
+    out: list[str] = []
+    if not root.exists():
+        return out
+    for dirpath, _dirnames, filenames in os.walk(root):
+        rel = os.path.relpath(dirpath, root)
+        for n in filenames:
+            if rel == ".":
+                out.append(f"{prefix}/{n}")
+            else:
+                out.append(f"{prefix}/{rel}/{n}")
+    return out
+
+
+def _write_files_from(paths: list[str]) -> Path:
+    fd, tmp = tempfile.mkstemp(prefix="ops-sync-files-", suffix=".txt", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        for p in paths:
+            f.write(p + "\n")
+    return Path(tmp)
+
+
+# ───────────────────────── data push / pull ─────────────────────────────
+
+def _copy_with_files_from(local: Path, remote: str, paths: list[str],
+                          flags: list[str], *, direction: str, dry_run: bool) -> int:
+    if not paths:
+        return 0
+    files_from = _write_files_from(paths)
+    try:
+        if direction == "push":
+            src, dst = str(local), remote
+        else:
+            src, dst = remote, str(local)
+        rc, _ = _rclone(
+            "copy", src, dst,
+            "--files-from", str(files_from),
+            "--no-traverse",
+            *flags,
+            dry_run=dry_run,
+        )
+        return rc
+    finally:
+        try:
+            files_from.unlink()
+        except OSError:
+            pass
+
+
+def _bootstrap_copy_dir(local: Path, remote: str, flags: list[str],
+                        *, direction: str, dry_run: bool) -> int:
+    """Bootstrap: copy a whole dir end-to-end (still additive)."""
+    if direction == "push":
+        if not local.exists():
+            warn(f"  ⚠ 本地不存在 {local},跳过")
+            return 0
+        src, dst = str(local), remote
+    else:
+        src, dst = remote, str(local)
+        local.mkdir(parents=True, exist_ok=True)
+    rc, _ = _rclone("copy", src, dst, *flags, dry_run=dry_run)
+    return rc
+
+
+# ───────────────────────── state merge round-trip ───────────────────────
+
+def _merge_states(config: Config, *, upload: bool, dry_run: bool) -> int:
+    """For each of the 3 state files:
+       1. download remote → tmp (rclone copyto)
+       2. merge tmp into local
+       3. (optional) upload merged local → remote
+
+    Returns number of failed file mergers."""
+    library_id = config.library_id
+    remote_state = f"{_remote_base(config)}/.state"
+    failed = 0
+    for fname in STATE_FILES:
+        local = cache_path(library_id, fname)
+        # 1. download — copyto preserves filename
+        with tempfile.TemporaryDirectory(prefix="ops-sync-state-") as td:
+            tmp_remote = Path(td) / fname
+            rc, _ = _rclone(
+                "copyto", f"{remote_state}/{fname}", str(tmp_remote),
+                "--ignore-existing", "--retries", "1",
+                capture=True,
+            )
+            # rc != 0 usually means "remote file absent" — first push case.
+            if rc != 0 or not tmp_remote.exists():
+                info(f"  · {fname}: 远端不存在,跳过 merge")
+                remote_present = False
+            else:
+                remote_present = True
+                try:
+                    merger = MERGERS[fname]
+                    added, updated = merger(local, tmp_remote)
+                    info(f"  ✔ {fname} merge: +{added} added, {updated} updated")
+                except Exception as e:
+                    error(f"  ✘ {fname} merge 失败: {e}")
+                    failed += 1
+                    continue
+
+            # 2. upload merged local back (push only)
+            if upload and local.exists():
+                rc2, _ = _rclone(
+                    "copyto", str(local), f"{remote_state}/{fname}",
+                    dry_run=dry_run, capture=True,
+                )
+                if rc2 != 0:
+                    error(f"  ✘ {fname} 上传失败 rc={rc2}")
+                    failed += 1
+                else:
+                    info(f"  ✔ {fname} 已上传")
+            elif not upload and not remote_present:
+                # pull + no remote file: nothing to do
+                pass
+    return failed
+
+
+# ───────────────────────── public entry points ──────────────────────────
+
+def push(config: Config, *, dry_run: bool = False) -> int:
+    """Push local data + state to remote.
+
+    Auto-detects first-run: if no local manifest exists, scan disk to build
+    one (cheap, no rclone), then run the normal incremental path. `rclone
+    copy` is additive — already-present remote files are skipped.
+    """
     _check_rclone()
     _require_remote(config)
-    targets: list[SyncTarget] = []
-    if data:
-        targets.extend(_data_targets(config))
-    if state:
-        targets.append(_state_target(config))
-    if not targets:
-        warn("nothing to pull")
-        return 0
-    return _run_targets(targets, "pull", dry_run)
+
+    failed = 0
+    remote_base = _remote_base(config)
+    library_id = config.library_id
+
+    manifest = load_manifest(library_id)
+    if manifest is None:
+        banner("first push: 建 manifest (本地扫盘)")
+        names = list_factor_names(config)
+        info(f"  扫描 {len(names)} 个因子...")
+        manifest = SyncManifest(factors={
+            name: stat_factor(name, config) for name in names
+        })
+        if not dry_run:
+            save_manifest(library_id, manifest)
+            info(f"  ✔ manifest 已写入 ({len(manifest.factors)} factors)")
+
+    banner("push data")
+    changes, fresh = scan_changes(config, manifest)
+    if changes.is_empty():
+        info("  · 无变更")
+    else:
+        info(f"  发现 {changes.total_factors()} 个因子有变更")
+        for d in DATA_DIRS:
+            paths, n = _build_files_from(changes, d, config)
+            if not paths:
+                continue
+            info(f"  → {d}: {n} files")
+            rc = _copy_with_files_from(
+                getattr(config, d), f"{remote_base}/{d}",
+                paths, DATA_FLAGS.get(d, []),
+                direction="push", dry_run=dry_run,
+            )
+            if rc != 0:
+                error(f"  ✘ {d} rc={rc}")
+                failed += 1
+        if failed == 0 and not dry_run:
+            for name, fp in fresh.items():
+                manifest.factors[name] = fp
+            save_manifest(library_id, manifest)
+            info("  ✔ manifest 已更新")
+
+    banner("push state (merge)")
+    failed += _merge_states(config, upload=True, dry_run=dry_run)
+    return failed
+
+
+def pull(config: Config, *, dry_run: bool = False) -> int:
+    """Pull state + missing factors from remote.
+
+    Auto-detects empty-local: if no factors exist locally, do a full
+    `rclone copy` of every data dir. Otherwise: merge state, then pull
+    only the factors named in remote `factor_state.json` that we lack.
+    """
+    _check_rclone()
+    _require_remote(config)
+
+    failed = 0
+    remote_base = _remote_base(config)
+    library_id = config.library_id
+
+    banner("pull state (merge)")
+    failed += _merge_states(config, upload=False, dry_run=dry_run)
+
+    local_names = set(list_factor_names(config))
+    if not local_names:
+        banner("pull data (空盘,全量拉)")
+        for d in DATA_DIRS:
+            local = getattr(config, d)
+            rc = _bootstrap_copy_dir(
+                local, f"{remote_base}/{d}", DATA_FLAGS.get(d, []),
+                direction="pull", dry_run=dry_run,
+            )
+            if rc != 0:
+                error(f"  ✘ {d} rc={rc}")
+                failed += 1
+            else:
+                info(f"  ✔ {d}")
+        if not dry_run:
+            manifest = SyncManifest(factors={
+                name: stat_factor(name, config)
+                for name in list_factor_names(config)
+            })
+            save_manifest(library_id, manifest)
+            info(f"  ✔ manifest 已写入 ({len(manifest.factors)} factors)")
+        return failed
+
+    banner("pull data (增量)")
+    state_path = cache_path(library_id, "factor_state.json")
+    if not state_path.exists():
+        info("  · 本地 factor_state.json 不存在,跳过 data 拉取")
+        return failed
+    try:
+        with state_path.open("r", encoding="utf-8") as f:
+            state_data = json.load(f)
+    except Exception as e:
+        error(f"  ✘ 读取 factor_state.json 失败: {e}")
+        return failed + 1
+
+    missing = [
+        name for name, rec in state_data.items()
+        if isinstance(rec, dict) and name not in local_names
+    ]
+    if not missing:
+        info("  · 无需拉取")
+        return failed
+    info(f"  → 需要拉取 {len(missing)} 个因子")
+    for d in DATA_DIRS:
+        for name in missing:
+            src = f"{remote_base}/{d}/{name}"
+            dst = str(getattr(config, d) / name)
+            Path(dst).mkdir(parents=True, exist_ok=True)
+            rc, _ = _rclone(
+                "copy", src, dst, *DATA_FLAGS.get(d, []),
+                dry_run=dry_run,
+            )
+            if rc != 0:
+                warn(f"  ⚠ {d}/{name} rc={rc}")
+    if not dry_run:
+        manifest = load_manifest(library_id) or SyncManifest()
+        for name in missing:
+            manifest.factors[name] = stat_factor(name, config)
+        save_manifest(library_id, manifest)
+        info(f"  ✔ manifest 已更新 (+{len(missing)})")
+    return failed
 
 
 def status(config: Config) -> int:
+    """Cheap diff using local manifest + remote factor_state.json. No data scan."""
     _check_rclone()
     _require_remote(config)
+    library_id = config.library_id
+
+    manifest = load_manifest(library_id)
+    n_local_manifest = len(manifest.factors) if manifest else 0
+    local_names = set(list_factor_names(config))
+
+    # fetch remote factor_state.json
+    remote_state = f"{_remote_base(config)}/.state/factor_state.json"
+    remote_records: dict = {}
+    with tempfile.TemporaryDirectory(prefix="ops-sync-status-") as td:
+        tmp = Path(td) / "factor_state.json"
+        rc, _ = _rclone("copyto", remote_state, str(tmp),
+                        "--retries", "1", capture=True)
+        if rc == 0 and tmp.exists():
+            try:
+                with tmp.open("r", encoding="utf-8") as f:
+                    remote_records = json.load(f) or {}
+            except Exception:
+                pass
+        else:
+            warn("  ⚠ 远端 factor_state.json 不可达或不存在")
+
+    remote_names = set(remote_records.keys())
+    missing_locally = remote_names - local_names
+    missing_remotely = local_names - remote_names
+
+    info(f"  本地因子数 (磁盘):    {len(local_names)}")
+    info(f"  本地 manifest 因子数: {n_local_manifest}")
+    info(f"  远端 state 因子数:    {len(remote_names)}")
+    info(f"  远端有 / 本地无:      {len(missing_locally)}")
+    info(f"  本地有 / 远端无:      {len(missing_remotely)}")
+    if missing_locally:
+        sample = sorted(missing_locally)[:5]
+        highlight(f"  (示例-需 pull):     {', '.join(sample)}")
+    if missing_remotely:
+        sample = sorted(missing_remotely)[:5]
+        highlight(f"  (示例-需 push):     {', '.join(sample)}")
+    return 0
+
+
+def verify(config: Config) -> int:
+    """Full reconciliation via rclone check on each data dir."""
+    _check_rclone()
+    _require_remote(config)
+    remote_base = _remote_base(config)
     failed = 0
-    for t in _data_targets(config) + [_state_target(config)]:
-        banner(f"check {t.label}")
-        rc = _rclone("check", str(t.local), t.remote, *t.flags, "--one-way")
+    for d in DATA_DIRS:
+        banner(f"verify {d}")
+        local = getattr(config, d)
+        rc, _ = _rclone("check", str(local), f"{remote_base}/{d}",
+                        *DATA_FLAGS.get(d, []), "--one-way")
         if rc != 0:
-            warn(f"  ⚠ {t.label} 存在差异 (rclone exit={rc})")
+            warn(f"  ⚠ {d} 存在差异 rc={rc}")
             failed += 1
         else:
-            info(f"  ✔ {t.label} 一致")
+            info(f"  ✔ {d} 一致")
+    banner("verify .state")
+    rc, _ = _rclone("check", str(library_cache_dir(config.library_id)),
+                    f"{remote_base}/.state",
+                    *[a for fn in STATE_FILES for a in ("--include", fn)],
+                    "--one-way")
+    if rc != 0:
+        warn(f"  ⚠ .state 存在差异 rc={rc}")
+        failed += 1
     return failed
 
 
@@ -160,10 +446,8 @@ def run_sync(args) -> None:
     action: str = args.action
 
     if action in ("push", "pull"):
-        data = not args.state_only
-        state = not args.data_only
         fn = push if action == "push" else pull
-        failed = fn(config, data=data, state=state, dry_run=args.dry_run)
+        failed = fn(config, dry_run=args.dry_run)
         banner(f"{action} 汇总")
         if failed:
             error(f"✘ 失败子任务: {failed}")
@@ -171,8 +455,12 @@ def run_sync(args) -> None:
             info("✔ 全部成功")
         bottom()
     elif action == "status":
-        failed = status(config)
-        banner("status 汇总")
+        banner("sync status")
+        status(config)
+        bottom()
+    elif action == "verify":
+        failed = verify(config)
+        banner("verify 汇总")
         if failed:
             warn(f"⚠ 不一致子任务: {failed}")
         else:

@@ -1,6 +1,7 @@
 import json
 import hashlib
 import time
+from datetime import datetime
 from pathlib import Path
 
 from ops.core.library import FactorInfo
@@ -10,6 +11,10 @@ from ops.infra.cache import cache_path
 from ops.infra.gsim.runner import Runner
 
 METRICS_VERSION = 1
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
 
 
 def _get_metrics_path(config_path: Path) -> Path:
@@ -41,10 +46,14 @@ def load_metrics(config_path: Path) -> dict[str, Metrics]:
 def _save_metrics(config_path: Path, metrics: dict[str, Metrics]) -> None:
     path = _get_metrics_path(config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    now = _now_iso()
     data = {
         "version": METRICS_VERSION,
         "created_at": time.time(),
-        "metrics": {name: m.to_dict() for name, m in metrics.items()},
+        "metrics": {
+            name: {**m.to_dict(), "updated_at": now}
+            for name, m in metrics.items()
+        },
     }
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -84,7 +93,7 @@ def update_metrics(config_path: Path, name: str, m: Metrics) -> None:
         except Exception:
             pass
 
-    data.setdefault("metrics", {})[name] = m.to_dict()
+    data.setdefault("metrics", {})[name] = {**m.to_dict(), "updated_at": _now_iso()}
     data["created_at"] = time.time()
 
     path.parent.mkdir(parents=True, exist_ok=True)

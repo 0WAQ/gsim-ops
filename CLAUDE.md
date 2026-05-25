@@ -29,10 +29,11 @@ uv run ops health --fix              # Auto-refresh missing metrics/datasources
 uv run ops pack                      # Aggregate alpha_dump → alpha_feature (skip already-packed)
 uv run ops pack --force              # Rewrite all factors
 uv run ops pack --factor AlphaXxx    # Pack one factor
-uv run ops sync push                 # Push data+state to rclone remote
+uv run ops sync push                 # Incremental push (manifest-driven + state merge)
 uv run ops sync push --dry-run       # Preview transfers
-uv run ops sync pull                 # Pull data+state from remote (bootstrap new server)
-uv run ops sync status               # rclone check local vs remote
+uv run ops sync pull                 # Pull state (merge) + factors missing locally
+uv run ops sync status               # Quick local-vs-remote summary (no data scan)
+uv run ops sync verify               # Slow: rclone check across all dirs
 ```
 
 No test suite exists. Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
@@ -157,14 +158,38 @@ Cross-server factor library sync via rclone. Ships **data + state together** so 
 **Per-subdir rclone tuning** (`sync.py:DATA_FLAGS`):
 | Subdir | Flags | Why |
 |---|---|---|
-| `alpha_dump` | `--transfers 32 --checkers 32 --fast-list` | Millions of tiny .npy files |
+| `alpha_dump` | `--transfers 32 --checkers 32` | Millions of tiny .npy files |
 | `alpha_feature` | `--transfers 8 --checksum` | Large memmap, content-stable |
 | `alpha_src`, `alpha_pnl` | defaults | Few small files |
-| `.state` | `--include factor_state.json --include metrics.json --include datasources.json` | Whitelist — never ship index.json or stray files |
 
-All subdirs use `rclone sync` (mirroring, deletes orphans on dest), so re-runs are self-healing — partial earlier transfers get reconciled.
+**Transfer model: manifest-driven `rclone copy` (additive, never deletes)**.
 
-**Push/pull order**: data first, then state. If interrupted mid-transfer the safer drift is remote state lagging remote data (next reconcile recovers); the inverse leaves state referencing missing files.
+`rclone sync` was rejected because (a) it must list both sides to compute the diff — alpha_dump alone has ~1.8M files; (b) it deletes destination files missing from the source, which would wipe factors that exist only on the other machine.
+
+Instead, `ops sync push` keeps a per-machine `~/.cache/ops/lib/<library_id>/sync_manifest.json` recording each factor's fingerprint:
+- `src_mtime` / `pnl_mtime` / `feature_v{1,2}_mtime` — max mtime within that subtree
+- `dump_latest` (newest YYYYMMDD dir) + `dump_count` — alpha_dump grows by appending a new date dir per check; new date + changed count ⇒ only those date dirs need shipping
+
+Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), descending into a factor's dirs only when its top-level fingerprint moved. Changed files feed `rclone copy --files-from --no-traverse` so rclone skips the remote-side listing entirely. Manifest is only advanced after the corresponding `rclone copy` returns 0; partial pushes naturally re-send next time.
+
+**First-run is automatic.** No `--bootstrap` / `init` flags exposed:
+- `ops sync push` on a machine without a manifest: scan disk once, save manifest, then run the normal incremental path. `rclone copy` is additive so already-present remote files are skipped — no double upload.
+- `ops sync pull` on an empty machine (zero local factors): full `rclone copy` of every data dir, then build the manifest from what just landed.
+
+**State merge** (`ops/services/sync/merge.py`). Each of `factor_state.json`, `metrics.json`, `datasources.json` carries a per-entry `updated_at` ISO timestamp. The sync step:
+1. `rclone copyto remote/.state/<file> /tmp/<file>` (3 small files, cheap)
+2. Per-name: pick the entry with newer `updated_at`; tie → keep local
+3. Atomic write merged result to local, then upload to remote
+
+`factor_state.json` merge holds the JsonStateStore fcntl lock so a concurrent `ops check` finishing on this machine can't lose its write. Missing `updated_at` on legacy entries treated as `1970-01-01`. `index.json` is **not** synced (1h TTL, regenerable). `sync_manifest.json` is per-machine, also not synced.
+
+**Pull semantics** — pull always merges state first. If the local library is empty, falls back to a full `rclone copy` of every data dir. Otherwise (manifest exists or just got built), uses the merged `factor_state.json` as the "remote manifest of factor names": names present in remote state but missing on local disk are fetched per-subdir (one `rclone copy` per factor).
+
+**Operations**:
+- `ops sync push` — incremental data + state merge
+- `ops sync pull` — state merge + pull factors referenced by state but missing locally
+- `ops sync status` — counts only (no data scan); reports local-vs-remote-state diff
+- `ops sync verify` — full `rclone check` across all subdirs (slow; use occasionally)
 
 ### Factor Lifecycle
 
