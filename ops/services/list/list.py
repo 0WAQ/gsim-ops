@@ -4,6 +4,8 @@ import fnmatch
 from colorama import Fore, Style, init
 
 from ops.core.library import LibraryScanner, FactorInfo
+from ops.core.state import FactorStatus
+from ops.infra.store import default_store
 from .metrics import load_metrics, refresh_metrics, merge_metrics
 from .datasource import load_datasources, refresh_datasources, merge_datasources
 
@@ -11,7 +13,18 @@ from .datasource import load_datasources, refresh_datasources, merge_datasources
 init(autoreset=True)
 
 
-def print_table(factors: list[FactorInfo], show_tables=False, show_fields=False):
+_STATUS_COLOR = {
+    FactorStatus.ACTIVE:    Fore.GREEN,
+    FactorStatus.REJECTED:  Fore.RED,
+    FactorStatus.SUBMITTED: Fore.YELLOW,
+    FactorStatus.CHECKING:  Fore.YELLOW,
+    FactorStatus.DECAYING:  Fore.MAGENTA,
+    FactorStatus.RETIRED:   Style.DIM,
+    FactorStatus.DELETED:   Style.DIM,
+}
+
+def print_table(factors: list[FactorInfo], statuses: dict[str, FactorStatus],
+                show_tables=False, show_fields=False):
     if not factors:
         print(Fore.YELLOW + "No factors found.")
         return
@@ -39,7 +52,8 @@ def print_table(factors: list[FactorInfo], show_tables=False, show_fields=False)
             line += f"  {', '.join(f.datasources.get('tables', []))}"
         if show_fields and f.datasources:
             line += f"  {', '.join(f.datasources.get('fields', []))}"
-        print(line)
+        color = _STATUS_COLOR.get(statuses.get(f.name), "") # type: ignore
+        print(color + line)
 
     print(Fore.CYAN + separator)
     print(f"Total: {len(factors)} factors")
@@ -124,9 +138,15 @@ def apply_filters(factors: list[FactorInfo], filters: list[tuple[str, str, str]]
 def run_list(args):
     scanner = LibraryScanner.from_config_path(args.config_path)
     factors = scanner.scan(refresh=args.refresh)
+    statuses = {r.name: r.status for r in default_store().list()}
 
     if args.user:
         factors = scanner.filter_by_author(factors, args.user)
+
+    if args.status:
+        factors = [f for f in factors if statuses.get(f.name) == args.status]
+    else:
+        factors = [f for f in factors if statuses.get(f.name) != FactorStatus.DELETED]
 
     if args.refresh_metrics:
         metrics = refresh_metrics(factors, scanner.config, args.config_path)
@@ -160,4 +180,5 @@ def run_list(args):
     if args.format == "json":
         print_json(factors)
     else:
-        print_table(factors, show_tables=args.show_tables, show_fields=args.show_fields)
+        print_table(factors, statuses,
+                    show_tables=args.show_tables, show_fields=args.show_fields)

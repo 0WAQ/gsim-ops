@@ -9,6 +9,7 @@ from ops.cli.status import add_status_subparser
 from ops.cli.backfill import add_backfill_subparser
 from ops.cli.pack import add_pack_subparser
 from ops.cli.sync import add_sync_subparser
+from ops.cli.rm import add_rm_subparser
 
 
 def main():
@@ -31,6 +32,7 @@ def main():
     add_backfill_subparser(subparsers)
     add_pack_subparser(subparsers)
     add_sync_subparser(subparsers)
+    add_rm_subparser(subparsers)
 
     args = parser.parse_args()
     args.func(args)

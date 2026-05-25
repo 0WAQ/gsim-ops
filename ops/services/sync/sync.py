@@ -92,14 +92,22 @@ def _remote_base(config: Config) -> str:
 
 def _build_files_from(changes: ChangeSet, kind: str, config: Config
                       ) -> tuple[list[str], int]:
-    """Return (list of paths relative to <kind> dir, count of files)."""
+    """Return (list of paths relative to <kind> dir, count of files).
+
+    Layout:
+      alpha_src/<name>/...           — push whole dir
+      alpha_dump/<name>/<YYYYMMDD>/* — push only new date dirs
+      alpha_pnl/<name>               — single file at the top level
+      alpha_feature/<name>.v{1,2}.npy — files at the top level
+    """
     paths: list[str] = []
     if kind == "alpha_src":
         for name in sorted(changes.alpha_src):
             paths.extend(_list_files(config.alpha_src / name, prefix=name))
     elif kind == "alpha_pnl":
         for name in sorted(changes.alpha_pnl):
-            paths.extend(_list_files(config.alpha_pnl / name, prefix=name))
+            if (config.alpha_pnl / name).exists():
+                paths.append(name)
     elif kind == "alpha_dump":
         for name, dates in sorted(changes.alpha_dump.items()):
             for d in dates:
@@ -108,8 +116,9 @@ def _build_files_from(changes: ChangeSet, kind: str, config: Config
     elif kind == "alpha_feature":
         for name, versions in sorted(changes.alpha_feature.items()):
             for v in versions:
-                paths.extend(_list_files(config.alpha_feature / name / v,
-                                          prefix=f"{name}/{v}"))
+                fname = f"{name}.{v}.npy"
+                if (config.alpha_feature / fname).exists():
+                    paths.append(fname)
     return paths, len(paths)
 
 
@@ -350,17 +359,50 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
         info("  · 无需拉取")
         return failed
     info(f"  → 需要拉取 {len(missing)} 个因子")
-    for d in DATA_DIRS:
-        for name in missing:
-            src = f"{remote_base}/{d}/{name}"
-            dst = str(getattr(config, d) / name)
-            Path(dst).mkdir(parents=True, exist_ok=True)
+    for name in missing:
+        # alpha_src/<name>/  — dir
+        src = f"{remote_base}/alpha_src/{name}"
+        dst = str(config.alpha_src / name)
+        Path(dst).mkdir(parents=True, exist_ok=True)
+        rc, _ = _rclone("copy", src, dst, *DATA_FLAGS.get("alpha_src", []),
+                        dry_run=dry_run)
+        if rc != 0:
+            warn(f"  ⚠ alpha_src/{name} rc={rc}")
+
+        # alpha_dump/<name>/  — dir
+        src = f"{remote_base}/alpha_dump/{name}"
+        dst = str(config.alpha_dump / name)
+        Path(dst).mkdir(parents=True, exist_ok=True)
+        rc, _ = _rclone("copy", src, dst, *DATA_FLAGS.get("alpha_dump", []),
+                        dry_run=dry_run)
+        if rc != 0:
+            warn(f"  ⚠ alpha_dump/{name} rc={rc}")
+
+        # alpha_pnl/<name>  — single file (use copyto so basename is preserved)
+        config.alpha_pnl.mkdir(parents=True, exist_ok=True)
+        rc, _ = _rclone(
+            "copyto",
+            f"{remote_base}/alpha_pnl/{name}",
+            str(config.alpha_pnl / name),
+            "--ignore-existing", "--retries", "1",
+            dry_run=dry_run, capture=True,
+        )
+        if rc != 0:
+            warn(f"  ⚠ alpha_pnl/{name} rc={rc}")
+
+        # alpha_feature/<name>.v{1,2}.npy  — flat files
+        config.alpha_feature.mkdir(parents=True, exist_ok=True)
+        for v in ("v1", "v2"):
+            fname = f"{name}.{v}.npy"
             rc, _ = _rclone(
-                "copy", src, dst, *DATA_FLAGS.get(d, []),
-                dry_run=dry_run,
+                "copyto",
+                f"{remote_base}/alpha_feature/{fname}",
+                str(config.alpha_feature / fname),
+                "--ignore-existing", "--retries", "1",
+                dry_run=dry_run, capture=True,
             )
             if rc != 0:
-                warn(f"  ⚠ {d}/{name} rc={rc}")
+                warn(f"  ⚠ alpha_feature/{fname} rc={rc}")
     if not dry_run:
         manifest = load_manifest(library_id) or SyncManifest()
         for name in missing:

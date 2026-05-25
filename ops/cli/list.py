@@ -3,6 +3,7 @@ from pathlib import Path
 
 from ops.utils.utils import LowerAction
 from ops.infra.config import get_default_config_path
+from ops.core.state import FactorStatus
 from ops.services.list import run_list
 
 
@@ -28,6 +29,14 @@ Example:
         type=str,
         action=LowerAction,
         help="Filter by author (e.g., wbai)",
+    )
+    parser.add_argument(
+        "--status",
+        "-s",
+        default=None,
+        type=str,
+        choices=[s.value for s in FactorStatus],
+        help="Filter by lifecycle status (e.g., active, rejected)",
     )
     parser.add_argument(
         "--format",

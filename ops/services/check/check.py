@@ -129,6 +129,29 @@ class CheckerPipeline:
         if dst_dir.exists():
             shutil.rmtree(dst_dir)
         self._clean_pycache(factor.dir)
+
+        # rejected 因子保留 src + pnl(若存在);不保留 dump / feature
+        # alpha_src: 从 staging 复制一份(staging 原物随后移到 recycle 归档)
+        src_dst = self.config.alpha_src / factor.name
+        if src_dst.exists():
+            shutil.rmtree(src_dst)
+        shutil.copytree(factor.dir, src_dst)
+        self._rewrite_module_path(src_dst)
+
+        # alpha_pnl: 长回测产物;只在 correlation 阶段之后存在
+        if factor.pnl_file.exists():
+            shutil.copy2(factor.pnl_file, self.config.alpha_pnl / factor.name)
+
+        # 清理可能存在的 dump / feature 残留(防御性,正常 staging 路径不会有)
+        dump_dir = self.config.alpha_dump / factor.name
+        if dump_dir.exists():
+            shutil.rmtree(dump_dir)
+        for v in ("v1", "v2"):
+            f = self.config.alpha_feature / f"{factor.name}.{v}.npy"
+            if f.exists():
+                f.unlink()
+
+        # 归档到 recycle
         shutil.move(factor.dir, dst_dir)
         self._rewrite_module_path(dst_dir)
         with open(dst_dir / "reason.txt", 'w') as f:

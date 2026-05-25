@@ -34,6 +34,8 @@ uv run ops sync push --dry-run       # Preview transfers
 uv run ops sync pull                 # Pull state (merge) + factors missing locally
 uv run ops sync status               # Quick local-vs-remote summary (no data scan)
 uv run ops sync verify               # Slow: rclone check across all dirs
+uv run ops rm AlphaXxx               # 软删除:仅打 DELETED 标,文件保留
+uv run ops rm AlphaXxx --force       # 同时删本地 dump + feature(保留 src/pnl)
 ```
 
 No test suite exists. Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
@@ -190,6 +192,8 @@ Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), desc
 - `ops sync pull` — state merge + pull factors referenced by state but missing locally
 - `ops sync status` — counts only (no data scan); reports local-vs-remote-state diff
 - `ops sync verify` — full `rclone check` across all subdirs (slow; use occasionally)
+
+**Soft-delete**: `ops rm <name>` flips state to `DELETED` (a tombstone) — `list`/`health` hide it by default; `ops list -s deleted` shows them. The tombstone propagates to other machines via the next `ops sync push` (state merge). **Sync never `rclone delete`s anything** — soft-delete on machine A causes machine B's next `list` to drop the factor too, but the remote files persist. Reclaiming remote disk for deleted factors is the job of the (deferred) `ops sync gc`. `ops rm --force` drops the *local* dump dir + feature `.npy` (src/pnl always kept).
 
 ### Factor Lifecycle
 
@@ -647,6 +651,56 @@ Implemented `ops submit` / `ops status` / `ops backfill`, state tracking in `Che
 
 **Phase 4: 服务化** — FastAPI over services layer, Redis cache, Streamlit/Grafana dashboard.
 
+### Consolidate `ops status` into `ops list` + `ops info` (Not Started)
+
+`ops list -s <status>` now covers batch lifecycle filtering (with status-based row coloring) and `ops info <factor>` covers single-factor static info, so `ops status` is mostly redundant. Its only unique surface today is single-factor lifecycle history (the check history list).
+
+**Plan**:
+- Move single-factor history rendering into `ops info <factor>` (append a "Lifecycle" / "Check History" section to its existing output).
+- Remove `ops status` subcommand: delete `ops/cli/status.py` registration and `ops/services/status/`. Drop the `ops status` line from CLAUDE.md and the example block.
+- Verify nothing else imports `ops.services.status`.
+
+**Why deferred**: cosmetic UX cleanup, no functional gap. Do once after the next round of feature work settles.
+
+### `ops factor` Namespace + Cross-Machine Soft-Delete (Not Started)
+
+The CLI surface has grown flat: `submit / check / list / info / health / pack / sync / rm / status / backfill`. The factor-lifecycle ones (`submit`, `check`, `rm`, `info`, `list`, `status`, `backfill`) all act on a single factor (or a query over factors) and naturally belong under one namespace. Plan: introduce `ops factor <verb>` as the canonical home, keep flat aliases for back-compat during transition.
+
+**Target shape**:
+```
+ops factor add <name>      # alias: ops submit (one factor, possibly inline source)
+ops factor rm <name>       # alias: ops rm        (current implementation)
+ops factor check [name]    # alias: ops check
+ops factor run <name>      # NEW — re-run an existing factor (for refresh / re-pack)
+ops factor info <name>     # alias: ops info
+ops factor list            # alias: ops list
+ops factor status [name]   # alias: ops status   (until folded into info, see prior plan)
+```
+
+`pack`, `sync`, `health` stay top-level — they operate on the library, not a single factor.
+
+**Why**: discoverability (`ops factor --help` enumerates everything one can do *to* a factor), and prepares the codebase for similar groupings later (`ops dataset ...`, `ops job ...`).
+
+**Soft-delete model** (already partially landed via `ops rm`):
+
+- `FactorStatus.DELETED` is a tombstone, not a record removal. Files default to staying on disk; `--force` removes local dump + feature only (src/pnl always kept, mirroring the rejected-factor retention rule).
+- The tombstone propagates to other machines via `ops sync push` state merge — receivers will hide the factor from `list` / `health` automatically because those filter `status == DELETED` by default.
+- **`ops sync push` does NOT issue `rclone delete` for DELETED factors.** State merge alone is the sync mechanism. Remote files stay until a future `ops sync gc` (separate, opt-in) reclaims them.
+- `ops sync pull` does not auto-clean local files of newly-DELETED-on-remote factors either. Same reasoning: keep destructive ops out of routine sync; require explicit `gc`.
+
+**`ops sync gc` (deferred)**:
+- Walks `factor_state.json`, finds `status == DELETED` records older than some threshold (e.g. 30d), enumerates their remote `alpha_dump/<name>/`, `alpha_feature/<name>.v[12].npy`, and (with extra flag) `alpha_src/<name>/` + `alpha_pnl/<name>`, deletes via `rclone delete`.
+- Default-dry-run; explicit `--apply` to actually purge.
+- Updates manifest to drop the entries so subsequent push doesn't re-stat them.
+
+**Execution waves** (when picked up):
+| Wave | Description |
+|---|---|
+| 1 | Add `ops factor` parent parser; register existing subcommands as both flat (legacy) and nested (`factor X`). |
+| 2 | Implement `ops factor run` (re-run + re-pack one factor in place). |
+| 3 | Add `ops sync gc` with dry-run/apply. |
+| 4 | Drop the flat aliases (one-shot deprecation, after team is on the new shape). |
+
 ## Roadmap
 
 ### Factor Storage & Management
@@ -668,6 +722,9 @@ Implemented `ops submit` / `ops status` / `ops backfill`, state tracking in `Che
 - [x] State ↔ filesystem reconcile on check startup
 - [x] `ops pack` - Aggregate alpha_dump → alpha_feature (batch + incremental from check)
 - [x] `ops sync` - Cross-server library sync via rclone (data + state, stable library_id replaces hash cache keys)
+- [x] `ops rm` - Soft-delete a factor (DELETED tombstone; `--force` drops local dump+feature)
+- [ ] `ops sync gc` - Reclaim remote files for DELETED factors (opt-in, separate from push/pull)
+- [ ] `ops factor` namespace consolidating add/rm/check/run/info/list (see Plans)
 - [ ] Daily incremental pack path (rows > 20251231; buffer / generational / zarr — design pending)
 - [ ] Factor registry, versioning, tags/categories
 - [ ] Enable/disable, archive/unarchive factors

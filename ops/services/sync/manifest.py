@@ -35,10 +35,10 @@ _DATE_RE = re.compile(r"^\d{8}$")
 @dataclass
 class FactorFingerprint:
     src_mtime: float = 0.0
-    pnl_mtime: float = 0.0
-    dump_latest: Optional[str] = None      # YYYYMMDD
+    pnl_mtime: float = 0.0                  # alpha_pnl/<name>  is a single file
+    dump_latest: Optional[str] = None       # YYYYMMDD
     dump_count: int = 0
-    feature_mtime: dict = field(default_factory=dict)  # {"v1": ts, "v2": ts}
+    feature_mtime: float = 0.0              # max(mtime(<name>.v1.npy), mtime(<name>.v2.npy))
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -46,7 +46,10 @@ class FactorFingerprint:
     @classmethod
     def from_dict(cls, d: dict) -> "FactorFingerprint":
         d = dict(d)
-        d["feature_mtime"] = dict(d.get("feature_mtime") or {})
+        # tolerate v0 manifest where feature_mtime was a dict
+        fm = d.get("feature_mtime", 0.0)
+        if isinstance(fm, dict):
+            d["feature_mtime"] = max(fm.values()) if fm else 0.0
         return cls(**d)
 
 
@@ -167,35 +170,56 @@ def _dump_summary(dump_dir: Path) -> tuple[Optional[str], int]:
     return latest, total
 
 
-def _feature_mtimes(feature_dir: Path) -> dict[str, float]:
-    """Per-version max mtime under alpha_feature/<name>/<version>/."""
-    out: dict[str, float] = {}
+def _file_mtime(path: Path) -> float:
+    """Single-file mtime. 0 if missing."""
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return 0.0
+
+
+def _feature_versions_present(feature_dir: Path, name: str) -> list[str]:
+    """Which of v1/v2 exist as alpha_feature/<name>.<v>.npy."""
+    return [v for v in FEATURE_VERSIONS
+            if (feature_dir / f"{name}.{v}.npy").exists()]
+
+
+def _feature_mtime(feature_dir: Path, name: str) -> float:
+    """Max mtime of alpha_feature/<name>.v1.npy and alpha_feature/<name>.v2.npy."""
+    best = 0.0
     for v in FEATURE_VERSIONS:
-        vdir = feature_dir / v
-        if vdir.exists():
-            out[v] = _max_mtime(vdir)
-    return out
+        m = _file_mtime(feature_dir / f"{name}.{v}.npy")
+        if m > best:
+            best = m
+    return best
 
 
 def stat_factor(name: str, config: Config) -> FactorFingerprint:
     src_mtime = _max_mtime(config.alpha_src / name)
-    pnl_mtime = _max_mtime(config.alpha_pnl / name)
+    pnl_mtime = _file_mtime(config.alpha_pnl / name)
     dump_latest, dump_count = _dump_summary(config.alpha_dump / name)
-    feature = _feature_mtimes(config.alpha_feature / name)
+    feature_mtime = _feature_mtime(config.alpha_feature, name)
     return FactorFingerprint(
         src_mtime=src_mtime,
         pnl_mtime=pnl_mtime,
         dump_latest=dump_latest,
         dump_count=dump_count,
-        feature_mtime=feature,
+        feature_mtime=feature_mtime,
     )
 
 
 def list_factor_names(config: Config) -> list[str]:
-    """Union of factor names appearing under any data dir."""
+    """Union of factor names across all data dirs.
+
+    Layout:
+      alpha_src/<name>/        — dir
+      alpha_dump/<name>/       — dir
+      alpha_pnl/<name>         — file
+      alpha_feature/<name>.v{1,2}.npy — files
+    """
     names: set[str] = set()
-    for d in (config.alpha_src, config.alpha_pnl,
-              config.alpha_dump, config.alpha_feature):
+
+    for d in (config.alpha_src, config.alpha_dump):
         if not d.exists():
             continue
         try:
@@ -205,6 +229,31 @@ def list_factor_names(config: Config) -> list[str]:
                         names.add(entry.name)
         except OSError:
             pass
+
+    if config.alpha_pnl.exists():
+        try:
+            with os.scandir(config.alpha_pnl) as it:
+                for entry in it:
+                    if entry.is_file() and not entry.name.startswith("."):
+                        names.add(entry.name)
+        except OSError:
+            pass
+
+    if config.alpha_feature.exists():
+        try:
+            with os.scandir(config.alpha_feature) as it:
+                for entry in it:
+                    if not entry.is_file() or entry.name.startswith("."):
+                        continue
+                    n = entry.name
+                    for v in FEATURE_VERSIONS:
+                        suffix = f".{v}.npy"
+                        if n.endswith(suffix):
+                            names.add(n[:-len(suffix)])
+                            break
+        except OSError:
+            pass
+
     return sorted(names)
 
 
@@ -241,7 +290,7 @@ def scan_changes(config: Config, manifest: SyncManifest
         old_pnl = old.pnl_mtime if old else 0.0
         old_dump_latest = old.dump_latest if old else None
         old_dump_count = old.dump_count if old else 0
-        old_feat = old.feature_mtime if old else {}
+        old_feat = old.feature_mtime if old else 0.0
 
         if new.src_mtime > old_src:
             changes.alpha_src.add(name)
@@ -251,12 +300,9 @@ def scan_changes(config: Config, manifest: SyncManifest
             dates = _newer_dump_dates(config.alpha_dump / name, old_dump_latest)
             if dates:
                 changes.alpha_dump[name] = dates
-
-        feat_versions: list[str] = []
-        for v in FEATURE_VERSIONS:
-            if new.feature_mtime.get(v, 0.0) > old_feat.get(v, 0.0):
-                feat_versions.append(v)
-        if feat_versions:
-            changes.alpha_feature[name] = feat_versions
+        if new.feature_mtime > old_feat:
+            versions = _feature_versions_present(config.alpha_feature, name)
+            if versions:
+                changes.alpha_feature[name] = versions
 
     return changes, fresh
