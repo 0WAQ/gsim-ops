@@ -175,7 +175,7 @@ Instead, `ops sync push` keeps a per-machine `~/.cache/ops/lib/<library_id>/sync
 Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), descending into a factor's dirs only when its top-level fingerprint moved. Changed files feed `rclone copy --files-from --no-traverse` so rclone skips the remote-side listing entirely. Manifest is only advanced after the corresponding `rclone copy` returns 0; partial pushes naturally re-send next time.
 
 **First-run is automatic.** No `--bootstrap` / `init` flags exposed:
-- `ops sync push` on a machine without a manifest: scan disk once, save manifest, then run the normal incremental path. `rclone copy` is additive so already-present remote files are skipped — no double upload.
+- `ops sync push` on a machine without a manifest: treats it as empty — every factor looks new to `scan_changes`. `rclone copy` is additive so already-present remote files are skipped; manifest is written only after a successful push.
 - `ops sync pull` on an empty machine (zero local factors): full `rclone copy` of every data dir, then build the manifest from what just landed.
 
 **State merge** (`ops/services/sync/merge.py`). Each of `factor_state.json`, `metrics.json`, `datasources.json` carries a per-entry `updated_at` ISO timestamp. The sync step:

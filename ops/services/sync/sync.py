@@ -246,9 +246,9 @@ def _merge_states(config: Config, *, upload: bool, dry_run: bool) -> int:
 def push(config: Config, *, dry_run: bool = False) -> int:
     """Push local data + state to remote.
 
-    Auto-detects first-run: if no local manifest exists, scan disk to build
-    one (cheap, no rclone), then run the normal incremental path. `rclone
-    copy` is additive — already-present remote files are skipped.
+    No manifest → treat as empty (everything looks new). `rclone copy` is
+    additive so already-present remote files are skipped. Manifest is
+    written only after a successful data push.
     """
     _check_rclone()
     _require_remote(config)
@@ -257,17 +257,7 @@ def push(config: Config, *, dry_run: bool = False) -> int:
     remote_base = _remote_base(config)
     library_id = config.library_id
 
-    manifest = load_manifest(library_id)
-    if manifest is None:
-        banner("first push: 建 manifest (本地扫盘)")
-        names = list_factor_names(config)
-        info(f"  扫描 {len(names)} 个因子...")
-        manifest = SyncManifest(factors={
-            name: stat_factor(name, config) for name in names
-        })
-        if not dry_run:
-            save_manifest(library_id, manifest)
-            info(f"  ✔ manifest 已写入 ({len(manifest.factors)} factors)")
+    manifest = load_manifest(library_id) or SyncManifest()
 
     banner("push data")
     changes, fresh = scan_changes(config, manifest)
