@@ -241,13 +241,52 @@ def _merge_states(config: Config, *, upload: bool, dry_run: bool) -> int:
     return failed
 
 
+# ───────────────────────── manifest helpers ───────────────────────────
+
+def _ensure_manifest(config: Config) -> None:
+    """If no manifest exists, build one from disk so subsequent push is
+    incremental. Idempotent — skips if manifest already present."""
+    library_id = config.library_id
+    if load_manifest(library_id) is not None:
+        return
+    names = list_factor_names(config)
+    if not names:
+        return
+    manifest = SyncManifest(factors={
+        name: stat_factor(name, config) for name in names
+    })
+    save_manifest(library_id, manifest)
+    info(f"  ✔ manifest 重建 ({len(manifest.factors)} factors)")
+
+
+# ───────────────────────── pre-push check ─────────────────────────────
+
+def _fetch_remote_state_names(config: Config) -> set[str] | None:
+    """Download remote factor_state.json and return its factor names.
+    Returns None if remote is unreachable or empty."""
+    remote_state = f"{_remote_base(config)}/.state/factor_state.json"
+    with tempfile.TemporaryDirectory(prefix="ops-sync-pre-") as td:
+        tmp = Path(td) / "factor_state.json"
+        rc, _ = _rclone("copyto", remote_state, str(tmp),
+                        "--retries", "1", capture=True)
+        if rc != 0 or not tmp.exists():
+            return None
+        try:
+            with tmp.open("r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+            return set(data.keys())
+        except Exception:
+            return None
+
+
 # ───────────────────────── public entry points ──────────────────────────
 
 def push(config: Config, *, dry_run: bool = False) -> int:
     """Push local data + state to remote.
 
-    No manifest → treat as empty (everything looks new). `rclone copy` is
-    additive so already-present remote files are skipped. Manifest is
+    Checks remote state first: if remote has factors not in local state,
+    refuse and ask user to pull first (like git push refusing when behind).
+    No manifest → treat as empty (everything looks new). Manifest is
     written only after a successful data push.
     """
     _check_rclone()
@@ -256,6 +295,28 @@ def push(config: Config, *, dry_run: bool = False) -> int:
     failed = 0
     remote_base = _remote_base(config)
     library_id = config.library_id
+
+    banner("pre-push check")
+    remote_names = _fetch_remote_state_names(config)
+    if remote_names is not None:
+        local_state_path = cache_path(library_id, "factor_state.json")
+        local_names: set[str] = set()
+        if local_state_path.exists():
+            try:
+                with local_state_path.open("r", encoding="utf-8") as f:
+                    local_names = set((json.load(f) or {}).keys())
+            except Exception:
+                pass
+        behind = remote_names - local_names
+        if behind:
+            error(f"  ✘ 远端有 {len(behind)} 个因子本地 state 中不存在,请先 pull")
+            sample = sorted(behind)[:5]
+            warn(f"  (示例): {', '.join(sample)}")
+            warn("  → 运行 ops sync pull 后再 push")
+            return 1
+        info(f"  ✔ 本地 state 已包含远端全部 {len(remote_names)} 个因子")
+    else:
+        info("  · 远端 state 不存在或不可达,跳过检查")
 
     manifest = load_manifest(library_id) or SyncManifest()
 
@@ -295,6 +356,7 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
     Auto-detects empty-local: if no factors exist locally, do a full
     `rclone copy` of every data dir. Otherwise: merge state, then pull
     only the factors named in remote `factor_state.json` that we lack.
+    Always ensures a manifest exists after pull (rebuilds from disk if missing).
     """
     _check_rclone()
     _require_remote(config)
@@ -320,85 +382,74 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
                 failed += 1
             else:
                 info(f"  ✔ {d}")
-        if not dry_run:
-            manifest = SyncManifest(factors={
-                name: stat_factor(name, config)
-                for name in list_factor_names(config)
-            })
-            save_manifest(library_id, manifest)
-            info(f"  ✔ manifest 已写入 ({len(manifest.factors)} factors)")
-        return failed
+    else:
+        banner("pull data (增量)")
+        state_path = cache_path(library_id, "factor_state.json")
+        if not state_path.exists():
+            info("  · 本地 factor_state.json 不存在,跳过 data 拉取")
+        else:
+            try:
+                with state_path.open("r", encoding="utf-8") as f:
+                    state_data = json.load(f)
+            except Exception as e:
+                error(f"  ✘ 读取 factor_state.json 失败: {e}")
+                failed += 1
+                state_data = None
 
-    banner("pull data (增量)")
-    state_path = cache_path(library_id, "factor_state.json")
-    if not state_path.exists():
-        info("  · 本地 factor_state.json 不存在,跳过 data 拉取")
-        return failed
-    try:
-        with state_path.open("r", encoding="utf-8") as f:
-            state_data = json.load(f)
-    except Exception as e:
-        error(f"  ✘ 读取 factor_state.json 失败: {e}")
-        return failed + 1
+            if state_data is not None:
+                missing = [
+                    name for name, rec in state_data.items()
+                    if isinstance(rec, dict) and name not in local_names
+                ]
+                if not missing:
+                    info("  · 无需拉取")
+                else:
+                    info(f"  → 需要拉取 {len(missing)} 个因子")
+                    for name in missing:
+                        src = f"{remote_base}/alpha_src/{name}"
+                        dst = str(config.alpha_src / name)
+                        Path(dst).mkdir(parents=True, exist_ok=True)
+                        rc, _ = _rclone("copy", src, dst,
+                                        *DATA_FLAGS.get("alpha_src", []),
+                                        dry_run=dry_run)
+                        if rc != 0:
+                            warn(f"  ⚠ alpha_src/{name} rc={rc}")
 
-    missing = [
-        name for name, rec in state_data.items()
-        if isinstance(rec, dict) and name not in local_names
-    ]
-    if not missing:
-        info("  · 无需拉取")
-        return failed
-    info(f"  → 需要拉取 {len(missing)} 个因子")
-    for name in missing:
-        # alpha_src/<name>/  — dir
-        src = f"{remote_base}/alpha_src/{name}"
-        dst = str(config.alpha_src / name)
-        Path(dst).mkdir(parents=True, exist_ok=True)
-        rc, _ = _rclone("copy", src, dst, *DATA_FLAGS.get("alpha_src", []),
-                        dry_run=dry_run)
-        if rc != 0:
-            warn(f"  ⚠ alpha_src/{name} rc={rc}")
+                        src = f"{remote_base}/alpha_dump/{name}"
+                        dst = str(config.alpha_dump / name)
+                        Path(dst).mkdir(parents=True, exist_ok=True)
+                        rc, _ = _rclone("copy", src, dst,
+                                        *DATA_FLAGS.get("alpha_dump", []),
+                                        dry_run=dry_run)
+                        if rc != 0:
+                            warn(f"  ⚠ alpha_dump/{name} rc={rc}")
 
-        # alpha_dump/<name>/  — dir
-        src = f"{remote_base}/alpha_dump/{name}"
-        dst = str(config.alpha_dump / name)
-        Path(dst).mkdir(parents=True, exist_ok=True)
-        rc, _ = _rclone("copy", src, dst, *DATA_FLAGS.get("alpha_dump", []),
-                        dry_run=dry_run)
-        if rc != 0:
-            warn(f"  ⚠ alpha_dump/{name} rc={rc}")
+                        config.alpha_pnl.mkdir(parents=True, exist_ok=True)
+                        rc, _ = _rclone(
+                            "copyto",
+                            f"{remote_base}/alpha_pnl/{name}",
+                            str(config.alpha_pnl / name),
+                            "--ignore-existing", "--retries", "1",
+                            dry_run=dry_run, capture=True,
+                        )
+                        if rc != 0:
+                            warn(f"  ⚠ alpha_pnl/{name} rc={rc}")
 
-        # alpha_pnl/<name>  — single file (use copyto so basename is preserved)
-        config.alpha_pnl.mkdir(parents=True, exist_ok=True)
-        rc, _ = _rclone(
-            "copyto",
-            f"{remote_base}/alpha_pnl/{name}",
-            str(config.alpha_pnl / name),
-            "--ignore-existing", "--retries", "1",
-            dry_run=dry_run, capture=True,
-        )
-        if rc != 0:
-            warn(f"  ⚠ alpha_pnl/{name} rc={rc}")
+                        config.alpha_feature.mkdir(parents=True, exist_ok=True)
+                        for v in ("v1", "v2"):
+                            fname = f"{name}.{v}.npy"
+                            rc, _ = _rclone(
+                                "copyto",
+                                f"{remote_base}/alpha_feature/{fname}",
+                                str(config.alpha_feature / fname),
+                                "--ignore-existing", "--retries", "1",
+                                dry_run=dry_run, capture=True,
+                            )
+                            if rc != 0:
+                                warn(f"  ⚠ alpha_feature/{fname} rc={rc}")
 
-        # alpha_feature/<name>.v{1,2}.npy  — flat files
-        config.alpha_feature.mkdir(parents=True, exist_ok=True)
-        for v in ("v1", "v2"):
-            fname = f"{name}.{v}.npy"
-            rc, _ = _rclone(
-                "copyto",
-                f"{remote_base}/alpha_feature/{fname}",
-                str(config.alpha_feature / fname),
-                "--ignore-existing", "--retries", "1",
-                dry_run=dry_run, capture=True,
-            )
-            if rc != 0:
-                warn(f"  ⚠ alpha_feature/{fname} rc={rc}")
     if not dry_run:
-        manifest = load_manifest(library_id) or SyncManifest()
-        for name in missing:
-            manifest.factors[name] = stat_factor(name, config)
-        save_manifest(library_id, manifest)
-        info(f"  ✔ manifest 已更新 (+{len(missing)})")
+        _ensure_manifest(config)
     return failed
 
 
