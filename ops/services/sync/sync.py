@@ -244,19 +244,22 @@ def _merge_states(config: Config, *, upload: bool, dry_run: bool) -> int:
 # ───────────────────────── manifest helpers ───────────────────────────
 
 def _ensure_manifest(config: Config) -> None:
-    """If no manifest exists, build one from disk so subsequent push is
-    incremental. Idempotent — skips if manifest already present."""
+    """Rebuild manifest if missing or stale (covers fewer factors than disk)."""
     library_id = config.library_id
-    if load_manifest(library_id) is not None:
-        return
     names = list_factor_names(config)
     if not names:
+        return
+    existing = load_manifest(library_id)
+    if existing is not None and len(existing.factors) >= len(names):
         return
     manifest = SyncManifest(factors={
         name: stat_factor(name, config) for name in names
     })
     save_manifest(library_id, manifest)
-    info(f"  ✔ manifest 重建 ({len(manifest.factors)} factors)")
+    if existing is None:
+        info(f"  ✔ manifest 新建 ({len(manifest.factors)} factors)")
+    else:
+        info(f"  ✔ manifest 重建 ({len(existing.factors)} → {len(manifest.factors)} factors)")
 
 
 # ───────────────────────── pre-push check ─────────────────────────────
