@@ -50,6 +50,18 @@ uv run <cmd>     # Run command in venv
 
 Entry point: `ops/main.py` (argparse dispatcher). Each subcommand lives in its own package under `ops/` with an `args.py` (CLI registration) and implementation module.
 
+### Design Principles
+
+**Destructive operations are opt-in.** Default behavior never deletes user data. Every destructive path lives behind an explicit flag or a separate subcommand. Established patterns to mirror when adding new commands:
+
+- `ops rm` defaults to a state-only soft-delete (`DELETED` tombstone). `--force` removes local `alpha_dump/<name>/` and `alpha_feature/<name>.v{1,2}.npy` only; `alpha_src` and `alpha_pnl` are always preserved.
+- `ops sync push` uses `rclone copy` (additive). It never issues `rclone delete`, even for `DELETED` factors. Remote cleanup is the job of the planned `ops sync gc` (opt-in, dry-run by default, `--apply` to actually purge).
+- Bulk operations default to dry-run; require `--apply` (or equivalent) to execute.
+- State merge prefers data preservation over precision: tied `updated_at` keeps local; missing timestamps treated as epoch zero.
+
+When adding a new command that touches files, state, or remotes: default to the non-destructive path, surface the destructive variant behind a flag, and require explicit user authorization at the scope being acted on.
+
+
 | Subcommand | Purpose | Module |
 |------------|---------|--------|
 | `submit` | Copy factors from dropbox to staging, generate `meta.json`, mark SUBMITTED | `ops/services/submit/` |
