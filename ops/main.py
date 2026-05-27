@@ -1,5 +1,6 @@
 import argparse
 
+from ops.cli.run import add_run_subparser
 from ops.cli.check import add_check_subparser
 from ops.cli.list import add_list_subparser
 from ops.cli.info import add_info_subparser
@@ -23,6 +24,7 @@ def main():
         title="sub-command", dest="sub-command", required=True
     )
 
+    add_run_subparser(subparsers)
     add_check_subparser(subparsers)
     add_list_subparser(subparsers)
     add_info_subparser(subparsers)
