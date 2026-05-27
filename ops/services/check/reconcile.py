@@ -18,6 +18,7 @@ Reconciliation rules:
   CHECKING     | recycle/            | → REJECTED
   CHECKING     | (nowhere)           | drop record
   ACTIVE       | alpha_src/          | OK
+  ACTIVE       | staging/            | → SUBMITTED (resubmit crashed mid-move)
   ACTIVE       | elsewhere/nowhere   | warn (don't auto-fix — surprising)
   REJECTED     | recycle/            | OK
   REJECTED     | elsewhere/nowhere   | warn
@@ -116,6 +117,11 @@ def reconcile(config: Config, store: StateStore) -> dict[str, int]:
         elif st == FactorStatus.ACTIVE:
             if name in alpha_src:
                 counts["ok"] += 1
+            elif name in staging:
+                # ops resubmit 崩在 move 之后、transition 之前的恢复路径
+                store.transition(name, FactorStatus.SUBMITTED)
+                info(f"  ⚙  {name} ACTIVE → SUBMITTED (found in staging, likely interrupted resubmit)")
+                counts["reverted_submitted"] += 1
             else:
                 warn(f"  ⚠  {name} ACTIVE but not in alpha_src — manual review")
                 counts["warned"] += 1

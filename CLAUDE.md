@@ -36,6 +36,10 @@ uv run ops sync status               # Quick local-vs-remote summary (no data sc
 uv run ops sync verify               # Slow: rclone check across all dirs
 uv run ops rm AlphaXxx               # 软删除:仅打 DELETED 标,文件保留
 uv run ops rm AlphaXxx --force       # 同时删本地 dump + feature(保留 src/pnl)
+uv run ops resubmit AlphaXxx         # 将 active 因子打回 staging 重新审查
+uv run ops resubmit AlphaXxx --purge # 同时清除 dump + feature(保留 src/pnl)
+uv run ops resubmit -u wbai          # 批量:wbai 所有 active 因子(apt 风格确认)
+uv run ops resubmit -u wbai -y       # 批量,跳过确认
 ```
 
 No test suite exists. Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
@@ -55,6 +59,7 @@ Entry point: `ops/main.py` (argparse dispatcher). Each subcommand lives in its o
 **Destructive operations are opt-in.** Default behavior never deletes user data. Every destructive path lives behind an explicit flag or a separate subcommand. Established patterns to mirror when adding new commands:
 
 - `ops rm` defaults to a state-only soft-delete (`DELETED` tombstone). `--force` removes local `alpha_dump/<name>/` and `alpha_feature/<name>.v{1,2}.npy` only; `alpha_src` and `alpha_pnl` are always preserved.
+- `ops resubmit` defaults to moving `alpha_src/<name>/` → `staging/<name>/` and flipping ACTIVE → SUBMITTED. `alpha_dump` / `alpha_feature` / `alpha_pnl` are kept by default; `--purge` removes dump + feature (pnl still preserved — different Stats modules don't always overwrite, and we need the history). Batch mode (`-u` / `-s`) lists targets and asks `[y/N]` apt-install style; `-y` skips. Source status currently restricted to ACTIVE — REJECTED uses the existing `ops submit` recycle-fallback path.
 - `ops sync push` uses `rclone copy` (additive). It never issues `rclone delete`, even for `DELETED` factors. Remote cleanup is the job of the planned `ops sync gc` (opt-in, dry-run by default, `--apply` to actually purge).
 - Bulk operations default to dry-run; require `--apply` (or equivalent) to execute.
 - State merge prefers data preservation over precision: tied `updated_at` keeps local; missing timestamps treated as epoch zero.
@@ -65,6 +70,7 @@ When adding a new command that touches files, state, or remotes: default to the 
 | Subcommand | Purpose | Module |
 |------------|---------|--------|
 | `submit` | Copy factors from dropbox (or recycle fallback) to staging, generate `meta.json`, mark SUBMITTED | `ops/services/submit/` |
+| `resubmit` | Move ACTIVE factor back to staging, flip state to SUBMITTED for re-check | `ops/services/resubmit/` |
 | `check` | 8-stage alpha factor validation pipeline (runs in-place on staging) | `ops/services/check/` |
 | `status` | Query factor lifecycle state | `ops/services/status/` |
 | `backfill` | One-shot: generate `meta.json` + ACTIVE for existing factors in `alpha_src/` | `ops/services/backfill/` |
@@ -226,6 +232,10 @@ dropbox/{user}/{date}/AlphaXxx/      (QR-owned, read-only source)
 staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
     │  ops check   → reconcile → 8-stage pipeline run
     ├── pass ──► alpha_src/AlphaXxx/                  state=ACTIVE
+    │                │  ops resubmit  (后续发现因子有问题,召回重审)
+    │                │  → 搬回 staging/ + state→SUBMITTED  (--purge 顺带清 dump/feature)
+    │                ▼
+    │            [回到 staging,等待下一次 ops check]
     ├── fail (validate/long_backtest)
     │            → staging/ (kept in-place)            state→SUBMITTED  (retry via ops check --retry)
     └── fail (checkbias/checkpoint/compliance/correlation/archive)
