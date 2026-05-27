@@ -47,7 +47,9 @@ def run_one(factor_dir: Path, config: Config,
             do_pack: bool, i: int, total: int) -> str:
     """Returns one of: 'pass' | 'fail' | 'locked'."""
     name = factor_dir.name
-    bar = f"[{i+1:>{len(str(total))}}/{total}]"
+    total_n = len(str(total))
+    prog = (i + 1) / total
+    bar = f"[{i+1:>{total_n}}/{total}] {prog:>6.1%}"
     print(f"{bar} running ", end="")
     highlight(name)
 
