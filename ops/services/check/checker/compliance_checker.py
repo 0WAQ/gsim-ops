@@ -2,7 +2,6 @@ import numpy as np
 from pathlib import Path
 from .base import *
 from ops.infra.config import Config
-from ops.infra.gsim.runner import Runner, BacktestError
 from ops.core.alpha.metadata import AlphaMetadata
 from ops.core.alpha.results.compliance import *
 
@@ -93,33 +92,24 @@ class ComplianceChecker:
         return Position(avg_long_pct, avg_short_pct, long_count, short_count)
 
     def check(self, factor: AlphaMetadata) -> CompResult:
-        try:
-            # Long Backtest
-            Runner.run_backtest(factor.xml_file, self.config)
+        npy_files = factor.get_v2npy_files()
+        if not npy_files:
+            raise ComplianceSkip("未找到 v2 版本的 npy 文件")
 
-            npy_files = factor.get_v2npy_files()
-            if not npy_files:
-                raise ComplianceSkip("未找到 v2 版本的 npy 文件")
+        positions: list[Position] = []
 
-            # 收集持仓信息
-            positions: list[Position] = []
-            
-            # 检查所有文件, 一旦发现问题立即返回
-            for npy_file in npy_files:
-                position = self._check_position(npy_file)
-                if position is None:
-                    continue
-                positions.append(position)
+        for npy_file in npy_files:
+            position = self._check_position(npy_file)
+            if position is None:
+                continue
+            positions.append(position)
 
-            if not positions:
-                raise ComplianceSkip("持仓全空") # TODO:
+        if not positions:
+            raise ComplianceSkip("持仓全空")
 
-            # 计算平均持仓信息
-            return CompResult(np.mean([p.long_pct for p in positions], dtype=np.float64),
-                            np.mean([p.short_pct for p in positions], dtype=np.float64),
-                            np.mean([p.long_count for p in positions], dtype=int),
-                            np.mean([p.short_count for p in positions], dtype=int),
-                            len(npy_files))
+        return CompResult(np.mean([p.long_pct for p in positions], dtype=np.float64),
+                        np.mean([p.short_pct for p in positions], dtype=np.float64),
+                        np.mean([p.long_count for p in positions], dtype=int),
+                        np.mean([p.short_count for p in positions], dtype=int),
+                        len(npy_files))
 
-        except BacktestError as e:
-            raise ComplianceFail(e)

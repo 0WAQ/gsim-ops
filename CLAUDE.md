@@ -64,8 +64,8 @@ When adding a new command that touches files, state, or remotes: default to the 
 
 | Subcommand | Purpose | Module |
 |------------|---------|--------|
-| `submit` | Copy factors from dropbox to staging, generate `meta.json`, mark SUBMITTED | `ops/services/submit/` |
-| `check` | Alpha factor validation pipeline (runs in-place on staging) | `ops/services/check/` |
+| `submit` | Copy factors from dropbox (or recycle fallback) to staging, generate `meta.json`, mark SUBMITTED | `ops/services/submit/` |
+| `check` | 8-stage alpha factor validation pipeline (runs in-place on staging) | `ops/services/check/` |
 | `status` | Query factor lifecycle state | `ops/services/status/` |
 | `backfill` | One-shot: generate `meta.json` + ACTIVE for existing factors in `alpha_src/` | `ops/services/backfill/` |
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
@@ -78,14 +78,21 @@ Removed subcommands: `cp`, `scp`, `compiler`.
 
 ### Check Pipeline (`ops/services/check/`)
 
-`CheckerPipeline` in `check.py` runs 6 stages sequentially per factor:
+`CheckerPipeline` in `check.py` runs 8 stages sequentially per factor:
 
+0. **Validate** - Short backtest (20241201-20241231) without DataFirewall — validates factor code/config can run at all
 1. **Checkbias** - Short backtest (20241201-20241231) with DataFirewall injection for forward-looking bias detection
-2. **Checkpoint** - Breakpoint validation (5 days)
-3. **Long Backtest** - Full historical (20150101-20251231)
+2. **Checkpoint** - Breakpoint stability validation (5-day checkpoint)
+3. **Long Backtest** - Full historical backtest (20150101-20251231), pure run, no checks
 4. **Compliance** - Position limits (max 5% per stock), min stock counts (50 long, 50 short, 100 total)
 5. **Correlation** - Factor correlation < 0.7 threshold against existing library
 6. **Archive** - Run simsummary, save metrics to index, move to library; Fail: move to recycle folder
+
+Plus pack (incremental update to alpha_feature, non-fatal) at the end.
+
+**Failure semantics**:
+- validate / long_backtest fail → revert to SUBMITTED, factor stays in staging (environmental/config issue, retry via `ops check --retry`)
+- checkbias / checkpoint / compliance / correlation / archive fail → REJECTED, factor moved to recycle (factor quality issue, QR must fix code and re-submit)
 
 Uses `ProcessPoolExecutor` (max 20 workers) for parallel factor checking.
 
@@ -209,7 +216,7 @@ Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), desc
 
 ### Factor Lifecycle
 
-State machine: `SUBMITTED → CHECKING → ACTIVE | REJECTED → (DECAYING → RETIRED)`.
+State machine: `SUBMITTED → CHECKING → ACTIVE | REJECTED → (DECAYING → RETIRED → DELETED)`.
 
 **Flow**:
 ```
@@ -217,9 +224,15 @@ dropbox/{user}/{date}/AlphaXxx/      (QR-owned, read-only source)
     │  ops submit  → parse_factor() → write meta.json + state=SUBMITTED
     ▼
 staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
-    │  ops check   → reconcile → in-place pipeline run
+    │  ops check   → reconcile → 8-stage pipeline run
     ├── pass ──► alpha_src/AlphaXxx/                  state=ACTIVE
-    └── fail ──► recycle/{user}/{stage}/AlphaXxx/     state=REJECTED
+    ├── fail (validate/long_backtest)
+    │            → staging/ (kept in-place)            state→SUBMITTED  (retry via ops check --retry)
+    └── fail (checkbias/checkpoint/compliance/correlation/archive)
+                 → recycle/{user}/{stage}/AlphaXxx/    state=REJECTED
+                     │  ops submit (recycle fallback)   → staging/ + state→SUBMITTED
+                     ▼
+                 [same flow as new factor]
 ```
 
 **A factor record is never deleted from state.json** — it transitions through statuses but stays. REJECTED records keep `last_fail_stage` / `last_fail_reason` for auditing. The only thing reconcile drops are pure orphans (status SUBMITTED/CHECKING with no files anywhere on disk).
@@ -261,6 +274,10 @@ After `to_lib` / `to_recycle`, check rewrites `Modules.Alpha.@module` to the .py
 | CHECKING | nowhere | drop record |
 | ACTIVE | not in alpha_src | warn (don't auto-fix — surprising) |
 | REJECTED | not in recycle | warn |
+| DELETED | staging | → SUBMITTED (re-submitted, tombstone invalidated) |
+| DELETED | alpha_src | → ACTIVE (tombstone invalidated) |
+| DELETED | recycle | → REJECTED (tombstone invalidated) |
+| DELETED | nowhere | ok |
 
 Filesystem is the source of truth; reconcile only touches state.
 

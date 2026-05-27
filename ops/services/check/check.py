@@ -23,16 +23,23 @@ from ops.core.alpha.results.checkbias import *
 from .xml_prepare import *
 from .reconcile import reconcile
 from .checker.base import *
-from .checker.compliance_checker import ComplianceChecker
-from .checker.checkpoint_checker import CheckpointChecker
+from .checker.validate_checker import ValidateChecker
 from .checker.checkbias_checker import CheckbiasChecker
+from .checker.checkpoint_checker import CheckpointChecker
+from .checker.long_backtest_checker import LongBacktestChecker
+from .checker.compliance_checker import ComplianceChecker
 from .checker.correlation_checker import CorrelationChecker
+
+# Stages whose failure is likely environmental/config — revert to SUBMITTED, leave in staging.
+_RETRYABLE_STAGES = {"validate", "long_backtest"}
+
 
 class CheckerPipeline:
     def __init__(self,
                  users: list[str] | None,
                  config_path: Path,
-                 factor: str | None=None):
+                 factor: str | None = None,
+                 retry: bool = False):
 
         self.config = Config.load(config_path)
         self.config_path = config_path
@@ -40,15 +47,18 @@ class CheckerPipeline:
         self.config.alpha_src.mkdir(exist_ok=True)
         self.config.alpha_dump.mkdir(exist_ok=True)
         self.config.alpha_pnl.mkdir(exist_ok=True)
+        self.retry = retry
 
         self.metadatas = self._scan_factors(users, factor)
         for md in self.metadatas:
             prepare_for_initial(md, self.config)
 
+        self.validate_checker = ValidateChecker(config=self.config)
+        self.checkbias_checker = CheckbiasChecker(config=self.config)
+        self.checkpoint_checker = CheckpointChecker(config=self.config)
+        self.long_backtest_checker = LongBacktestChecker(config=self.config)
         self.compliance_checker = ComplianceChecker(config=self.config)
         self.correlation_checker = CorrelationChecker(config=self.config)
-        self.checkpoint_checker = CheckpointChecker(config=self.config)
-        self.checkbias_checker = CheckbiasChecker(config=self.config)
 
     def _scan_factors(self, users: list[str] | None,
                       factor_name: str | None = None) -> list[AlphaMetadata]:
@@ -204,35 +214,45 @@ class CheckerPipeline:
         store.transition(factor.name, FactorStatus.CHECKING)
 
         try:
-            # 1. Checkbias (Short Backtest)
+            # 0. Validate — short backtest, no firewall (env/config check)
+            prepare_for_validate(factor)
+            self.validate_checker.check(factor)
+            info(f"  ✔  {factor.key} validate passed")
+
+            # 1. Checkbias — firewall injection + short backtest
             prepare_for_checkbias(factor)
             self.checkbias_checker.check(factor)
             info(f"  ✔  {factor.key} checkbias passed")
 
-            # 2. Checkpoint
-            prepare_for_checkpoint(factor) # TODO: now, do nothing
+            # 2. Checkpoint — breakpoint stability
+            prepare_for_checkpoint(factor)
             self.checkpoint_checker.check(factor)
             self.checkpoint_checker.clean(factor)
             info(f"  ✔  {factor.key} checkpoint passed")
 
-            # 3. Compliance (Long Backtest)
+            # 3. Long Backtest — full history (pure run, no checks)
+            prepare_for_long_backtest(factor)
+            self.long_backtest_checker.check(factor)
+            info(f"  ✔  {factor.key} long_backtest passed")
+
+            # 4. Compliance — position limits check
             prepare_for_compliance(factor)
             self.compliance_checker.check(factor)
             info(f"  ✔  {factor.key} compliance passed")
 
-            # 4. Correlation
+            # 5. Correlation — correlation against library
             prepare_for_correlation(factor)
             self.correlation_checker.check(factor)
             info(f"  ✔  {factor.key} correlation passed")
 
-            # 5. Archive
+            # 6. Archive — simsummary + move to lib
             metrics = Runner.run_simsummary(factor.pnl_file, self.config)
             prepare_for_archive(factor)
             self.to_lib(factor)
             if metrics:
                 update_metrics(self.config_path, factor.name, metrics)
 
-            # 6. Pack — incremental update to alpha_feature (non-fatal)
+            # 7. Pack — incremental update to alpha_feature (non-fatal)
             try:
                 pack_one_incremental(factor.name, [], self.config)
             except Exception as e:
@@ -252,24 +272,37 @@ class CheckerPipeline:
             check.failed_stage = e.stage
             check.fail_reason = str(e)
             store.append_check(factor.name, check)
-            # revert CHECKING → SUBMITTED, leave factor in staging for re-check
             store.transition(factor.name, FactorStatus.SUBMITTED)
             return "error"
+
         except CheckFail as e:
-            error(f"  ✘  {factor.key} {e.stage} failed. ({str(e)})")
-            prepare_for_recycle(factor) # TODO: now, do nothing
-            self.to_recycle(factor, e)
-            now = datetime.now().isoformat(timespec="seconds")
-            check.finished_at = now
-            check.passed = False
-            check.failed_stage = e.stage
-            check.fail_reason = str(e)
-            store.append_check(factor.name, check)
-            store.transition(factor.name, FactorStatus.REJECTED,
-                             rejected_at=now,
-                             last_fail_stage=e.stage,
-                             last_fail_reason=str(e))
-            return "fail"
+            if e.stage in _RETRYABLE_STAGES:
+                # Environmental/config failure — revert to SUBMITTED, keep in staging
+                error(f"  ✘  {factor.key} {e.stage} failed (环境/配置问题). ({str(e)})")
+                check.finished_at = datetime.now().isoformat(timespec="seconds")
+                check.passed = False
+                check.failed_stage = e.stage
+                check.fail_reason = str(e)
+                store.append_check(factor.name, check)
+                store.transition(factor.name, FactorStatus.SUBMITTED)
+                return "error"
+            else:
+                # Factor quality failure — REJECTED + recycle
+                error(f"  ✘  {factor.key} {e.stage} failed. ({str(e)})")
+                prepare_for_recycle(factor)
+                self.to_recycle(factor, e)
+                now = datetime.now().isoformat(timespec="seconds")
+                check.finished_at = now
+                check.passed = False
+                check.failed_stage = e.stage
+                check.fail_reason = str(e)
+                store.append_check(factor.name, check)
+                store.transition(factor.name, FactorStatus.REJECTED,
+                                 rejected_at=now,
+                                 last_fail_stage=e.stage,
+                                 last_fail_reason=str(e))
+                return "fail"
+
         except Exception as e:
             # Environment / framework bug — NOT a factor problem.
             # Keep factor in staging, leave meta.json untouched, revert state to SUBMITTED.
@@ -319,11 +352,13 @@ def run_check(args):
     users: list[str] | None = [args.user] if args.user else None
     config_path: Path = args.config_path
     factor: str | None = args.factor_name
+    retry: bool = getattr(args, "retry", False)
 
-    pipline = CheckerPipeline(
+    pipeline = CheckerPipeline(
         users=users,
         config_path=config_path,
-        factor=factor
+        factor=factor,
+        retry=retry,
     )
-    pipline.run()
+    pipeline.run()
 

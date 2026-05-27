@@ -10,6 +10,7 @@ _STATUS_COLOR = {
     FactorStatus.REJECTED:  error,
     FactorStatus.DECAYING:  warn,
     FactorStatus.RETIRED:   warn,
+    FactorStatus.DELETED:   warn,
 }
 
 

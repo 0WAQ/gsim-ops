@@ -20,6 +20,7 @@ Example:
 
     parser.add_argument("--user", "-u", default=None, type=str, action=LowerAction, help="filter by submitted_by")
     parser.add_argument("--factor-name", "-f", type=str, default=None, help="check one factor by name")
+    parser.add_argument("--retry", action="store_true", help="retry factors in staging (for env/config failures)")
     parser.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
 
     parser.set_defaults(func=run_check)

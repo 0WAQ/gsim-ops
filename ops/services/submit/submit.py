@@ -91,6 +91,23 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
     return True
 
 
+def _find_recycled_factor(config: Config, factor_name: str) -> tuple[str, Path] | None:
+    """Search recycle/ for a factor by name. Returns (user, factor_dir) or None."""
+    recycle = config.recycle
+    if not recycle.exists():
+        return None
+    for user_dir in recycle.iterdir():
+        if not user_dir.is_dir():
+            continue
+        for stage_dir in user_dir.iterdir():
+            if not stage_dir.is_dir():
+                continue
+            candidate = stage_dir / factor_name
+            if candidate.is_dir():
+                return (user_dir.name, candidate)
+    return None
+
+
 def run_submit(args):
     users: list[str] = [args.user]
     start: str = args.start_date
@@ -103,13 +120,26 @@ def run_submit(args):
 
     banner("因子提交")
     found = _iter_dropbox_dirs(config, users, start, end, factor_name)
-    if not found:
+    recycled: list[tuple[str, Path]] = []
+
+    # Recycle fallback: when not in dropbox, search recycle for re-submission
+    if not found and factor_name is not None:
+        rc = _find_recycled_factor(config, factor_name)
+        if rc is not None:
+            user, rc_dir = rc
+            info(f"  未在 dropbox 找到 {factor_name},从 recycle 重新提交")
+            recycled.append((user, rc_dir))
+
+    if not found and not recycled:
         warn("没找到任何因子目录")
         bottom()
         return
 
     user_of = {d: user for user, d in found}
-    src_dirs = [d for _, d in found]
+    for user, d in recycled:
+        user_of[d] = user
+
+    src_dirs = [d for _, d in found] + [d for _, d in recycled]
     staging_dirs = copy_to_staging(config, src_dirs)
 
     passed = failed = 0

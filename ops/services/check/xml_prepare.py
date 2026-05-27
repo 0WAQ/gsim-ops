@@ -26,13 +26,33 @@ def prepare_for_initial(factor: AlphaMetadata, config: Config):
     save_xml(factor)
 
 
-def prepare_for_checkbias(factor: AlphaMetadata):
+def prepare_for_validate(factor: AlphaMetadata):
     try:
-        factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'false'
         factor.xml_config["gsim"]['Universe']['@startdate'] = "20241201"
         factor.xml_config["gsim"]['Universe']['@enddate'] = "20241231"
+        factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'false'
         save_xml(factor)
-    except Exception as e:
+    except Exception:
+        ...
+
+
+def prepare_for_checkbias(factor: AlphaMetadata):
+    try:
+        factor.xml_config["gsim"]['Universe']['@startdate'] = "20241201"
+        factor.xml_config["gsim"]['Universe']['@enddate'] = "20241231"
+        factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'false'
+        save_xml(factor)
+    except Exception:
+        ...
+
+
+def prepare_for_long_backtest(factor: AlphaMetadata):
+    try:
+        factor.xml_config["gsim"]["Universe"]["@startdate"] = "20150101"
+        factor.xml_config["gsim"]["Universe"]["@enddate"]   = "20251231"
+        factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'true'
+        save_xml(factor)
+    except Exception:
         ...
 
 
@@ -41,13 +61,7 @@ def prepare_for_checkpoint(factor: AlphaMetadata):
 
 
 def prepare_for_compliance(factor: AlphaMetadata):
-    try:
-        factor.xml_config["gsim"]["Universe"]["@startdate"] = "20150101"
-        factor.xml_config["gsim"]["Universe"]["@enddate"]   = "20251231"
-        factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'true'
-        save_xml(factor)
-    except Exception as e:
-        ...
+    ...
 
 
 def prepare_for_correlation(factor: AlphaMetadata):

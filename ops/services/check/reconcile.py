@@ -127,4 +127,23 @@ def reconcile(config: Config, store: StateStore) -> dict[str, int]:
                 warn(f"  ⚠  {name} REJECTED but not in recycle — manual review")
                 counts["warned"] += 1
 
+        elif st == FactorStatus.DELETED:
+            if name in staging:
+                store.transition(name, FactorStatus.SUBMITTED)
+                info(f"  ⚙  {name} DELETED → SUBMITTED (re-submitted)")
+                counts["reverted_submitted"] += 1
+            elif name in alpha_src:
+                store.transition(name, FactorStatus.ACTIVE, entered_at=_now())
+                info(f"  ⚙  {name} DELETED → ACTIVE (found in alpha_src)")
+                counts["promoted_active"] += 1
+            elif name in recycle:
+                _, stage = recycle[name]
+                store.transition(name, FactorStatus.REJECTED, rejected_at=_now(),
+                                 last_fail_stage=stage,
+                                 last_fail_reason="reconciled from filesystem")
+                info(f"  ⚙  {name} DELETED → REJECTED (recycle/{stage})")
+                counts["promoted_rejected"] += 1
+            else:
+                counts["ok"] += 1
+
     return counts
