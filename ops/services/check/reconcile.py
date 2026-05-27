@@ -21,6 +21,7 @@ Reconciliation rules:
   ACTIVE       | staging/            | → SUBMITTED (resubmit crashed mid-move)
   ACTIVE       | elsewhere/nowhere   | warn (don't auto-fix — surprising)
   REJECTED     | recycle/            | OK
+  REJECTED     | staging/            | → SUBMITTED (resubmit crashed mid-move)
   REJECTED     | elsewhere/nowhere   | warn
 
 We touch state, not the filesystem. Filesystem is the source of truth.
@@ -129,6 +130,11 @@ def reconcile(config: Config, store: StateStore) -> dict[str, int]:
         elif st == FactorStatus.REJECTED:
             if name in recycle:
                 counts["ok"] += 1
+            elif name in staging:
+                # ops resubmit (from rejected) 崩在 move 之后、transition 之前
+                store.transition(name, FactorStatus.SUBMITTED)
+                info(f"  ⚙  {name} REJECTED → SUBMITTED (found in staging, likely interrupted resubmit)")
+                counts["reverted_submitted"] += 1
             else:
                 warn(f"  ⚠  {name} REJECTED but not in recycle — manual review")
                 counts["warned"] += 1

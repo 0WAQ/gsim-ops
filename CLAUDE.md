@@ -37,6 +37,8 @@ uv run ops sync verify               # Slow: rclone check across all dirs
 uv run ops rm AlphaXxx               # 软删除:仅打 DELETED 标,文件保留
 uv run ops rm AlphaXxx --force       # 同时删本地 dump + feature(保留 src/pnl)
 uv run ops resubmit AlphaXxx         # 将 active 因子打回 staging 重新审查
+uv run ops resubmit AlphaXxx -s rejected   # 从 recycle 召回 rejected 因子
+uv run ops resubmit AlphaXxx -s deleted    # 复活 deleted 因子(soft-delete 仍保留 src)
 uv run ops resubmit AlphaXxx --purge # 同时清除 dump + feature(保留 src/pnl)
 uv run ops resubmit -u wbai          # 批量:wbai 所有 active 因子(apt 风格确认)
 uv run ops resubmit -u wbai -y       # 批量,跳过确认
@@ -59,7 +61,7 @@ Entry point: `ops/main.py` (argparse dispatcher). Each subcommand lives in its o
 **Destructive operations are opt-in.** Default behavior never deletes user data. Every destructive path lives behind an explicit flag or a separate subcommand. Established patterns to mirror when adding new commands:
 
 - `ops rm` defaults to a state-only soft-delete (`DELETED` tombstone). `--force` removes local `alpha_dump/<name>/` and `alpha_feature/<name>.v{1,2}.npy` only; `alpha_src` and `alpha_pnl` are always preserved.
-- `ops resubmit` defaults to moving `alpha_src/<name>/` → `staging/<name>/` and flipping ACTIVE → SUBMITTED. `alpha_dump` / `alpha_feature` / `alpha_pnl` are kept by default; `--purge` removes dump + feature (pnl still preserved — different Stats modules don't always overwrite, and we need the history). Batch mode (`-u` / `-s`) lists targets and asks `[y/N]` apt-install style; `-y` skips. Source status currently restricted to ACTIVE — REJECTED uses the existing `ops submit` recycle-fallback path.
+- `ops resubmit` defaults to moving an ACTIVE factor's `alpha_src/<name>/` → `staging/<name>/` and flipping state → SUBMITTED. With `-s rejected` it pulls from `recycle/{user}/{stage}/<name>/`; with `-s deleted` it tries `alpha_src` first (soft-delete keeps src) then falls back to `recycle/`. `alpha_dump` / `alpha_feature` / `alpha_pnl` are kept by default; `--purge` removes dump + feature (pnl still preserved — different Stats modules don't always overwrite, and we need the history). Batch mode (`-u` / `-s`) lists targets and asks `[y/N]` apt-install style; `-y` skips.
 - `ops sync push` uses `rclone copy` (additive). It never issues `rclone delete`, even for `DELETED` factors. Remote cleanup is the job of the planned `ops sync gc` (opt-in, dry-run by default, `--apply` to actually purge).
 - Bulk operations default to dry-run; require `--apply` (or equivalent) to execute.
 - State merge prefers data preservation over precision: tied `updated_at` keeps local; missing timestamps treated as epoch zero.
