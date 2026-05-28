@@ -108,3 +108,8 @@ mode:
 sync:
   remote: 39000:external-sync
   # library_id: alphalib      # 默认 = alpha_src.parent.name
+  s3:
+    endpoint_url: http://103.237.248.189:39000
+    access_key_id: external-client
+    secret_access_key: vNwRK2i+5IIusD2xYhaQUEXPeq2TeyZ/
+    bucket: external-sync

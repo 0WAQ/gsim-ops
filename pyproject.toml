@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "argparse>=1.4.0",
+    "boto3>=1.43.16",
     "colorama>=0.4.6",
     "lxml>=6.0.2",
     "lxml-stubs>=0.5.1",
@@ -19,7 +20,11 @@ dependencies = [
     "tqdm>=4.67.1",
     "wheel>=0.45.1",
     "xmltodict>=1.0.2",
+    "zstandard>=0.25.0",
 ]
 
 [project.scripts]
 ops = "ops.main:main"
+
+[tool.setuptools.packages.find]
+include = ["ops*"]

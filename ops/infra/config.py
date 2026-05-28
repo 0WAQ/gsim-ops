@@ -95,6 +95,13 @@ class Config:
         self.sync_remote: str | None = sync_cfg.get("remote")
         self.library_id: str = sync_cfg.get("library_id") or self.alpha_src.parent.name
 
+        # sync.s3 (optional — if present, use boto3 instead of rclone)
+        s3_cfg: Dict[str, Any] = sync_cfg.get("s3") or {}
+        self.s3_endpoint_url: str | None = s3_cfg.get("endpoint_url")
+        self.s3_access_key_id: str | None = s3_cfg.get("access_key_id")
+        self.s3_secret_access_key: str | None = s3_cfg.get("secret_access_key")
+        self.s3_bucket: str | None = s3_cfg.get("bucket")
+
     @staticmethod
     def _resolve_vars(raw: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve ${var_name} references in config values.
