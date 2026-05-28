@@ -562,8 +562,10 @@ def run_sync(args) -> None:
     action: str = args.action
 
     if action in ("push", "pull"):
-        fn = push if action == "push" else pull
-        failed = fn(config, dry_run=args.dry_run, force_state=getattr(args, "force_state", False))
+        if action == "push":
+            failed = push(config, dry_run=args.dry_run, force_state=getattr(args, "force_state", False))
+        elif action == "pull":
+            failed = pull(config, dry_run=args.dry_run)
         banner(f"{action} 汇总")
         if failed:
             error(f"✘ 失败子任务: {failed}")
