@@ -576,15 +576,14 @@ AlphaXxx/
 
 See `docs/plans.md` for deferred plans (architecture refactor, `ops factor` namespace, `ops sync gc`, etc.) and `docs/roadmap.md` for the feature checklist.
 
-### Sync Storage Optimization (Planned)
+### Sync Storage Optimization
 
-**问题**: alpha_dump 1.8M 小文件导致 sync listing/传输极慢。
-
-**Phase 1 — sync 层 tar.zst 压缩传输（短期）**:
+**Phase 1 — sync 层 tar.zst 压缩传输（已完成）**:
 - 本地 alpha_dump 保持 per-date npy 不变（gsim 直接读写）
 - push 时按 factor 打 tar.zst 压缩包传输（1.8M 文件 → ~2500 个包）
 - pull 时拉 tar.zst 解压到 alpha_dump/
 - 增量逻辑：manifest 检测到 factor dump 变更 → 只重新打包变更的 factor
+- 传输层已从 rclone 迁移到 boto3 S3 SDK，ThreadPoolExecutor(8) 并行化
 
 **Phase 2 — gsim FeatureReader 模块（长期，需内部调研）**:
 - 为 gsim 实现 FeatureReader Data module，从 alpha_feature memmap 按 (di, ii) 切片返回等价 per-date array
