@@ -145,28 +145,35 @@ def _max_mtime(root: Path) -> float:
     return best
 
 
+_YEAR_RE = re.compile(r"^\d{4}$")
+_MONTH_RE = re.compile(r"^\d{2}$")
+
+
 def _dump_summary(dump_dir: Path) -> tuple[Optional[str], int]:
-    """Return (latest YYYYMMDD dir name, total .npy count) under one factor's
-    dump dir. Layout: <dump_dir>/<YYYYMMDD>/*.npy"""
+    """Return (latest YYYYMMDD date, total .npy count) under one factor's
+    dump dir. Layout: <dump_dir>/<YYYY>/<MM>/<YYYYMMDD>v{1,2}.npy"""
     if not dump_dir.exists():
         return None, 0
     latest: Optional[str] = None
     total = 0
     with os.scandir(dump_dir) as it:
-        for entry in it:
-            if not entry.is_dir():
+        for year_entry in it:
+            if not year_entry.is_dir() or not _YEAR_RE.match(year_entry.name):
                 continue
-            name = entry.name
-            if not _DATE_RE.match(name):
-                continue
-            if latest is None or name > latest:
-                latest = name
-            try:
-                with os.scandir(entry.path) as sub:
-                    total += sum(1 for e in sub
-                                 if e.is_file() and e.name.endswith(".npy"))
-            except OSError:
-                pass
+            with os.scandir(year_entry.path) as mon_it:
+                for mon_entry in mon_it:
+                    if not mon_entry.is_dir() or not _MONTH_RE.match(mon_entry.name):
+                        continue
+                    with os.scandir(mon_entry.path) as day_it:
+                        for day_entry in day_it:
+                            if not day_entry.is_file() or not day_entry.name.endswith(".npy"):
+                                continue
+                            total += 1
+                            # Extract YYYYMMDD from "YYYYMMDDv1.npy" or "YYYYMMDDv2.npy"
+                            date_str = day_entry.name[:8]
+                            if _DATE_RE.match(date_str):
+                                if latest is None or date_str > latest:
+                                    latest = date_str
     return latest, total
 
 
@@ -258,16 +265,31 @@ def list_factor_names(config: Config) -> list[str]:
 
 
 def _newer_dump_dates(dump_dir: Path, prev_latest: Optional[str]) -> list[str]:
-    """List date dirs strictly newer than prev_latest (or all if prev_latest is None)."""
+    """List year/month paths under dump_dir that contain dates > prev_latest.
+    Returns sorted relative paths like ['2025/01', '2025/02', ...]."""
     if not dump_dir.exists():
         return []
-    out: list[str] = []
+    out: set[str] = set()
     with os.scandir(dump_dir) as it:
-        for entry in it:
-            if not entry.is_dir() or not _DATE_RE.match(entry.name):
+        for year_entry in it:
+            if not year_entry.is_dir() or not _YEAR_RE.match(year_entry.name):
                 continue
-            if prev_latest is None or entry.name > prev_latest:
-                out.append(entry.name)
+            y = year_entry.name
+            with os.scandir(year_entry.path) as mon_it:
+                for mon_entry in mon_it:
+                    if not mon_entry.is_dir() or not _MONTH_RE.match(mon_entry.name):
+                        continue
+                    m = mon_entry.name
+                    with os.scandir(mon_entry.path) as day_it:
+                        for day_entry in day_it:
+                            if not day_entry.is_file() or not day_entry.name.endswith(".npy"):
+                                continue
+                            date_str = day_entry.name[:8]
+                            if not _DATE_RE.match(date_str):
+                                continue
+                            if prev_latest is None or date_str > prev_latest:
+                                out.add(f"{y}/{m}")
+                                break  # month already included
     return sorted(out)
 
 

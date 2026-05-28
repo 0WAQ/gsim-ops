@@ -241,6 +241,28 @@ def _merge_states(config: Config, *, upload: bool, dry_run: bool) -> int:
     return failed
 
 
+def _force_push_states(config: Config, *, dry_run: bool) -> int:
+    """Upload local state files directly to overwrite remote. No merge."""
+    library_id = config.library_id
+    remote_state = f"{_remote_base(config)}/.state"
+    failed = 0
+    for fname in STATE_FILES:
+        local = cache_path(library_id, fname)
+        if not local.exists():
+            info(f"  · {fname}: 本地不存在,跳过")
+            continue
+        rc, _ = _rclone(
+            "copyto", str(local), f"{remote_state}/{fname}",
+            dry_run=dry_run, capture=True,
+        )
+        if rc != 0:
+            error(f"  ✘ {fname} 上传失败 rc={rc}")
+            failed += 1
+        else:
+            info(f"  ✔ {fname} 已直接上传(force-state)")
+    return failed
+
+
 # ───────────────────────── manifest helpers ───────────────────────────
 
 def _ensure_manifest(config: Config) -> None:
@@ -284,13 +306,16 @@ def _fetch_remote_state_names(config: Config) -> set[str] | None:
 
 # ───────────────────────── public entry points ──────────────────────────
 
-def push(config: Config, *, dry_run: bool = False) -> int:
+def push(config: Config, *, dry_run: bool = False, force_state: bool = False) -> int:
     """Push local data + state to remote.
 
     Checks remote state first: if remote has factors not in local state,
     refuse and ask user to pull first (like git push refusing when behind).
     No manifest → treat as empty (everything looks new). Manifest is
     written only after a successful data push.
+
+    --force-state skips pre-push check + merge, uploading local state
+    files directly to overwrite remote.
     """
     _check_rclone()
     _require_remote(config)
@@ -299,27 +324,29 @@ def push(config: Config, *, dry_run: bool = False) -> int:
     remote_base = _remote_base(config)
     library_id = config.library_id
 
-    banner("pre-push check")
-    remote_names = _fetch_remote_state_names(config)
-    if remote_names is not None:
-        local_state_path = cache_path(library_id, "factor_state.json")
-        local_names: set[str] = set()
-        if local_state_path.exists():
-            try:
-                with local_state_path.open("r", encoding="utf-8") as f:
-                    local_names = set((json.load(f) or {}).keys())
-            except Exception:
-                pass
-        behind = remote_names - local_names
-        if behind:
-            error(f"  ✘ 远端有 {len(behind)} 个因子本地 state 中不存在,请先 pull")
-            sample = sorted(behind)[:5]
-            warn(f"  (示例): {', '.join(sample)}")
-            warn("  → 运行 ops sync pull 后再 push")
-            return 1
-        info(f"  ✔ 本地 state 已包含远端全部 {len(remote_names)} 个因子")
-    else:
-        info("  · 远端 state 不存在或不可达,跳过检查")
+    if not force_state:
+        banner("pre-push check")
+        remote_names = _fetch_remote_state_names(config)
+        if remote_names is not None:
+            local_state_path = cache_path(library_id, "factor_state.json")
+            local_names: set[str] = set()
+            if local_state_path.exists():
+                try:
+                    with local_state_path.open("r", encoding="utf-8") as f:
+                        local_names = set((json.load(f) or {}).keys())
+                except Exception:
+                    pass
+            behind = remote_names - local_names
+            if behind:
+                error(f"  ✘ 远端有 {len(behind)} 个因子本地 state 中不存在,请先 pull")
+                sample = sorted(behind)[:5]
+                warn(f"  (示例): {', '.join(sample)}")
+                warn("  → 运行 ops sync pull 后再 push")
+                warn("  → 或 ops sync push --force-state 用本地 state 覆盖远端")
+                return 1
+            info(f"  ✔ 本地 state 已包含远端全部 {len(remote_names)} 个因子")
+        else:
+            info("  · 远端 state 不存在或不可达,跳过检查")
 
     manifest = load_manifest(library_id) or SyncManifest()
 
@@ -348,8 +375,11 @@ def push(config: Config, *, dry_run: bool = False) -> int:
             save_manifest(library_id, manifest)
             info("  ✔ manifest 已更新")
 
-    banner("push state (merge)")
-    failed += _merge_states(config, upload=True, dry_run=dry_run)
+    banner("push state" + (" (force overwrite)" if force_state else " (merge)"))
+    if force_state:
+        failed += _force_push_states(config, dry_run=dry_run)
+    else:
+        failed += _merge_states(config, upload=True, dry_run=dry_run)
     return failed
 
 
@@ -533,7 +563,7 @@ def run_sync(args) -> None:
 
     if action in ("push", "pull"):
         fn = push if action == "push" else pull
-        failed = fn(config, dry_run=args.dry_run)
+        failed = fn(config, dry_run=args.dry_run, force_state=getattr(args, "force_state", False))
         banner(f"{action} 汇总")
         if failed:
             error(f"✘ 失败子任务: {failed}")

@@ -26,6 +26,8 @@ Example:
     for act in ("push", "pull"):
         p = sub.add_parser(act, help=f"{act} between local and remote")
         p.add_argument("--dry-run", action="store_true", help="只展示,不传输")
+        p.add_argument("--force-state", action="store_true",
+                       help="跳过 merge,用本地 state 直接覆盖远端(factor_state/metrics/datasources)")
         p.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
         p.set_defaults(func=run_sync)
 
