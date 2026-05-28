@@ -372,20 +372,35 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
                     info("  · 无需拉取")
                 else:
                     info(f"  → {len(missing)} 个因子")
-                    for name in missing:
-                        if dry_run:
-                            continue
-                        d = config.alpha_src / name
-                        d.mkdir(parents=True, exist_ok=True)
-                        s3.download_dir(f"{pfx}/alpha_src/{name}/", d)
+                    if not dry_run:
                         config.alpha_pnl.mkdir(parents=True, exist_ok=True)
-                        s3.download(f"{pfx}/alpha_pnl/{name}",
-                                    config.alpha_pnl / name)
                         config.alpha_feature.mkdir(parents=True, exist_ok=True)
-                        for v in ("v1", "v2"):
-                            fn = f"{name}.{v}.npy"
-                            s3.download(f"{pfx}/alpha_feature/{fn}",
-                                        config.alpha_feature / fn)
+
+                        def _pull_one_factor(name: str) -> str | None:
+                            try:
+                                d = config.alpha_src / name
+                                d.mkdir(parents=True, exist_ok=True)
+                                s3.download_dir(f"{pfx}/alpha_src/{name}/", d)
+                                s3.download(f"{pfx}/alpha_pnl/{name}",
+                                            config.alpha_pnl / name)
+                                for v in ("v1", "v2"):
+                                    fn = f"{name}.{v}.npy"
+                                    s3.download(f"{pfx}/alpha_feature/{fn}",
+                                                config.alpha_feature / fn)
+                                return None
+                            except Exception as e:
+                                return f"{name}: {e}"
+
+                        progress = tqdm(total=len(missing), desc="  src/pnl/feat", unit="factor")
+                        with ThreadPoolExecutor(max_workers=8) as pool:
+                            futures = {pool.submit(_pull_one_factor, n): n for n in missing}
+                            for fut in as_completed(futures):
+                                progress.update(1)
+                                err = fut.result()
+                                if err:
+                                    warn(f"    ⚠ {err}")
+                        progress.close()
+
                     failed += _pull_dump_archives(
                         missing, config, s3, pfx, dry_run=dry_run)
     if not dry_run:

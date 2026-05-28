@@ -184,12 +184,14 @@ Cross-server factor library sync via rclone. Ships **data + state together** so 
 - `cache_path(library_id, filename, legacy_hash=...)` resolves the new path and one-shot migrates any legacy file on first call — no manual migration step
 - `index.json` is **not** synced (1h TTL, regenerated on demand); locks (`~/.cache/ops/locks/`) are fcntl, per-machine, never synced
 
-**Per-subdir rclone tuning** (`sync.py:DATA_FLAGS`):
-| Subdir | Flags | Why |
+**Per-subdir transfer strategy**:
+| Subdir | Method | Why |
 |---|---|---|
-| `alpha_dump` | `--transfers 32 --checkers 32` | Millions of tiny .npy files |
-| `alpha_feature` | `--transfers 8 --checksum` | Large memmap, content-stable |
-| `alpha_src`, `alpha_pnl` | defaults | Few small files |
+| `alpha_dump` | per-factor `.tar.zst` archive via S3 | 1.8M small npy → ~2500 archives |
+| `alpha_feature` | direct S3 upload per file | 2 large .npy per factor |
+| `alpha_src`, `alpha_pnl` | S3 upload_dir / upload | Few small files |
+
+**Transport**: `ops/infra/s3.py` (`S3Client`) wraps boto3. Config in `sync.s3` (endpoint_url, access_key_id, secret_access_key, bucket). ThreadPoolExecutor(8 workers) parallelizes push/pull.
 
 **Manifest fingerprint** (`manifest.py`). `SyncManifest` tracks per-factor mtimes and dump summary for incremental push:
 - `src_mtime` / `pnl_mtime` / `feature_mtime` — max mtime in each subtree
@@ -200,36 +202,37 @@ Cross-server factor library sync via rclone. Ships **data + state together** so 
 
 **`ops sync push --force-state`**: when local state was intentionally pruned (e.g., cleaned orphan records after deleting empty factor dirs), the pre-push check would refuse because remote state has more keys. `--force-state` skips both the pre-push check and the timestamp merge — it uploads local state files directly to overwrite remote. Use sparingly; normal push should go through merge.
 
-**Transfer model: manifest-driven `rclone copy` (additive, never deletes)**.
+**Transfer model: manifest-driven S3 upload (additive, never deletes)**.
 
-`rclone sync` was rejected because (a) it must list both sides to compute the diff — alpha_dump alone has ~1.8M files; (b) it deletes destination files missing from the source, which would wipe factors that exist only on the other machine.
+`ops sync push` keeps a per-machine `~/.cache/ops/lib/<library_id>/sync_manifest.json` recording each factor's fingerprint:
+- `src_mtime` / `pnl_mtime` / `feature_mtime` — max mtime within that subtree
+- `dump_latest` (newest YYYYMMDD dir) + `dump_count` — alpha_dump grows by appending a new date dir per check; new date + changed count ⇒ factor needs re-pack
 
-Instead, `ops sync push` keeps a per-machine `~/.cache/ops/lib/<library_id>/sync_manifest.json` recording each factor's fingerprint:
-- `src_mtime` / `pnl_mtime` / `feature_v{1,2}_mtime` — max mtime within that subtree
-- `dump_latest` (newest YYYYMMDD dir) + `dump_count` — alpha_dump grows by appending a new date dir per check; new date + changed count ⇒ only those date dirs need shipping
+Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), descending into a factor's dirs only when its top-level fingerprint moved. Changed factors are tar.zst compressed and uploaded via boto3. Manifest is only advanced after successful upload; partial pushes naturally re-send next time.
 
-Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), descending into a factor's dirs only when its top-level fingerprint moved. Changed files feed `rclone copy --files-from --no-traverse` so rclone skips the remote-side listing entirely. Manifest is only advanced after the corresponding `rclone copy` returns 0; partial pushes naturally re-send next time.
+**`ops sync push --repack`**: forces re-tar and re-upload of all alpha_dump factors regardless of manifest state. Used for initial migration from rclone to S3 format.
 
 **First-run is automatic.** No `--bootstrap` / `init` flags exposed:
-- `ops sync push` on a machine without a manifest: treats it as empty — every factor looks new to `scan_changes`. `rclone copy` is additive so already-present remote files are skipped; manifest is written only after a successful push.
-- `ops sync pull` on an empty machine (zero local factors): full `rclone copy` of every data dir, then build the manifest from what just landed.
+- `ops sync push` on a machine without a manifest: treats it as empty — every factor looks new to `scan_changes`. Upload is additive so already-present remote files are skipped; manifest is written only after a successful push.
+- `ops sync pull` on an empty machine (zero local factors): full S3 download of every data dir, then build the manifest from what just landed.
 
 **State merge** (`ops/services/sync/merge.py`). Each of `factor_state.json`, `metrics.json`, `datasources.json` carries a per-entry `updated_at` ISO timestamp. The sync step:
-1. `rclone copyto remote/.state/<file> /tmp/<file>` (3 small files, cheap)
+1. Download remote `.state/<file>` to tmp
 2. Per-name: pick the entry with newer `updated_at`; tie → keep local
 3. Atomic write merged result to local, then upload to remote
 
 `factor_state.json` merge holds the JsonStateStore fcntl lock so a concurrent `ops check` finishing on this machine can't lose its write. Missing `updated_at` on legacy entries treated as `1970-01-01`. `index.json` is **not** synced (1h TTL, regenerable). `sync_manifest.json` is per-machine, also not synced.
 
-**Pull semantics** — pull always merges state first. If the local library is empty, falls back to a full `rclone copy` of every data dir. Otherwise (manifest exists or just got built), uses the merged `factor_state.json` as the "remote manifest of factor names": names present in remote state but missing on local disk are fetched per-subdir (one `rclone copy` per factor).
+**Pull semantics** — pull always merges state first. If the local library is empty, falls back to a full S3 download of every data dir. Otherwise uses the merged `factor_state.json` as the "remote manifest of factor names": names present in remote state but missing on local disk are fetched (parallelized via ThreadPoolExecutor).
 
 **Operations**:
 - `ops sync push` — incremental data + state merge
+- `ops sync push --repack` — force re-tar all alpha_dump (initial migration)
 - `ops sync pull` — state merge + pull factors referenced by state but missing locally
 - `ops sync status` — counts only (no data scan); reports local-vs-remote-state diff
-- `ops sync verify` — full `rclone check` across all subdirs (slow; use occasionally)
+- `ops sync verify` — checks that all local dump factors have remote archives
 
-**Soft-delete**: `ops rm <name>` flips state to `DELETED` (a tombstone) — `list`/`health` hide it by default; `ops list -s deleted` shows them. The tombstone propagates to other machines via the next `ops sync push` (state merge). **Sync never `rclone delete`s anything** — soft-delete on machine A causes machine B's next `list` to drop the factor too, but the remote files persist. Reclaiming remote disk for deleted factors is the job of the (deferred) `ops sync gc`. `ops rm --force` drops the *local* dump dir + feature `.npy` (src/pnl always kept).
+**Soft-delete**: `ops rm <name>` flips state to `DELETED` (a tombstone) — `list`/`health` hide it by default; `ops list -s deleted` shows them. The tombstone propagates to other machines via the next `ops sync push` (state merge). **Sync never deletes remote objects** — soft-delete on machine A causes machine B's next `list` to drop the factor too, but the remote files persist. Reclaiming remote disk for deleted factors is the job of the (deferred) `ops sync gc`. `ops rm --force` drops the *local* dump dir + feature `.npy` (src/pnl always kept).
 
 ### Factor Lifecycle
 
@@ -319,7 +322,8 @@ Filesystem is the source of truth; reconcile only touches state.
 | `services/check/checker/checkbias_checker.py` | AST-inject DataFirewall into a temp `_firewall.py` (original .py untouched) |
 | `services/backfill/backfill.py` | Generate meta.json + ACTIVE for legacy `alpha_src/` factors |
 | `services/pack/pack.py` | Aggregate per-date alpha_dump → alpha_feature memmap; full + incremental + sampled verify |
-| `services/sync/sync.py` | rclone push/pull/status for data + state to a remote |
+| `services/sync/sync.py` | S3 (boto3) push/pull/status for data + state; alpha_dump as tar.zst archives |
+| `infra/s3.py` | Thin boto3 S3Client wrapper (upload/download/list/upload_dir/download_dir) |
 | `infra/cache.py` | `cache_path()` — ~/.cache/ops/lib/<library_id>/* with one-shot legacy hash migration |
 | `services/status/status.py` | Query/format state records |
 
@@ -426,6 +430,8 @@ checker:
 - **colorama** - Terminal colors
 - **tqdm** - Progress bars
 - **pyyaml** - Config parsing
+- **boto3** - S3-compatible object storage (sync)
+- **zstandard** - Zstd compression for alpha_dump archives
 
 ## Key Concepts
 
