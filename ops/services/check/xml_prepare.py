@@ -29,7 +29,7 @@ def prepare_for_initial(factor: AlphaMetadata, config: Config):
 def prepare_for_validate(factor: AlphaMetadata):
     try:
         factor.xml_config["gsim"]['Universe']['@startdate'] = "20241201"
-        factor.xml_config["gsim"]['Universe']['@enddate'] = "20241231"
+        factor.xml_config["gsim"]['Universe']['@enddate'] = "20241202"
         factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'false'
         save_xml(factor)
     except Exception:
