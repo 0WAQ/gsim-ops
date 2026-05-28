@@ -13,6 +13,7 @@ remote uses tar.zst archives.
 import json
 import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from tqdm import tqdm
@@ -108,20 +109,29 @@ def _push_dump_archives(changes: ChangeSet, config: Config,
     if not names:
         return 0
     info(f"  → alpha_dump: {len(names)} factors (tar.zst)")
+    if dry_run:
+        return 0
     failed = 0
-    with tempfile.TemporaryDirectory(prefix="ops-sync-dump-") as td:
-        tmp_dir = Path(td)
-        for name in tqdm(names, desc="  pack+push", unit="factor"):
-            if dry_run:
-                continue
+    progress = tqdm(total=len(names), desc="  pack+push", unit="factor")
+
+    def _do_one(name: str) -> str | None:
+        with tempfile.TemporaryDirectory(prefix="ops-dump-") as td:
             try:
-                archive = _tar_zst_factor(name, config.alpha_dump, tmp_dir)
+                archive = _tar_zst_factor(name, config.alpha_dump, Path(td))
                 s3.upload(archive, f"{pfx}/alpha_dump/{name}.tar.zst")
+                return None
             except Exception as e:
-                error(f"    ✘ {name}: {e}")
+                return f"{name}: {e}"
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_do_one, n): n for n in names}
+        for fut in as_completed(futures):
+            progress.update(1)
+            err = fut.result()
+            if err:
+                error(f"    ✘ {err}")
                 failed += 1
-            finally:
-                (tmp_dir / f"{name}.tar.zst").unlink(missing_ok=True)
+    progress.close()
     return failed
 
 
@@ -179,25 +189,32 @@ def _pull_dump_archives(names: list[str], config: Config,
     if not names:
         return 0
     info(f"  → alpha_dump: {len(names)} factors (tar.zst)")
+    if dry_run:
+        return 0
     failed = 0
-    with tempfile.TemporaryDirectory(prefix="ops-sync-dump-") as td:
-        tmp_dir = Path(td)
-        for name in tqdm(names, desc="  pull+unpack", unit="factor"):
-            if dry_run:
-                continue
-            archive = tmp_dir / f"{name}.tar.zst"
+    progress = tqdm(total=len(names), desc="  pull+unpack", unit="factor")
+
+    def _do_one(name: str) -> str | None:
+        with tempfile.TemporaryDirectory(prefix="ops-dump-") as td:
+            archive = Path(td) / f"{name}.tar.zst"
             try:
                 ok = s3.download(f"{pfx}/alpha_dump/{name}.tar.zst", archive)
                 if not ok:
-                    warn(f"    ⚠ {name}.tar.zst not found")
-                    failed += 1
-                    continue
+                    return f"{name}: not found"
                 _untar_zst_factor(archive, config.alpha_dump)
+                return None
             except Exception as e:
-                error(f"    ✘ {name}: {e}")
+                return f"{name}: {e}"
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_do_one, n): n for n in names}
+        for fut in as_completed(futures):
+            progress.update(1)
+            err = fut.result()
+            if err:
+                error(f"    ✘ {err}")
                 failed += 1
-            finally:
-                archive.unlink(missing_ok=True)
+    progress.close()
     return failed
 
 
