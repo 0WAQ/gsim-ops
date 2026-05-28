@@ -191,6 +191,15 @@ Cross-server factor library sync via rclone. Ships **data + state together** so 
 | `alpha_feature` | `--transfers 8 --checksum` | Large memmap, content-stable |
 | `alpha_src`, `alpha_pnl` | defaults | Few small files |
 
+**Manifest fingerprint** (`manifest.py`). `SyncManifest` tracks per-factor mtimes and dump summary for incremental push:
+- `src_mtime` / `pnl_mtime` / `feature_mtime` — max mtime in each subtree
+- `dump_latest` — latest `YYYYMMDD` date string found across `alpha_dump/<name>/<YYYY>/<MM>/<YYYYMMDD>v{1,2}.npy`
+- `dump_count` — total .npy files counted through the nested year/month/date layout
+
+`_dump_summary` and `_newer_dump_dates` walk `<year>/<month>/` (not flat `YYYYMMDD` dirs). The dump layout is `alpha_dump/<name>/<YYYY>/<MM>/<YYYYMMDD>v{1,2}.npy`.
+
+**`ops sync push --force-state`**: when local state was intentionally pruned (e.g., cleaned orphan records after deleting empty factor dirs), the pre-push check would refuse because remote state has more keys. `--force-state` skips both the pre-push check and the timestamp merge — it uploads local state files directly to overwrite remote. Use sparingly; normal push should go through merge.
+
 **Transfer model: manifest-driven `rclone copy` (additive, never deletes)**.
 
 `rclone sync` was rejected because (a) it must list both sides to compute the diff — alpha_dump alone has ~1.8M files; (b) it deletes destination files missing from the source, which would wipe factors that exist only on the other machine.
