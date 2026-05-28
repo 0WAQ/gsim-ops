@@ -557,6 +557,24 @@ def verify(config: Config) -> int:
     return failed
 
 
+def rebuild(config: Config) -> int:
+    """Unconditionally rebuild the local sync manifest from disk."""
+    import time as _time
+    library_id = config.library_id
+    t0 = _time.time()
+    names = list_factor_names(config)
+    if not names:
+        warn("  本地无因子,无需重建")
+        return 0
+    manifest = SyncManifest(factors={
+        name: stat_factor(name, config) for name in names
+    })
+    save_manifest(library_id, manifest)
+    elapsed = _time.time() - t0
+    info(f"  ✔ manifest 已重建: {len(names)} 因子, 耗时 {elapsed:.1f}s")
+    return 0
+
+
 def run_sync(args) -> None:
     config: Config = Config.load(args.config_path)
     action: str = args.action
@@ -583,6 +601,10 @@ def run_sync(args) -> None:
             warn(f"⚠ 不一致子任务: {failed}")
         else:
             info("✔ 完全一致")
+        bottom()
+    elif action == "rebuild":
+        banner("sync rebuild")
+        rebuild(config)
         bottom()
     else:
         raise ValueError(f"unknown action: {action}")

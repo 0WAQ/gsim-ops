@@ -38,3 +38,7 @@ Example:
     p = sub.add_parser("verify", help="rclone check 全量校验(慢)")
     p.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
     p.set_defaults(func=run_sync)
+
+    p = sub.add_parser("rebuild", help="无条件重建本地 sync manifest")
+    p.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
+    p.set_defaults(func=run_sync)
