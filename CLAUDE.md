@@ -479,9 +479,16 @@ Located at `/mnt/storage/alphalib/`:
 ```
 /mnt/storage/alphalib/
 ├── alpha_src/      # Factor source code
+├── alpha_pnl/     # Backtest results (PNL)
 ├── alpha_dump/     # Daily target positions per factor
 └── alpha_feature/  # Aggregated alpha_dump data
 ```
+
+**Directory count invariants** (healthy state):
+- `alpha_src >= alpha_pnl`: some deleted factors retain src but lose pnl
+- `alpha_pnl >= alpha_dump`: factors failing correlation check have pnl but no dump (correlation runs after backtest, before dump generation)
+- `alpha_dump == alpha_feature / 2`: each dump factor produces exactly 2 feature files (.v1.npy + .v2.npy)
+- In the common case: `alpha_src == alpha_pnl == alpha_dump`, `alpha_feature == alpha_dump * 2`
 
 ### Factor Directory Structure
 
