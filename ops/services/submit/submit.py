@@ -63,6 +63,15 @@ def copy_to_staging(config: Config, factor_dirs: list[Path]) -> list[Path]:
 def submit_one(staging_dir: Path, submitted_by: str, config: Config,
                store: StateStore) -> bool:
     submitted_at = datetime.now().isoformat(timespec="seconds")
+
+    py_files = sorted(staging_dir.glob("*.py"))
+    xml_files = sorted(staging_dir.glob("*.xml"))
+    if len(py_files) != 1 or len(xml_files) != 1:
+        error(f"  ✘  {staging_dir.name} 文件数不合规: "
+              f".py={[p.name for p in py_files]}, .xml={[x.name for x in xml_files]} "
+              f"(各需恰好 1 个,请清理多余文件后重提)")
+        return False
+
     try:
         normalize_factor_xml(staging_dir)
         meta = parse_factor(staging_dir, config,

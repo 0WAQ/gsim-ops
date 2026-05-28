@@ -146,6 +146,14 @@ def _resubmit_one(rec: FactorRecord, src: Path, config: Config, store, purge: bo
     if dst.exists():
         raise FileExistsError(f"{dst} 已存在,拒绝覆盖")
 
+    py_files = sorted(src.glob("*.py"))
+    xml_files = sorted(src.glob("*.xml"))
+    if len(py_files) != 1 or len(xml_files) != 1:
+        raise ValueError(
+            f"文件数不合规: .py={[p.name for p in py_files]}, "
+            f".xml={[x.name for x in xml_files]} (各需恰好 1 个)"
+        )
+
     config.staging.mkdir(parents=True, exist_ok=True)
     _clean_pycache(src)
 
