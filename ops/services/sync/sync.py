@@ -3,17 +3,21 @@
 Design: manifest-driven `rclone copy` (additive, never deletes) for data
 + per-record timestamp merge for the 3 state files.
 
-Remote layout (option A — state hidden under data root):
+Remote layout:
 
     <remote>/<library_id>/
     ├── alpha_src/
-    ├── alpha_dump/
+    ├── alpha_dump/              ← per-factor .tar.zst archives
+    │   └── <name>.tar.zst
     ├── alpha_pnl/
     ├── alpha_feature/
     └── .state/
         ├── factor_state.json
         ├── metrics.json
         └── datasources.json
+
+Local alpha_dump stays as per-date npy (gsim compatibility); only the
+remote/transfer format uses tar.zst compression.
 
 Local state lives at ~/.cache/ops/lib/<library_id>/; per-machine fcntl
 locks at ~/.cache/ops/locks/ are NEVER synced.
@@ -49,7 +53,7 @@ STATE_FILES = ("factor_state.json", "metrics.json", "datasources.json")
 
 DATA_DIRS = ("alpha_src", "alpha_dump", "alpha_pnl", "alpha_feature")
 DATA_FLAGS: dict[str, list[str]] = {
-    "alpha_dump":    ["--transfers", "32", "--checkers", "32"],
+    "alpha_dump":    ["--transfers", "8", "--checksum"],
     "alpha_feature": ["--transfers", "8",  "--checksum"],
     "alpha_src":     [],
     "alpha_pnl":     [],
@@ -74,6 +78,132 @@ def _rclone(*args: str, dry_run: bool = False, capture: bool = False) -> tuple[i
         r = subprocess.run(cmd, check=False, capture_output=True, text=True)
         return r.returncode, r.stdout
     return subprocess.run(cmd, check=False).returncode, ""
+
+
+# ───────────────────────── tar.zst helpers ─────────────────────────────
+
+def _check_zstd() -> None:
+    try:
+        import zstandard  # noqa: F401
+    except ImportError:
+        raise RuntimeError("zstandard 未安装 — uv add zstandard")
+
+
+def _tar_zst_factor(name: str, dump_dir: Path, tmp_dir: Path) -> Path:
+    """Tar + zstd compress a factor's dump directory."""
+    import tarfile
+    import zstandard as zstd
+
+    archive = tmp_dir / f"{name}.tar.zst"
+    factor_dir = dump_dir / name
+    if not factor_dir.exists():
+        raise FileNotFoundError(f"dump dir not found: {factor_dir}")
+
+    cctx = zstd.ZstdCompressor(level=3, threads=-1)
+    with open(archive, "wb") as fh:
+        with cctx.stream_writer(fh) as compressor:
+            with tarfile.open(fileobj=compressor, mode="w|") as tar:
+                tar.add(str(factor_dir), arcname=name)
+    return archive
+
+
+def _untar_zst_factor(archive: Path, dump_dir: Path) -> None:
+    """Extract a tar.zst archive into dump_dir."""
+    import tarfile
+    import zstandard as zstd
+
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    dctx = zstd.ZstdDecompressor()
+    with open(archive, "rb") as fh:
+        with dctx.stream_reader(fh) as reader:
+            with tarfile.open(fileobj=reader, mode="r|") as tar:
+                tar.extractall(path=str(dump_dir))
+
+
+def _push_dump_archives(changes: ChangeSet, config: Config,
+                        remote_base: str, *, dry_run: bool) -> int:
+    """Tar.zst each changed factor's dump dir and upload as a single archive."""
+    from tqdm import tqdm
+
+    names = sorted(changes.alpha_dump.keys())
+    if not names:
+        return 0
+    info(f"  → alpha_dump: {len(names)} factors (tar.zst)")
+    failed = 0
+    with tempfile.TemporaryDirectory(prefix="ops-sync-dump-") as td:
+        tmp_dir = Path(td)
+        for name in tqdm(names, desc="  pack+push", unit="factor"):
+            if dry_run:
+                info(f"    [dry-run] tar.zst {name} → upload")
+                continue
+            try:
+                archive = _tar_zst_factor(name, config.alpha_dump, tmp_dir)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                error(f"    ✘ tar {name}: {e}")
+                failed += 1
+                continue
+            rc, _ = _rclone(
+                "copyto", str(archive),
+                f"{remote_base}/alpha_dump/{name}.tar.zst",
+                "--checksum",
+                capture=True,
+            )
+            if rc != 0:
+                error(f"    ✘ upload {name}.tar.zst rc={rc}")
+                failed += 1
+            archive.unlink(missing_ok=True)
+    return failed
+
+
+def _pull_dump_archives(names: list[str], config: Config,
+                        remote_base: str, *, dry_run: bool) -> int:
+    """Download and extract tar.zst archives for the given factor names."""
+    from tqdm import tqdm
+
+    if not names:
+        return 0
+    info(f"  → alpha_dump: {len(names)} factors (tar.zst)")
+    failed = 0
+    with tempfile.TemporaryDirectory(prefix="ops-sync-dump-") as td:
+        tmp_dir = Path(td)
+        for name in tqdm(names, desc="  pull+unpack", unit="factor"):
+            archive = tmp_dir / f"{name}.tar.zst"
+            rc, _ = _rclone(
+                "copyto",
+                f"{remote_base}/alpha_dump/{name}.tar.zst",
+                str(archive),
+                "--retries", "2",
+                dry_run=dry_run, capture=True,
+            )
+            if rc != 0:
+                warn(f"    ⚠ alpha_dump/{name}.tar.zst rc={rc}")
+                failed += 1
+                continue
+            if not dry_run and archive.exists():
+                try:
+                    _untar_zst_factor(archive, config.alpha_dump)
+                except subprocess.CalledProcessError as e:
+                    error(f"    ✘ untar {name}: {e}")
+                    failed += 1
+                archive.unlink(missing_ok=True)
+    return failed
+
+
+def _list_remote_dump_archives(config: Config, remote_base: str) -> list[str]:
+    """List factor names that have .tar.zst archives on remote."""
+    rc, stdout = _rclone(
+        "lsf", f"{remote_base}/alpha_dump/",
+        "--include", "*.tar.zst",
+        capture=True,
+    )
+    if rc != 0:
+        return []
+    names = []
+    for line in stdout.strip().splitlines():
+        line = line.strip()
+        if line.endswith(".tar.zst"):
+            names.append(line[:-len(".tar.zst")])
+    return names
 
 
 def _require_remote(config: Config) -> None:
@@ -318,6 +448,7 @@ def push(config: Config, *, dry_run: bool = False, force_state: bool = False) ->
     files directly to overwrite remote.
     """
     _check_rclone()
+    _check_zstd()
     _require_remote(config)
 
     failed = 0
@@ -357,6 +488,8 @@ def push(config: Config, *, dry_run: bool = False, force_state: bool = False) ->
     else:
         info(f"  发现 {changes.total_factors()} 个因子有变更")
         for d in DATA_DIRS:
+            if d == "alpha_dump":
+                continue
             paths, n = _build_files_from(changes, d, config)
             if not paths:
                 continue
@@ -369,6 +502,7 @@ def push(config: Config, *, dry_run: bool = False, force_state: bool = False) ->
             if rc != 0:
                 error(f"  ✘ {d} rc={rc}")
                 failed += 1
+        failed += _push_dump_archives(changes, config, remote_base, dry_run=dry_run)
         if failed == 0 and not dry_run:
             for name, fp in fresh.items():
                 manifest.factors[name] = fp
@@ -392,6 +526,7 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
     Always ensures a manifest exists after pull (rebuilds from disk if missing).
     """
     _check_rclone()
+    _check_zstd()
     _require_remote(config)
 
     failed = 0
@@ -405,6 +540,8 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
     if not local_names:
         banner("pull data (空盘,全量拉)")
         for d in DATA_DIRS:
+            if d == "alpha_dump":
+                continue
             local = getattr(config, d)
             rc = _bootstrap_copy_dir(
                 local, f"{remote_base}/{d}", DATA_FLAGS.get(d, []),
@@ -415,6 +552,8 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
                 failed += 1
             else:
                 info(f"  ✔ {d}")
+        all_dump_names = _list_remote_dump_archives(config, remote_base)
+        failed += _pull_dump_archives(all_dump_names, config, remote_base, dry_run=dry_run)
     else:
         banner("pull data (增量)")
         state_path = cache_path(library_id, "factor_state.json")
@@ -448,15 +587,6 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
                         if rc != 0:
                             warn(f"  ⚠ alpha_src/{name} rc={rc}")
 
-                        src = f"{remote_base}/alpha_dump/{name}"
-                        dst = str(config.alpha_dump / name)
-                        Path(dst).mkdir(parents=True, exist_ok=True)
-                        rc, _ = _rclone("copy", src, dst,
-                                        *DATA_FLAGS.get("alpha_dump", []),
-                                        dry_run=dry_run)
-                        if rc != 0:
-                            warn(f"  ⚠ alpha_dump/{name} rc={rc}")
-
                         config.alpha_pnl.mkdir(parents=True, exist_ok=True)
                         rc, _ = _rclone(
                             "copyto",
@@ -480,6 +610,8 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
                             )
                             if rc != 0:
                                 warn(f"  ⚠ alpha_feature/{fname} rc={rc}")
+
+                    failed += _pull_dump_archives(missing, config, remote_base, dry_run=dry_run)
 
     if not dry_run:
         _ensure_manifest(config)
@@ -531,12 +663,15 @@ def status(config: Config) -> int:
 
 
 def verify(config: Config) -> int:
-    """Full reconciliation via rclone check on each data dir."""
+    """Full reconciliation via rclone check on each data dir.
+    For alpha_dump, verifies that each local factor has a matching .tar.zst on remote."""
     _check_rclone()
     _require_remote(config)
     remote_base = _remote_base(config)
     failed = 0
     for d in DATA_DIRS:
+        if d == "alpha_dump":
+            continue
         banner(f"verify {d}")
         local = getattr(config, d)
         rc, _ = _rclone("check", str(local), f"{remote_base}/{d}",
@@ -546,6 +681,22 @@ def verify(config: Config) -> int:
             failed += 1
         else:
             info(f"  ✔ {d} 一致")
+    banner("verify alpha_dump (archives)")
+    remote_archives = set(_list_remote_dump_archives(config, remote_base))
+    local_dump_names: set[str] = set()
+    if config.alpha_dump.exists():
+        with os.scandir(config.alpha_dump) as it:
+            for entry in it:
+                if entry.is_dir() and not entry.name.startswith("."):
+                    local_dump_names.add(entry.name)
+    missing_remote = local_dump_names - remote_archives
+    if missing_remote:
+        warn(f"  ⚠ {len(missing_remote)} factors 本地有 dump 但远端无 archive")
+        for name in sorted(missing_remote)[:5]:
+            warn(f"    · {name}")
+        failed += 1
+    else:
+        info(f"  ✔ alpha_dump: {len(local_dump_names)} factors 均有远端 archive")
     banner("verify .state")
     rc, _ = _rclone("check", str(library_cache_dir(config.library_id)),
                     f"{remote_base}/.state",

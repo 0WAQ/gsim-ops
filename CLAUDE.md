@@ -569,3 +569,20 @@ AlphaXxx/
 ## Plans & Roadmap
 
 See `docs/plans.md` for deferred plans (architecture refactor, `ops factor` namespace, `ops sync gc`, etc.) and `docs/roadmap.md` for the feature checklist.
+
+### Sync Storage Optimization (Planned)
+
+**问题**: alpha_dump 1.8M 小文件导致 sync listing/传输极慢。
+
+**Phase 1 — sync 层 tar.zst 压缩传输（短期）**:
+- 本地 alpha_dump 保持 per-date npy 不变（gsim 直接读写）
+- push 时按 factor 打 tar.zst 压缩包传输（1.8M 文件 → ~2500 个包）
+- pull 时拉 tar.zst 解压到 alpha_dump/
+- 增量逻辑：manifest 检测到 factor dump 变更 → 只重新打包变更的 factor
+
+**Phase 2 — gsim FeatureReader 模块（长期，需内部调研）**:
+- 为 gsim 实现 FeatureReader Data module，从 alpha_feature memmap 按 (di, ii) 切片返回等价 per-date array
+- combo 等下游模块改为读 feature 而非 dump
+- alpha_dump 降级为 check pipeline 中间产物，check 完成 pack 后可清理
+- sync 只传 feature（每 factor 2 文件）
+- 需要 QR 配合改动 combo 配置，需内部调研推动
