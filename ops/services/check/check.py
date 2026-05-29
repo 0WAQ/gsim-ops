@@ -127,10 +127,22 @@ class CheckerPipeline:
 
     def to_lib(self, factor: AlphaMetadata):
         self._clean_pycache(factor.dir)
+
+        src_dst = self.config.alpha_src / factor.dir.name
+        if src_dst.exists():
+            shutil.rmtree(src_dst)
         shutil.move(factor.dir, self.config.alpha_src)
-        self._rewrite_module_path(self.config.alpha_src / factor.dir.name)
+        self._rewrite_module_path(src_dst)
+
+        dump_dst = self.config.alpha_dump / factor.alpha_dir.name
+        if dump_dst.exists():
+            shutil.rmtree(dump_dst)
         shutil.move(factor.alpha_dir, self.config.alpha_dump)
-        shutil.move(factor.pnl_file, self.config.alpha_pnl / factor.name)
+
+        pnl_dst = self.config.alpha_pnl / factor.name
+        if pnl_dst.exists():
+            shutil.rmtree(pnl_dst)
+        shutil.move(factor.pnl_file, pnl_dst)
 
     def to_recycle(self, factor: AlphaMetadata, e: CheckFail):
         dst_dir = self.config.recycle / factor.key.user / e.stage / factor.name
