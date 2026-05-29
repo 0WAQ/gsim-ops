@@ -74,18 +74,21 @@ class Runner:
             lines = result.stdout.strip().split('\n')
             if not lines:
                 return None
-    
-            parts = lines[-1].strip().split()
+
+            # Normalize "shrp( ir)" → "shrp(ir)" so split() yields stable column positions
+            # regardless of sign (positive IR has leading space inside parens, negative doesn't).
+            last = re.sub(r'\(\s+', '(', lines[-1].strip())
+            parts = last.split()
             if len(parts) < 11:
                 return None
-        
+
             try:
                 ret = float(parts[4])
                 tvr = float(parts[5])
                 shrp_raw = parts[6]
                 shrp = float(shrp_raw.split('(')[0].strip())
-                mdd = float(parts[8])
-                fitness = float(parts[10])
+                mdd = float(parts[7])
+                fitness = float(parts[9])
                 return Metrics(ret, tvr, shrp, mdd, fitness)
                 
             except (ValueError, IndexError) as e:
