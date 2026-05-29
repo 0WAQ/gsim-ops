@@ -80,7 +80,7 @@ Example:
     parser.add_argument(
         "--sort-by",
         type=str,
-        choices=["ret", "shrp", "mdd", "tvr", "fitness", "dump_days"],
+        choices=["ret", "shrp", "mdd", "tvr", "fitness", "dump_days", "delay"],
         help="Sort by field (descending)",
     )
     parser.add_argument(

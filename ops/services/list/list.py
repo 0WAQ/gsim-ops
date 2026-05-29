@@ -29,7 +29,7 @@ def print_table(factors: list[FactorInfo], statuses: dict[str, FactorStatus],
         print(Fore.YELLOW + "No factors found.")
         return
 
-    header = f"{'name':<40} {'author':<10} {'ret%':>8} {'shrp':>8} {'mdd%':>8} {'tvr%':>8} {'fitness':>8}"
+    header = f"{'name':<40} {'author':<10} {'D':>2} {'ret%':>8} {'shrp':>8} {'mdd%':>8} {'tvr%':>8} {'fitness':>8}"
     if show_tables:
         header += f"  {'tables'}"
     if show_fields:
@@ -47,7 +47,8 @@ def print_table(factors: list[FactorInfo], statuses: dict[str, FactorStatus],
         mdd = f"{m.mdd:>8.2f}" if m else f"{'—':>8}"
         tvr = f"{m.tvr:>8.2f}" if m else f"{'—':>8}"
         fitness = f"{m.fitness:>8.2f}" if m else f"{'—':>8}"
-        line = f"{f.name:<40} {f.author:<10} {ret} {shrp} {mdd} {tvr} {fitness}"
+        delay = f"{f.delay:>2}" if f.delay is not None else f"{'?':>2}"
+        line = f"{f.name:<40} {f.author:<10} {delay} {ret} {shrp} {mdd} {tvr} {fitness}"
         if show_tables and f.datasources:
             line += f"  {', '.join(f.datasources.get('tables', []))}"
         if show_fields and f.datasources:
@@ -71,6 +72,7 @@ SORT_KEYS = {
     "tvr": lambda f: f.metrics.tvr if f.metrics else float("-inf"),
     "fitness": lambda f: f.metrics.fitness if f.metrics else float("-inf"),
     "dump_days": lambda f: f.dump_days,
+    "delay": lambda f: f.delay if f.delay is not None else float("-inf"),
 }
 
 METRIC_GETTERS = {
@@ -80,6 +82,7 @@ METRIC_GETTERS = {
     "tvr": lambda f: f.metrics.tvr if f.metrics else None,
     "fitness": lambda f: f.metrics.fitness if f.metrics else None,
     "dump_days": lambda f: float(f.dump_days),
+    "delay": lambda f: float(f.delay) if f.delay is not None else None,
 }
 
 _FILTER_PATTERN = re.compile(r"^(\w+)([><=!]+)(.+)$")

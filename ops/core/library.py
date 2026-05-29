@@ -13,7 +13,7 @@ from ops.infra.cache import cache_path
 from ops.core.metrics import Metrics
 
 
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 INDEX_MAX_AGE_SECONDS = 3600  # 1 hour
 
 
@@ -31,6 +31,7 @@ class FactorInfo:
     pnl_path: Path
     has_pnl: bool
     dump_days: int
+    delay: int | None = None
     metrics: Metrics | None = None
     datasources: dict | None = None
 
@@ -43,6 +44,7 @@ class FactorInfo:
             "pnl_path": str(self.pnl_path),
             "has_pnl": self.has_pnl,
             "dump_days": self.dump_days,
+            "delay": self.delay,
             "metrics": self.metrics.to_dict() if self.metrics else None,
             "datasources": self.datasources,
         }
@@ -58,6 +60,7 @@ class FactorInfo:
             pnl_path=Path(data["pnl_path"]),
             has_pnl=data["has_pnl"],
             dump_days=data["dump_days"],
+            delay=data.get("delay"),
             metrics=Metrics.from_dict(metrics_data) if metrics_data else None,
             datasources=data.get("datasources"),
         )
@@ -165,6 +168,16 @@ class LibraryScanner:
         except Exception:
             pass
 
+    def _read_delay(self, factor_dir: Path) -> int | None:
+        meta_path = factor_dir / "meta.json"
+        if not meta_path.exists():
+            return None
+        try:
+            data = json.loads(meta_path.read_text())
+            return data.get("delay")
+        except Exception:
+            return None
+
     def _scan_directory(self) -> list[FactorInfo]:
         factors: list[FactorInfo] = []
 
@@ -181,6 +194,7 @@ class LibraryScanner:
             pnl_path = self.alpha_pnl / name
             has_pnl = pnl_path.exists()
             dump_days = self._count_dump_days(dump_path)
+            delay = self._read_delay(factor_dir)
 
             factors.append(
                 FactorInfo(
@@ -191,6 +205,7 @@ class LibraryScanner:
                     pnl_path=pnl_path,
                     has_pnl=has_pnl,
                     dump_days=dump_days,
+                    delay=delay,
                 )
             )
 
