@@ -142,6 +142,14 @@ Aggregates per-date `.npy` dumps into per-factor matrices for downstream consume
 
 **Offset rule**: Per-date file at date `D` is placed at row `date_to_idx[D] - 1`. Gsim stores the *next-day* signal computed at close of day `D` — when read back as a feature on day `D-1`'s row, it serves as the previous-day prediction.
 
+> **🚨 Known critical bug — offset is delay-dependent, current pack hardcodes delay=1 semantics.**
+>
+> The `di → di-1` mapping is only correct for **delay=1** factors (signal computed at close of `D`, used to trade `D+1` — read back at row of `D` so downstream sees it as "yesterday's prediction"). For **delay=0** factors, gsim writes the dump at the same `di` it acts on, so the correct mapping is `di → di` (no shift).
+>
+> Current `pack.py` applies the `-1` shift unconditionally, so **every delay=0 factor's feature is misaligned by one day**. Downstream models reading the feature memmap see yesterday's signal labeled as today's, leaking 1d of look-ahead in one direction or losing 1d of signal in the other depending on how the consumer interprets the row.
+>
+> **Fix sketch (deferred)**: pack must read each factor's `meta.json` for `delay`, then choose the offset (`0` for delay=0, `-1` for delay=1). `verify_sample` and the incremental path (`pack_one_incremental`) need the same branching. Re-pack all delay=0 factors once the fix lands. Until fixed, treat any model trained on delay=0 features as suspect.
+
 **Shape policy** (see `pack.py`):
 - `PACK_L = 3900` hardcoded — covers historical universe up to 20251231, matches the check pipeline's backtest end date
 - `H` derived from `__universe/Instruments.npy` at write time (currently 5484, stable for 1-2 years)
