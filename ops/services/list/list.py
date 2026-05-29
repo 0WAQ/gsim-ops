@@ -4,13 +4,16 @@ import fnmatch
 from colorama import Fore, Style, init
 
 from ops.core.library import LibraryScanner, FactorInfo
-from ops.core.state import FactorStatus
+from ops.core.state import FactorStatus, FactorRecord
 from ops.infra.store import default_store
 from .metrics import load_metrics, refresh_metrics, merge_metrics
 from .datasource import load_datasources, refresh_datasources, merge_datasources
 
 
 init(autoreset=True)
+
+
+DASH = "—"
 
 
 _STATUS_COLOR = {
@@ -23,13 +26,20 @@ _STATUS_COLOR = {
     FactorStatus.DELETED:   Style.DIM,
 }
 
-def print_table(factors: list[FactorInfo], statuses: dict[str, FactorStatus],
+def print_table(factors: list[FactorInfo], records: dict[str, FactorRecord],
                 show_tables=False, show_fields=False):
     if not factors:
         print(Fore.YELLOW + "No factors found.")
         return
 
+    has_rejected = any(
+        (rec := records.get(f.name)) and rec.status == FactorStatus.REJECTED
+        for f in factors
+    )
+
     header = f"{'name':<40} {'author':<10} {'D':>2} {'ret%':>8} {'shrp':>8} {'mdd%':>8} {'tvr%':>8} {'fitness':>8}"
+    if has_rejected:
+        header += f"  {'fail_stage':<12}"
     if show_tables:
         header += f"  {'tables'}"
     if show_fields:
@@ -42,18 +52,22 @@ def print_table(factors: list[FactorInfo], statuses: dict[str, FactorStatus],
 
     for f in factors:
         m = f.metrics
-        ret = f"{m.ret:>8.2f}" if m else f"{'—':>8}"
-        shrp = f"{m.shrp:>8.2f}" if m else f"{'—':>8}"
-        mdd = f"{m.mdd:>8.2f}" if m else f"{'—':>8}"
-        tvr = f"{m.tvr:>8.2f}" if m else f"{'—':>8}"
-        fitness = f"{m.fitness:>8.2f}" if m else f"{'—':>8}"
+        ret = f"{m.ret:>8.2f}" if m else f"{DASH:>8}"
+        shrp = f"{m.shrp:>8.2f}" if m else f"{DASH:>8}"
+        mdd = f"{m.mdd:>8.2f}" if m else f"{DASH:>8}"
+        tvr = f"{m.tvr:>8.2f}" if m else f"{DASH:>8}"
+        fitness = f"{m.fitness:>8.2f}" if m else f"{DASH:>8}"
         delay = f"{f.delay:>2}" if f.delay is not None else f"{'?':>2}"
         line = f"{f.name:<40} {f.author:<10} {delay} {ret} {shrp} {mdd} {tvr} {fitness}"
+        rec = records.get(f.name)
+        if has_rejected:
+            stage = rec.last_fail_stage if rec and rec.status == FactorStatus.REJECTED and rec.last_fail_stage else ""
+            line += f"  {stage:<12}"
         if show_tables and f.datasources:
             line += f"  {', '.join(f.datasources.get('tables', []))}"
         if show_fields and f.datasources:
             line += f"  {', '.join(f.datasources.get('fields', []))}"
-        color = _STATUS_COLOR.get(statuses.get(f.name), "") # type: ignore
+        color = _STATUS_COLOR.get(rec.status if rec else None, "") # type: ignore
         print(color + line)
 
     print(Fore.CYAN + separator)
@@ -141,7 +155,8 @@ def apply_filters(factors: list[FactorInfo], filters: list[tuple[str, str, str]]
 def run_list(args):
     scanner = LibraryScanner.from_config_path(args.config_path)
     factors = scanner.scan(refresh=args.refresh)
-    statuses = {r.name: r.status for r in default_store().list()}
+    records = {r.name: r for r in default_store().list()}
+    statuses = {name: r.status for name, r in records.items()}
 
     if args.user:
         factors = scanner.filter_by_author(factors, args.user)
@@ -183,5 +198,5 @@ def run_list(args):
     if args.format == "json":
         print_json(factors)
     else:
-        print_table(factors, statuses,
+        print_table(factors, records,
                     show_tables=args.show_tables, show_fields=args.show_fields)
