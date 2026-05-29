@@ -1,8 +1,12 @@
 import json
 import hashlib
+import os
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+
+from tqdm import tqdm
 
 from ops.core.library import FactorInfo
 from ops.infra.config import Config
@@ -10,6 +14,7 @@ from ops.infra.cache import cache_path
 from ops.infra.gsim.runner import Runner
 
 BCORR_VERSION = 1
+DEFAULT_WORKERS = max(1, min(16, (os.cpu_count() or 4) - 2))
 
 
 def _now_iso() -> str:
@@ -69,14 +74,33 @@ def _compute_max_bcorr(factor: FactorInfo, config: Config) -> dict | None:
     return {"max_bcorr": corr, "max_bcorr_factor": name}
 
 
+def _worker(args: tuple[str, Path, bool, Path]) -> tuple[str, dict | None]:
+    name, pnl_path, has_pnl, config_path = args
+    config = Config.load(config_path)
+    fake = FactorInfo(
+        name=name, author="", src_path=Path(), dump_path=Path(),
+        pnl_path=pnl_path, has_pnl=has_pnl, dump_days=0,
+    )
+    return name, _compute_max_bcorr(fake, config)
+
+
 def refresh_bcorr(
-    factors: list[FactorInfo], config: Config, config_path: Path
+    factors: list[FactorInfo], config: Config, config_path: Path,
+    workers: int = DEFAULT_WORKERS,
 ) -> dict[str, dict]:
     bcorr: dict[str, dict] = {}
-    for factor in factors:
-        result = _compute_max_bcorr(factor, config)
-        if result:
-            bcorr[factor.name] = result
+    targets = [f for f in factors if f.has_pnl]
+    if not targets:
+        _save_bcorr(config_path, bcorr)
+        return bcorr
+
+    payload = [(f.name, f.pnl_path, f.has_pnl, config_path) for f in targets]
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        futures = [ex.submit(_worker, p) for p in payload]
+        for fut in tqdm(as_completed(futures), total=len(futures), desc="bcorr"):
+            name, result = fut.result()
+            if result:
+                bcorr[name] = result
 
     _save_bcorr(config_path, bcorr)
     return bcorr
