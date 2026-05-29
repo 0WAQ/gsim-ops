@@ -82,18 +82,16 @@ class SyncManifest:
 class ChangeSet:
     alpha_src: set[str] = field(default_factory=set)                # factor names → push whole dir
     alpha_pnl: set[str] = field(default_factory=set)
-    alpha_dump: dict[str, list[str]] = field(default_factory=dict)  # name → [YYYYMMDD, ...]
     alpha_feature: dict[str, list[str]] = field(default_factory=dict)  # name → ["v1", "v2"]
 
     def is_empty(self) -> bool:
         return not (self.alpha_src or self.alpha_pnl
-                    or self.alpha_dump or self.alpha_feature)
+                    or self.alpha_feature)
 
     def total_factors(self) -> int:
         names: set[str] = set()
         names.update(self.alpha_src)
         names.update(self.alpha_pnl)
-        names.update(self.alpha_dump.keys())
         names.update(self.alpha_feature.keys())
         return len(names)
 
@@ -220,17 +218,14 @@ def list_factor_names(config: Config) -> list[str]:
 
     Layout:
       alpha_src/<name>/        — dir
-      alpha_dump/<name>/       — dir
       alpha_pnl/<name>         — file
       alpha_feature/<name>.v{1,2}.npy — files
     """
     names: set[str] = set()
 
-    for d in (config.alpha_src, config.alpha_dump):
-        if not d.exists():
-            continue
+    if config.alpha_src.exists():
         try:
-            with os.scandir(d) as it:
+            with os.scandir(config.alpha_src) as it:
                 for entry in it:
                     if entry.is_dir() and not entry.name.startswith("."):
                         names.add(entry.name)
@@ -310,18 +305,12 @@ def scan_changes(config: Config, manifest: SyncManifest
         old = manifest.factors.get(name)
         old_src = old.src_mtime if old else 0.0
         old_pnl = old.pnl_mtime if old else 0.0
-        old_dump_latest = old.dump_latest if old else None
-        old_dump_count = old.dump_count if old else 0
         old_feat = old.feature_mtime if old else 0.0
 
         if new.src_mtime > old_src:
             changes.alpha_src.add(name)
         if new.pnl_mtime > old_pnl:
             changes.alpha_pnl.add(name)
-        if (new.dump_latest, new.dump_count) != (old_dump_latest, old_dump_count):
-            dates = _newer_dump_dates(config.alpha_dump / name, old_dump_latest)
-            if dates:
-                changes.alpha_dump[name] = dates
         if new.feature_mtime > old_feat:
             versions = _feature_versions_present(config.alpha_feature, name)
             if versions:

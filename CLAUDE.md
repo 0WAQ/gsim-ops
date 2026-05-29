@@ -62,7 +62,7 @@ Entry point: `ops/main.py` (argparse dispatcher). Each subcommand lives in its o
 
 - `ops rm` defaults to a state-only soft-delete (`DELETED` tombstone). `--force` removes local `alpha_dump/<name>/` and `alpha_feature/<name>.v{1,2}.npy` only; `alpha_src` and `alpha_pnl` are always preserved.
 - `ops resubmit` defaults to moving an ACTIVE factor's `alpha_src/<name>/` → `staging/<name>/` and flipping state → SUBMITTED. With `-s rejected` it pulls from `recycle/{user}/{stage}/<name>/`; with `-s deleted` it tries `alpha_src` first (soft-delete keeps src) then falls back to `recycle/`. `alpha_dump` / `alpha_feature` / `alpha_pnl` are kept by default; `--purge` removes dump + feature (pnl still preserved — different Stats modules don't always overwrite, and we need the history). Batch mode (`-u` / `-s`) lists targets and asks `[y/N]` apt-install style; `-y` skips.
-- `ops sync push` uses `rclone copy` (additive). It never issues `rclone delete`, even for `DELETED` factors. Remote cleanup is the job of the planned `ops sync gc` (opt-in, dry-run by default, `--apply` to actually purge).
+- `ops sync push` uses S3 upload (additive). It never deletes remote objects, even for `DELETED` factors. Remote cleanup is the job of the planned `ops sync gc` (opt-in, dry-run by default, `--apply` to actually purge).
 - Bulk operations default to dry-run; require `--apply` (or equivalent) to execute.
 - State merge prefers data preservation over precision: tied `updated_at` keeps local; missing timestamps treated as epoch zero.
 
@@ -95,8 +95,6 @@ Removed subcommands: `cp`, `scp`, `compiler`.
 4. **Compliance** - Position limits (max 5% per stock), min stock counts (50 long, 50 short, 100 total)
 5. **Correlation** - Factor correlation < 0.7 threshold against existing library
 6. **Archive** - Run simsummary, save metrics to index, move to library; Fail: move to recycle folder
-
-Plus pack (incremental update to alpha_feature, non-fatal) at the end.
 
 **Failure semantics**:
 - validate / long_backtest fail → revert to SUBMITTED, factor stays in staging (environmental/config issue, retry via `ops check --retry`)
@@ -153,7 +151,7 @@ Aggregates per-date `.npy` dumps into per-factor matrices for downstream consume
 
 **Two access paths**:
 1. **Batch CLI** (`ops pack`): scans `alpha_dump/`, skips already-packed unless `--force`, `ProcessPoolExecutor` parallel (default 10 workers), wraps each factor in `factor_lock`
-2. **Incremental from check** (`pack_one_incremental` called at end of `check.run_one`): if target memmap doesn't exist → falls back to full `pack_one`; otherwise opens `mode='r+'` and overwrites only requested date rows. Failures are non-fatal — warn and continue; `ops pack` will heal next run
+2. **Incremental** (`pack_one_incremental`): if target memmap doesn't exist → falls back to full `pack_one`; otherwise opens `mode='r+'` and overwrites only requested date rows. Currently only callable directly or via future `ops pack --date`
 
 **Atomic write**: full rewrites go through `.{name}.{v}.npy.tmp` + `os.replace` so a crashed pack never leaves a partial file in the target path.
 
@@ -161,13 +159,12 @@ Aggregates per-date `.npy` dumps into per-factor matrices for downstream consume
 
 ### Sync (`ops/services/sync/`)
 
-Cross-server factor library sync via rclone. Ships **data + state together** so a new machine bootstraps with `ops sync pull`.
+Cross-server factor library sync via S3. Ships **data + state together** so a new machine bootstraps with `ops sync pull`.
 
 **Remote layout**:
 ```
 <sync.remote>/<library_id>/
 ├── alpha_src/
-├── alpha_dump/
 ├── alpha_pnl/
 ├── alpha_feature/
 └── .state/              # dotfile so it's hidden from casual `rclone ls`
@@ -187,18 +184,18 @@ Cross-server factor library sync via rclone. Ships **data + state together** so 
 **Per-subdir transfer strategy**:
 | Subdir | Method | Why |
 |---|---|---|
-| `alpha_dump` | per-factor `.tar.zst` archive via S3 | 1.8M small npy → ~2500 archives |
 | `alpha_feature` | direct S3 upload per file | 2 large .npy per factor |
 | `alpha_src`, `alpha_pnl` | S3 upload_dir / upload | Few small files |
 
+**Note**: `alpha_dump` is not synced — it is a local-only intermediate product.
+
 **Transport**: `ops/infra/s3.py` (`S3Client`) wraps boto3. Config in `sync.s3` (endpoint_url, access_key_id, secret_access_key, bucket). ThreadPoolExecutor(8 workers) parallelizes push/pull.
 
-**Manifest fingerprint** (`manifest.py`). `SyncManifest` tracks per-factor mtimes and dump summary for incremental push:
+**Manifest fingerprint** (`manifest.py`). `SyncManifest` tracks per-factor mtimes for incremental push:
 - `src_mtime` / `pnl_mtime` / `feature_mtime` — max mtime in each subtree
-- `dump_latest` — latest `YYYYMMDD` date string found across `alpha_dump/<name>/<YYYY>/<MM>/<YYYYMMDD>v{1,2}.npy`
-- `dump_count` — total .npy files counted through the nested year/month/date layout
+- `dump_latest` / `dump_count` — retained for local `ops pack` incremental detection (not used by sync)
 
-`_dump_summary` and `_newer_dump_dates` walk `<year>/<month>/` (not flat `YYYYMMDD` dirs). The dump layout is `alpha_dump/<name>/<YYYY>/<MM>/<YYYYMMDD>v{1,2}.npy`.
+Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), descending into a factor's dirs only when its top-level fingerprint moved. Changed factors are uploaded via boto3. Manifest is only advanced after successful upload; partial pushes naturally re-send next time.
 
 **`ops sync push --force-state`**: when local state was intentionally pruned (e.g., cleaned orphan records after deleting empty factor dirs), the pre-push check would refuse because remote state has more keys. `--force-state` skips both the pre-push check and the timestamp merge — it uploads local state files directly to overwrite remote. Use sparingly; normal push should go through merge.
 
@@ -206,11 +203,9 @@ Cross-server factor library sync via rclone. Ships **data + state together** so 
 
 `ops sync push` keeps a per-machine `~/.cache/ops/lib/<library_id>/sync_manifest.json` recording each factor's fingerprint:
 - `src_mtime` / `pnl_mtime` / `feature_mtime` — max mtime within that subtree
-- `dump_latest` (newest YYYYMMDD dir) + `dump_count` — alpha_dump grows by appending a new date dir per check; new date + changed count ⇒ factor needs re-pack
+- `dump_latest` / `dump_count` — retained for local `ops pack` incremental detection
 
-Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), descending into a factor's dirs only when its top-level fingerprint moved. Changed factors are tar.zst compressed and uploaded via boto3. Manifest is only advanced after successful upload; partial pushes naturally re-send next time.
-
-**`ops sync push --repack`**: forces re-tar and re-upload of all alpha_dump factors regardless of manifest state. Used for initial migration from rclone to S3 format.
+Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), descending into a factor's dirs only when its top-level fingerprint moved. Changed factors are uploaded via boto3. Manifest is only advanced after successful upload; partial pushes naturally re-send next time.
 
 **First-run is automatic.** No `--bootstrap` / `init` flags exposed:
 - `ops sync push` on a machine without a manifest: treats it as empty — every factor looks new to `scan_changes`. Upload is additive so already-present remote files are skipped; manifest is written only after a successful push.
@@ -227,10 +222,9 @@ Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), desc
 
 **Operations**:
 - `ops sync push` — incremental data + state merge
-- `ops sync push --repack` — force re-tar all alpha_dump (initial migration)
 - `ops sync pull` — state merge + pull factors referenced by state but missing locally
 - `ops sync status` — counts only (no data scan); reports local-vs-remote-state diff
-- `ops sync verify` — checks that all local dump factors have remote archives
+- `ops sync verify` — placeholder (alpha_dump verify removed)
 
 **Soft-delete**: `ops rm <name>` flips state to `DELETED` (a tombstone) — `list`/`health` hide it by default; `ops list -s deleted` shows them. The tombstone propagates to other machines via the next `ops sync push` (state merge). **Sync never deletes remote objects** — soft-delete on machine A causes machine B's next `list` to drop the factor too, but the remote files persist. Reclaiming remote disk for deleted factors is the job of the (deferred) `ops sync gc`. `ops rm --force` drops the *local* dump dir + feature `.npy` (src/pnl always kept).
 
@@ -317,12 +311,12 @@ Filesystem is the source of truth; reconcile only touches state.
 | `services/submit/parser.py` | Parse xml/py → `FactorMeta` (author fallback, npy_index reuse) |
 | `services/submit/normalize.py` | Auto-rewrite mismatched XML ids in-place |
 | `services/submit/submit.py` | Scan dropbox → `copy_to_staging()` → `submit_one()` per factor (factor_lock-wrapped) |
-| `services/check/check.py` | reconcile on startup; `_scan_factors` reads staging; `to_lib`/`to_recycle` clean __pycache__ + rewrite XML @module + state transition; incremental pack after archive |
+| `services/check/check.py` | reconcile on startup; `_scan_factors` reads staging; `to_lib`/`to_recycle` clean __pycache__ + rewrite XML @module + state transition |
 | `services/check/reconcile.py` | state ↔ filesystem reconciliation |
 | `services/check/checker/checkbias_checker.py` | AST-inject DataFirewall into a temp `_firewall.py` (original .py untouched) |
 | `services/backfill/backfill.py` | Generate meta.json + ACTIVE for legacy `alpha_src/` factors |
 | `services/pack/pack.py` | Aggregate per-date alpha_dump → alpha_feature memmap; full + incremental + sampled verify |
-| `services/sync/sync.py` | S3 (boto3) push/pull/status for data + state; alpha_dump as tar.zst archives |
+| `services/sync/sync.py` | S3 (boto3) push/pull/status for alpha_src, alpha_pnl, alpha_feature + state |
 | `infra/s3.py` | Thin boto3 S3Client wrapper (upload/download/list/upload_dir/download_dir) |
 | `infra/cache.py` | `cache_path()` — ~/.cache/ops/lib/<library_id>/* with one-shot legacy hash migration |
 | `services/status/status.py` | Query/format state records |
@@ -431,7 +425,7 @@ checker:
 - **tqdm** - Progress bars
 - **pyyaml** - Config parsing
 - **boto3** - S3-compatible object storage (sync)
-- **zstandard** - Zstd compression for alpha_dump archives
+- **zstandard** - Zstd compression (retained for potential future use)
 
 ## Key Concepts
 
@@ -578,16 +572,18 @@ See `docs/plans.md` for deferred plans (architecture refactor, `ops factor` name
 
 ### Sync Storage Optimization
 
-**Phase 1 — sync 层 tar.zst 压缩传输（已完成）**:
-- 本地 alpha_dump 保持 per-date npy 不变（gsim 直接读写）
-- push 时按 factor 打 tar.zst 压缩包传输（1.8M 文件 → ~2500 个包）
-- pull 时拉 tar.zst 解压到 alpha_dump/
-- 增量逻辑：manifest 检测到 factor dump 变更 → 只重新打包变更的 factor
-- 传输层已从 rclone 迁移到 boto3 S3 SDK，ThreadPoolExecutor(8) 并行化
+**Phase 1 — sync 层 tar.zst 压缩传输（已废弃）**:
+- 已被 Phase 2 取代。alpha_dump 不再跨机器同步，sync 只传 alpha_src / alpha_pnl / alpha_feature / .state
 
-**Phase 2 — gsim FeatureReader 模块（长期，需内部调研）**:
-- 为 gsim 实现 FeatureReader Data module，从 alpha_feature memmap 按 (di, ii) 切片返回等价 per-date array
-- combo 等下游模块改为读 feature 而非 dump
-- alpha_dump 降级为 check pipeline 中间产物，check 完成 pack 后可清理
-- sync 只传 feature（每 factor 2 文件）
-- 需要 QR 配合改动 combo 配置，需内部调研推动
+**Phase 2 — gsim FeatureReader + sync 瘦身（已完成）**:
+- gsim FeatureReader 已实现，下游通过 alpha_feature memmap 读取
+- alpha_dump 降级为纯本地中间产物（gsim 产出 → 手动 ops pack → feature）
+- sync push/pull 只传 alpha_src、alpha_pnl、alpha_feature、.state
+- check pipeline 不再自动 pack（用户手动 ops pack）
+
+**Phase 3 — ops pack 增量模式（待实现）**:
+- `ops pack --date YYYYMMDD` — 只 pack 指定日期行到 feature memmap，遍历所有 factor
+- `ops pack --date YYYYMMDD --factor AlphaXxx` — 单因子单日期
+- PACK_L 动态化：从 Dates.npy 长度推导，超出时自动扩容（新建更大 memmap + copy + replace）
+- 独立于 check pipeline 的触发路径，适配日常收盘后 gsim 产出 dump 的场景
+- 并发安全：factor_lock 保护写入，FeatureReader 读端容忍写入中的部分行（NaN → 数据未就绪）

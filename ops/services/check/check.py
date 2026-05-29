@@ -10,7 +10,6 @@ from ops.infra.gsim.runner import Runner
 from ops.infra.store import default_store
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.services.list.metrics import update_metrics
-from ops.services.pack import pack_one_incremental
 from ops.utils.logger.log import *
 from ops.core.alpha.metadata import AlphaMetadata
 from ops.core.factormeta import FactorMeta
@@ -251,12 +250,6 @@ class CheckerPipeline:
             self.to_lib(factor)
             if metrics:
                 update_metrics(self.config_path, factor.name, metrics)
-
-            # 7. Pack — incremental update to alpha_feature (non-fatal)
-            try:
-                pack_one_incremental(factor.name, [], self.config)
-            except Exception as e:
-                warn(f"  ⚠  {factor.key} pack 失败,留待 ops pack 兜底: {e}")
 
             now = datetime.now().isoformat(timespec="seconds")
             check.finished_at = now

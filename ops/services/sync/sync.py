@@ -2,16 +2,13 @@
 
 Remote layout (S3 bucket):
     <library_id>/alpha_src/<name>/...
-    <library_id>/alpha_dump/<name>.tar.zst
     <library_id>/alpha_pnl/<name>
     <library_id>/alpha_feature/<name>.v1.npy
     <library_id>/.state/{factor_state,metrics,datasources}.json
 
-Local alpha_dump stays as per-date npy (gsim compatibility); only the
-remote uses tar.zst archives.
+Local alpha_dump is a local-only intermediate product (not synced).
 """
 import json
-import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -20,16 +17,16 @@ from tqdm import tqdm
 
 from ops.infra.config import Config
 from ops.infra.s3 import S3Client
-from ops.infra.cache import library_cache_dir, cache_path
+from ops.infra.cache import cache_path
 from ops.services.sync.manifest import (
-    SyncManifest, ChangeSet, FEATURE_VERSIONS,
+    SyncManifest, ChangeSet,
     load_manifest, save_manifest, scan_changes, stat_factor, list_factor_names,
 )
 from ops.services.sync.merge import MERGERS
 from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
 
 STATE_FILES = ("factor_state.json", "metrics.json", "datasources.json")
-DATA_DIRS = ("alpha_src", "alpha_dump", "alpha_pnl", "alpha_feature")
+DATA_DIRS = ("alpha_src", "alpha_pnl", "alpha_feature")
 
 
 def _make_s3(config: Config) -> S3Client:
@@ -48,30 +45,6 @@ def _pfx(config: Config) -> str:
     return config.library_id
 
 # PLACEHOLDER_CHUNK_2
-
-
-def _tar_zst_factor(name: str, dump_dir: Path, tmp_dir: Path) -> Path:
-    import tarfile, zstandard as zstd
-    archive = tmp_dir / f"{name}.tar.zst"
-    factor_dir = dump_dir / name
-    if not factor_dir.exists():
-        raise FileNotFoundError(f"dump dir not found: {factor_dir}")
-    cctx = zstd.ZstdCompressor(level=3, threads=-1)
-    with open(archive, "wb") as fh:
-        with cctx.stream_writer(fh) as compressor:
-            with tarfile.open(fileobj=compressor, mode="w|") as tar:
-                tar.add(str(factor_dir), arcname=name)
-    return archive
-
-
-def _untar_zst_factor(archive: Path, dump_dir: Path) -> None:
-    import tarfile, zstandard as zstd
-    dump_dir.mkdir(parents=True, exist_ok=True)
-    dctx = zstd.ZstdDecompressor()
-    with open(archive, "rb") as fh:
-        with dctx.stream_reader(fh) as reader:
-            with tarfile.open(fileobj=reader, mode="r|") as tar:
-                tar.extractall(path=str(dump_dir))
 
 
 def _merge_states(config: Config, s3: S3Client, pfx: str,
@@ -101,38 +74,6 @@ def _merge_states(config: Config, s3: S3Client, pfx: str,
     return failed
 
 # PLACEHOLDER_CHUNK_3
-
-
-def _push_dump_archives(changes: ChangeSet, config: Config,
-                        s3: S3Client, pfx: str, *, dry_run: bool) -> int:
-    names = sorted(changes.alpha_dump.keys())
-    if not names:
-        return 0
-    info(f"  → alpha_dump: {len(names)} factors (tar.zst)")
-    if dry_run:
-        return 0
-    failed = 0
-    progress = tqdm(total=len(names), desc="  pack+push", unit="factor")
-
-    def _do_one(name: str) -> str | None:
-        with tempfile.TemporaryDirectory(prefix="ops-dump-") as td:
-            try:
-                archive = _tar_zst_factor(name, config.alpha_dump, Path(td))
-                s3.upload(archive, f"{pfx}/alpha_dump/{name}.tar.zst")
-                return None
-            except Exception as e:
-                return f"{name}: {e}"
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(_do_one, n): n for n in names}
-        for fut in as_completed(futures):
-            progress.update(1)
-            err = fut.result()
-            if err:
-                error(f"    ✘ {err}")
-                failed += 1
-    progress.close()
-    return failed
 
 
 def _push_files(changes: ChangeSet, config: Config,
@@ -184,40 +125,6 @@ def _push_files(changes: ChangeSet, config: Config,
     return failed
 
 
-def _pull_dump_archives(names: list[str], config: Config,
-                        s3: S3Client, pfx: str, *, dry_run: bool) -> int:
-    if not names:
-        return 0
-    info(f"  → alpha_dump: {len(names)} factors (tar.zst)")
-    if dry_run:
-        return 0
-    failed = 0
-    progress = tqdm(total=len(names), desc="  pull+unpack", unit="factor")
-
-    def _do_one(name: str) -> str | None:
-        with tempfile.TemporaryDirectory(prefix="ops-dump-") as td:
-            archive = Path(td) / f"{name}.tar.zst"
-            try:
-                ok = s3.download(f"{pfx}/alpha_dump/{name}.tar.zst", archive)
-                if not ok:
-                    return f"{name}: not found"
-                _untar_zst_factor(archive, config.alpha_dump)
-                return None
-            except Exception as e:
-                return f"{name}: {e}"
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(_do_one, n): n for n in names}
-        for fut in as_completed(futures):
-            progress.update(1)
-            err = fut.result()
-            if err:
-                error(f"    ✘ {err}")
-                failed += 1
-    progress.close()
-    return failed
-
-
 def _ensure_manifest(config: Config) -> None:
     names = list_factor_names(config)
     if not names:
@@ -232,9 +139,7 @@ def _ensure_manifest(config: Config) -> None:
 # PLACEHOLDER_CHUNK_5
 
 
-def push(config: Config, *, dry_run: bool = False, force_state: bool = False,
-         repack: bool = False) -> int:
-    _check_zstd()
+def push(config: Config, *, dry_run: bool = False, force_state: bool = False) -> int:
     s3 = _make_s3(config)
     pfx = _pfx(config)
     library_id = config.library_id
@@ -263,18 +168,11 @@ def push(config: Config, *, dry_run: bool = False, force_state: bool = False,
     manifest = load_manifest(library_id) or SyncManifest()
     banner("push data")
     changes, fresh = scan_changes(config, manifest)
-    if repack:
-        dump_names = [n for n in list_factor_names(config)
-                      if (config.alpha_dump / n).exists()]
-        if dump_names:
-            changes.alpha_dump = {n: [] for n in dump_names}
-            info(f"  --repack: {len(dump_names)} factors")
     if changes.is_empty():
         info("  · 无变更")
     else:
         info(f"  发现 {changes.total_factors()} 个因子有变更")
         failed += _push_files(changes, config, s3, pfx, dry_run=dry_run)
-        failed += _push_dump_archives(changes, config, s3, pfx, dry_run=dry_run)
         if failed == 0 and not dry_run:
             for name, fp in fresh.items():
                 manifest.factors[name] = fp
@@ -289,13 +187,6 @@ def push(config: Config, *, dry_run: bool = False, force_state: bool = False,
     return failed
 
 # PLACEHOLDER_CHUNK_6
-
-
-def _check_zstd() -> None:
-    try:
-        import zstandard  # noqa: F401
-    except ImportError:
-        raise RuntimeError("zstandard 未安装 — uv add zstandard")
 
 
 def _force_push_states(config: Config, s3: S3Client, pfx: str,
@@ -332,7 +223,6 @@ def _fetch_remote_state_names(s3: S3Client, pfx: str) -> set[str] | None:
 
 
 def pull(config: Config, *, dry_run: bool = False) -> int:
-    _check_zstd()
     s3 = _make_s3(config)
     pfx = _pfx(config)
     library_id = config.library_id
@@ -350,8 +240,6 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
             if not dry_run:
                 n = s3.download_dir(f"{pfx}/{d}/", local)
                 info(f"  ✔ {d}: {n} files")
-        dump_names = s3.list_names(f"{pfx}/alpha_dump/", suffix=".tar.zst")
-        failed += _pull_dump_archives(dump_names, config, s3, pfx, dry_run=dry_run)
     else:
         banner("pull data (增量)")
         state_path = cache_path(library_id, "factor_state.json")
@@ -401,8 +289,6 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
                                     warn(f"    ⚠ {err}")
                         progress.close()
 
-                    failed += _pull_dump_archives(
-                        missing, config, s3, pfx, dry_run=dry_run)
     if not dry_run:
         _ensure_manifest(config)
     return failed
@@ -443,24 +329,7 @@ def status(config: Config) -> int:
 
 
 def verify(config: Config) -> int:
-    s3 = _make_s3(config)
-    pfx = _pfx(config)
-    failed = 0
-    banner("verify alpha_dump (archives)")
-    remote_archives = set(s3.list_names(f"{pfx}/alpha_dump/", suffix=".tar.zst"))
-    local_dump: set[str] = set()
-    if config.alpha_dump.exists():
-        with os.scandir(config.alpha_dump) as it:
-            for e in it:
-                if e.is_dir() and not e.name.startswith("."):
-                    local_dump.add(e.name)
-    missing = local_dump - remote_archives
-    if missing:
-        warn(f"  ⚠ {len(missing)} factors 无远端 archive")
-        failed += 1
-    else:
-        info(f"  ✔ {len(local_dump)} factors OK")
-    return failed
+    return 0
 
 
 def rebuild(config: Config) -> int:
@@ -482,8 +351,7 @@ def run_sync(args) -> None:
     if action in ("push", "pull"):
         if action == "push":
             failed = push(config, dry_run=args.dry_run,
-                          force_state=getattr(args, "force_state", False),
-                          repack=getattr(args, "repack", False))
+                          force_state=getattr(args, "force_state", False))
         else:
             failed = pull(config, dry_run=args.dry_run)
         banner(f"{action} 汇总")

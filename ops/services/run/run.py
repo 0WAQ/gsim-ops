@@ -6,7 +6,6 @@ from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner, BacktestError
 from ops.infra.lock import factor_lock, FactorLocked
-from ops.services.pack import pack_one_incremental
 from ops.utils.logger.log import *
 from ops.core.alpha.metadata import AlphaMetadata
 
@@ -44,7 +43,7 @@ def _restore_dates(xml_file: Path, orig_start: str, orig_end: str) -> None:
 
 def run_one(factor_dir: Path, config: Config,
             start_date: str, end_date: str,
-            do_pack: bool, i: int, total: int) -> str:
+            i: int, total: int) -> str:
     """Returns one of: 'pass' | 'fail' | 'locked'."""
     name = factor_dir.name
     total_n = len(str(total))
@@ -55,15 +54,14 @@ def run_one(factor_dir: Path, config: Config,
 
     try:
         with factor_lock(name):
-            return _run_one_locked(factor_dir, config, start_date, end_date, do_pack)
+            return _run_one_locked(factor_dir, config, start_date, end_date)
     except FactorLocked:
         warn(f"  ⚠  {name} 已被另一个进程占用,跳过")
         return "locked"
 
 
 def _run_one_locked(factor_dir: Path, config: Config,
-                    start_date: str, end_date: str,
-                    do_pack: bool) -> str:
+                    start_date: str, end_date: str) -> str:
     name = factor_dir.name
 
     # Load metadata from the directory (AlphaMetadata constructor needs user/date,
@@ -97,14 +95,6 @@ def _run_one_locked(factor_dir: Path, config: Config,
             if metrics:
                 info(f"  📊 {name} ret={metrics.ret:.2f}% shrp={metrics.shrp:.2f}")
 
-        # Optional pack
-        if do_pack:
-            try:
-                pack_one_incremental(name, [], config)
-                info(f"  ✔  {name} pack done")
-            except Exception as e:
-                warn(f"  ⚠  {name} pack 失败: {e}")
-
         return "pass"
 
     except BacktestError as e:
@@ -134,8 +124,6 @@ def run_factors(args) -> None:
 
     start_date: str = args.start_date
     end_date: str = args.end_date
-    do_pack: bool = getattr(args, 'pack', False)
-
     banner("因子运行")
 
     passed = failed = locked = 0
@@ -143,7 +131,7 @@ def run_factors(args) -> None:
     with ProcessPoolExecutor(max_workers=min(20, max(1, total))) as pool:
         futures: list[Future[str]] = []
         for i, (factor_dir, _) in enumerate(factors):
-            f = pool.submit(run_one, factor_dir, config, start_date, end_date, do_pack, i, total)
+            f = pool.submit(run_one, factor_dir, config, start_date, end_date, i, total)
             futures.append(f)
 
         for f in as_completed(futures):
