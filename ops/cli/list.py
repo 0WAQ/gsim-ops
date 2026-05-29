@@ -63,6 +63,11 @@ Example:
         help="Refresh data sources by parsing factor code",
     )
     parser.add_argument(
+        "--refresh-bcorr",
+        action="store_true",
+        help="Refresh max bcorr against alphalib + prod by running bcorr",
+    )
+    parser.add_argument(
         "--show-tables",
         action="store_true",
         help="Show tables column in output",
@@ -80,7 +85,7 @@ Example:
     parser.add_argument(
         "--sort-by",
         type=str,
-        choices=["ret", "shrp", "mdd", "tvr", "fitness", "dump_days", "delay"],
+        choices=["ret", "shrp", "mdd", "tvr", "fitness", "dump_days", "delay", "bcorr"],
         help="Sort by field (descending)",
     )
     parser.add_argument(

@@ -8,6 +8,7 @@ from ops.core.state import FactorStatus, FactorRecord
 from ops.infra.store import default_store
 from .metrics import load_metrics, refresh_metrics, merge_metrics
 from .datasource import load_datasources, refresh_datasources, merge_datasources
+from .bcorr import load_bcorr, refresh_bcorr, merge_bcorr
 
 
 init(autoreset=True)
@@ -37,7 +38,7 @@ def print_table(factors: list[FactorInfo], records: dict[str, FactorRecord],
         for f in factors
     )
 
-    header = f"{'name':<40} {'author':<10} {'D':>2} {'ret%':>8} {'shrp':>8} {'mdd%':>8} {'tvr%':>8} {'fitness':>8}"
+    header = f"{'name':<40} {'author':<10} {'delay':>5} {'ret%':>8} {'shrp':>8} {'mdd%':>8} {'tvr%':>8} {'fitness':>8} {'bcorr':>8}"
     if has_rejected:
         header += f"  {'fail_stage':<12}"
     if show_tables:
@@ -57,8 +58,9 @@ def print_table(factors: list[FactorInfo], records: dict[str, FactorRecord],
         mdd = f"{m.mdd:>8.2f}" if m else f"{DASH:>8}"
         tvr = f"{m.tvr:>8.2f}" if m else f"{DASH:>8}"
         fitness = f"{m.fitness:>8.2f}" if m else f"{DASH:>8}"
-        delay = f"{f.delay:>2}" if f.delay is not None else f"{'?':>2}"
-        line = f"{f.name:<40} {f.author:<10} {delay} {ret} {shrp} {mdd} {tvr} {fitness}"
+        delay = f"{f.delay:>5}" if f.delay is not None else f"{'?':>5}"
+        bcorr = f"{f.bcorr['max_bcorr']:>8.2f}" if f.bcorr and f.bcorr.get('max_bcorr') is not None else f"{DASH:>8}"
+        line = f"{f.name:<40} {f.author:<10} {delay} {ret} {shrp} {mdd} {tvr} {fitness} {bcorr}"
         rec = records.get(f.name)
         if has_rejected:
             stage = rec.last_fail_stage if rec and rec.status == FactorStatus.REJECTED and rec.last_fail_stage else ""
@@ -87,6 +89,7 @@ SORT_KEYS = {
     "fitness": lambda f: f.metrics.fitness if f.metrics else float("-inf"),
     "dump_days": lambda f: f.dump_days,
     "delay": lambda f: f.delay if f.delay is not None else float("-inf"),
+    "bcorr": lambda f: abs(f.bcorr["max_bcorr"]) if f.bcorr and f.bcorr.get("max_bcorr") is not None else float("-inf"),
 }
 
 METRIC_GETTERS = {
@@ -97,6 +100,7 @@ METRIC_GETTERS = {
     "fitness": lambda f: f.metrics.fitness if f.metrics else None,
     "dump_days": lambda f: float(f.dump_days),
     "delay": lambda f: float(f.delay) if f.delay is not None else None,
+    "bcorr": lambda f: abs(f.bcorr["max_bcorr"]) if f.bcorr and f.bcorr.get("max_bcorr") is not None else None,
 }
 
 _FILTER_PATTERN = re.compile(r"^(\w+)([><=!]+)(.+)$")
@@ -179,6 +183,13 @@ def run_list(args):
         datasources = load_datasources(args.config_path)
 
     factors = merge_datasources(factors, datasources)
+
+    if args.refresh_bcorr:
+        bcorr = refresh_bcorr(factors, scanner.config, args.config_path)
+    else:
+        bcorr = load_bcorr(args.config_path)
+
+    factors = merge_bcorr(factors, bcorr)
 
     if args.filter_by is not None:
         if not args.filter_by.strip():

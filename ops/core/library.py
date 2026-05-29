@@ -13,7 +13,7 @@ from ops.infra.cache import cache_path
 from ops.core.metrics import Metrics
 
 
-INDEX_VERSION = 4
+INDEX_VERSION = 5
 INDEX_MAX_AGE_SECONDS = 3600  # 1 hour
 
 
@@ -34,6 +34,7 @@ class FactorInfo:
     delay: int | None = None
     metrics: Metrics | None = None
     datasources: dict | None = None
+    bcorr: dict | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +48,7 @@ class FactorInfo:
             "delay": self.delay,
             "metrics": self.metrics.to_dict() if self.metrics else None,
             "datasources": self.datasources,
+            "bcorr": self.bcorr,
         }
 
     @classmethod
@@ -63,6 +65,7 @@ class FactorInfo:
             delay=data.get("delay"),
             metrics=Metrics.from_dict(metrics_data) if metrics_data else None,
             datasources=data.get("datasources"),
+            bcorr=data.get("bcorr"),
         )
 
 
