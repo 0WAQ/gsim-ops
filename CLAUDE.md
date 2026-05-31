@@ -155,15 +155,15 @@ AlphaXxx/
 
 See `docs/factor-state-machine.md` for the factor lifecycle design (state definitions, transitions, data product rules, version control direction).
 
-### Factor State Machine Refactor (待修复)
+### Factor State Machine Refactor (已修复)
 
-代码与 `docs/factor-state-machine.md` 设计文档存在以下不一致:
+以下问题已在 75ded5d 中修复:
 
-1. **submit 未拒绝已存在因子** (`services/submit/submit.py:97`): `store.put()` 无条件覆盖,应先检查 state 中是否已存在同名因子,存在则拒绝并提示用 resubmit
-2. **submit 有 recycle fallback** (`services/submit/submit.py:134-140`): dropbox 找不到时从 recycle 提交,应删除此逻辑(已有因子走 resubmit/recheck)
-3. **recheck REJECTED 代码来源错误** (`services/recheck/recheck.py:88`): `_locate_source` 对 REJECTED 走 `_find_in_recycle`,应统一从 alpha_src 拿
-4. **recheck REJECTED 产物未自动清理** (`services/recheck/recheck.py`): REJECTED recheck 时应自动清掉 pnl/dump/feature(无生产顾虑),当前默认保留
-5. **to_recycle 未按失败阶段区分产物** (`services/check/check.py:147-178`): 对所有失败阶段统一清 dump+feature,但 compliance/correlation 失败时应保留 dump 并生成 feature
+1. ~~submit 未拒绝已存在因子~~ → `submit_one` 开头检查 `store.get()`,存在则拒绝
+2. ~~submit 有 recycle fallback~~ → 已删除,已有因子走 resubmit/recheck
+3. ~~recheck REJECTED 代码来源错误~~ → `_locate_source` 对 REJECTED 统一从 alpha_src 拿
+4. ~~recheck REJECTED 产物未自动清理~~ → REJECTED recheck 自动清 pnl/dump/feature
+5. ~~to_recycle 未按失败阶段区分产物~~ → compliance/correlation 保留 dump+pnl 并生成 feature;checkbias/checkpoint 清掉
 
 ### Sync Storage Optimization
 
