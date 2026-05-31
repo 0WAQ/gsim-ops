@@ -62,7 +62,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 
 | Subcommand | Purpose | Module |
 |------------|---------|--------|
-| `submit` | Copy factors from dropbox (or recycle fallback) to staging, generate `meta.json`, mark SUBMITTED | `ops/services/submit/` |
+| `submit` | Copy new factors from dropbox to staging, generate `meta.json`, mark SUBMITTED | `ops/services/submit/` |
 | `resubmit` | Existing factor with new code from dropbox, version += 1, mark SUBMITTED | `ops/services/resubmit/` |
 | `recheck` | Move ACTIVE/REJECTED/DELETED factor back to staging for re-check (code unchanged) | `ops/services/recheck/` |
 | `check` | 7-stage validation pipeline (runs in-place on staging) | `ops/services/check/` |

@@ -191,9 +191,9 @@ XML 中通过 `Constants` 控制：
 **操作**:
 - 运行 `simsummary` 提取指标（ret/shrp/dd/tvr/fitness）
 - 保存指标到 ops 索引
-- 将因子源代码、Config、Readme 复制到 `alpha_src/`
-- 将 PNL 文件复制到 `alpha_pnl/`
-- 将 alpha_dump 复制到 `alpha_dump/`
+- 将因子源代码、Config、Readme 移动到 `alpha_src/`
+- 将 PNL 文件移动到 `alpha_pnl/`
+- 将 alpha_dump 移动到 `alpha_dump/`
 - 更新状态为 `ACTIVE`，生成 `meta.json`
 
 ## 失败语义总结

@@ -2,7 +2,9 @@
 
 ## State Machine
 
-`SUBMITTED → CHECKING → ACTIVE | REJECTED → (DECAYING → RETIRED → DELETED)`
+`SUBMITTED → CHECKING → ACTIVE | REJECTED`
+
+(DELETED 是 soft-delete 标记,由 `ops rm` 进入;DECAYING/RETIRED 暂未实现)
 
 **Flow**:
 ```
@@ -10,17 +12,18 @@ dropbox/{user}/{date}/AlphaXxx/      (QR-owned, read-only source)
     │  ops submit  → parse_factor() → write meta.json + state=SUBMITTED
     ▼
 staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
-    │  ops check   → reconcile → 8-stage pipeline run
+    │  ops check   → reconcile → 7-stage pipeline run
     ├── pass ──► alpha_src/AlphaXxx/                  state=ACTIVE
-    │                │  ops resubmit  (后续发现因子有问题,召回重审)
-    │                │  → 搬回 staging/ + state→SUBMITTED  (--purge 顺带清 dump/feature)
+    │                │  ops recheck   (原代码不变,重跑 check;--purge 顺带清 dump/feature)
+    │                │  ops resubmit  (从 dropbox 提交新代码,version += 1)
+    │                │  → 搬回 staging/ + state→SUBMITTED
     │                ▼
     │            [回到 staging,等待下一次 ops check]
     ├── fail (validate/long_backtest)
     │            → staging/ (kept in-place)            state→SUBMITTED  (retry via ops check --retry)
     └── fail (checkbias/checkpoint/compliance/correlation/archive)
                  → recycle/{user}/{stage}/AlphaXxx/    state=REJECTED
-                     │  ops submit (recycle fallback)   → staging/ + state→SUBMITTED
+                     │  ops recheck -s rejected         → staging/ + state→SUBMITTED
                      ▼
                  [same flow as new factor]
 ```
