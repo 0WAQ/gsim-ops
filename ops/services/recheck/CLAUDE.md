@@ -5,7 +5,7 @@
 ## 支持的来源状态
 
 - **ACTIVE** (默认): 源 = `alpha_src/<name>/`
-- **REJECTED** (`-s rejected`): 源 = `recycle/{user}/{stage}/<name>/`
+- **REJECTED** (`-s rejected`): 源 = `alpha_src/<name>/`
 - **DELETED** (`-s deleted`): 优先 `alpha_src`(soft-delete 保留 src），否则 recycle
 
 ## 操作流程

@@ -49,7 +49,7 @@ recycle 是给研究员看的 REJECTED 因子副本。
 | SUBMITTED | 无(在 staging) | 无 | 无 | 无 | — |
 | ACTIVE | 有 | 有 | 有 | 有(需 ops pack) | — |
 | REJECTED(checkbias/checkpoint 失败) | 有 | 无 | 无 | 无 | 有 |
-| REJECTED(compliance/correlation 失败) | 有 | 有 | 无 | 无 | 有 |
+| REJECTED(compliance/correlation 失败) | 有 | 有 | 有 | 有 | 有 |
 
 ## 转移时数据产物规则
 
@@ -58,7 +58,7 @@ recycle 是给研究员看的 REJECTED 因子副本。
 | submit (新因子→SUBMITTED) | 无(在 staging) | 无 | 无 | 无 |
 | check 通过 (→ACTIVE) | staging 移入 | 新产出 | 新产出 | 无(需 ops pack 单独产出) |
 | check 失败 checkbias/checkpoint (→REJECTED) | 保留 src | 不保留 | 不保留 | 无 |
-| check 失败 compliance/correlation (→REJECTED) | 保留 src | 保留 | 清除 | 清除 |
+| check 失败 compliance/correlation (→REJECTED) | 保留 src | 保留 | 保留 | 生成并保留 |
 | recheck (ACTIVE→SUBMITTED) | 保留(拷贝到 staging) | 保留 | 保留 | 保留 |
 | recheck (REJECTED→SUBMITTED) | 保留(拷贝到 staging) | 清掉 | 清掉 | 清掉 |
 | resubmit (新代码, version+=1) | 新代码到 staging,旧 src 保留 | 保留 | 保留 | 保留 |

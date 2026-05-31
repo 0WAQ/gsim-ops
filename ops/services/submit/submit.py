@@ -106,22 +106,6 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
     return True
 
 
-def _find_recycled_factor(config: Config, factor_name: str) -> tuple[str, Path] | None:
-    """Search recycle/ for a factor by name. Returns (user, factor_dir) or None."""
-    recycle = config.recycle
-    if not recycle.exists():
-        return None
-    for user_dir in recycle.iterdir():
-        if not user_dir.is_dir():
-            continue
-        for stage_dir in user_dir.iterdir():
-            if not stage_dir.is_dir():
-                continue
-            candidate = stage_dir / factor_name
-            if candidate.is_dir():
-                return (user_dir.name, candidate)
-    return None
-
 
 def run_submit(args):
     users: list[str] = [args.user]
