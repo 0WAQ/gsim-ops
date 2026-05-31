@@ -154,7 +154,11 @@ AlphaXxx/
 
 ## Plans & Roadmap
 
-See `docs/plans.md` for deferred plans and `docs/roadmap.md` for the feature checklist.
+See `docs/factor-state-machine.md` for the factor lifecycle design (state definitions, transitions, data product rules, version control direction).
+
+### Factor State Machine Refactor (待实现)
+
+当前代码中 `resubmit` 命令需重命名为 `recheck`,新建 `resubmit` 命令实现"从 dropbox 拿新代码覆盖已有因子"。`submit` 需加校验:拒绝已存在因子。state record 需加 `version` 字段。
 
 ### Sync Storage Optimization
 

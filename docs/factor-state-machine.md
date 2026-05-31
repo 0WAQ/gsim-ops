@@ -1,0 +1,85 @@
+# 因子状态机设计
+
+## 状态定义
+
+| 状态 | 业务含义 |
+|---|---|
+| SUBMITTED | 等待审查(唯一待审入口) |
+| ACTIVE | 通过验证,生产因子 |
+| REJECTED | 验证未通过,不合格 |
+
+- CHECKING 不作为独立状态,是 SUBMITTED 的运行中瞬态
+- DELETED 不是状态,是删除操作的结果——执行后因子从系统中彻底消失(清所有文件 + state 记录)
+- DECAYING / RETIRED 暂未实现
+
+## 命令体系
+
+| 命令 | 语义 | 前置条件 | 来源 | version |
+|---|---|---|---|---|
+| `ops submit` | 新因子入系统 | 因子名不存在于 state | dropbox | = 1 |
+| `ops resubmit` | 已有因子提交新代码 | 因子名已存在于 state | dropbox | += 1 |
+| `ops recheck` | 原代码不变,重跑 check | ACTIVE 或 REJECTED | alpha_src | 不变 |
+
+## 状态转移图
+
+```
+ops submit (新因子)     ops resubmit (新代码, version+=1)
+    │                       │
+    ▼                       ▼
+         ┌───────────┐
+         │ SUBMITTED │ ←── ops recheck (ACTIVE)
+         └───────────┘ ←── ops recheck (REJECTED)
+              │
+         ops check
+              │
+         ┌────┴────┐
+         ▼         ▼
+    ┌────────┐  ┌──────────┐
+    │ ACTIVE │  │ REJECTED │
+    └────────┘  └──────────┘
+```
+
+## 各状态下因子数据分布
+
+alpha_src 是所有因子的 src 归档,不区分状态(研究员无 alpha_src 权限)。
+recycle 是给研究员看的 REJECTED 因子副本。
+
+| 状态 | alpha_src | alpha_pnl | alpha_dump | alpha_feature | recycle |
+|---|---|---|---|---|---|
+| SUBMITTED | 无(在 staging) | 无 | 无 | 无 | — |
+| ACTIVE | 有 | 有 | 有 | 有 | — |
+| REJECTED(checkbias/checkpoint 失败) | 有 | 无 | 无 | 无 | 有 |
+| REJECTED(compliance/correlation 失败) | 有 | 有 | 有 | 有 | 有 |
+
+## 转移时数据产物规则
+
+| 转移 | alpha_src | alpha_pnl | alpha_dump | alpha_feature |
+|---|---|---|---|---|
+| submit (新因子→SUBMITTED) | 无(在 staging) | 无 | 无 | 无 |
+| check 通过 (→ACTIVE) | staging 移入 | 新产出 | 新产出 | 新产出 |
+| check 失败 checkbias/checkpoint (→REJECTED) | 保留 src | 不保留 | 不保留 | 无 |
+| check 失败 compliance/correlation (→REJECTED) | 保留 src | 保留 | 保留 | 生成并保留 |
+| recheck (ACTIVE→SUBMITTED) | 保留(拷贝到 staging) | 保留 | 保留 | 保留 |
+| recheck (REJECTED→SUBMITTED) | 保留(拷贝到 staging) | 清掉 | 清掉 | 清掉 |
+| resubmit (新代码, version+=1) | 新代码到 staging,旧 src 保留 | 保留 | 保留 | 保留 |
+
+规则说明:
+- ACTIVE recheck 保留产物:不暂停生产
+- REJECTED recheck 清掉产物:无生产顾虑,check 会重新产出
+- resubmit 保留旧产物:作为对比基准
+- REJECTED 后两阶段失败保留完整产物:数据完整,有分析参考价值
+- REJECTED 前两阶段失败不保留:短期数据不完整,无意义
+
+## 版本控制
+
+当前阶段:state record 加 `version` 计数器,check_history 每条标注对应 version。
+代码只保留当前版本(不做历史快照)。
+
+未来方向:加代码快照(git 管理 alpha_src 或 .versions/ 归档),类似 MVCC。
+
+## 业务背景
+
+- 研究员没有 alpha_src 的读写权限,recycle 是给研究员看的副本
+- 目前没有真正的生产环境,ACTIVE 只是"通过验证入库"
+- 有些手写因子质量高但被机器因子挤占(correlation 被拒),其完整产物有分析价值
+- 数据产物可再生性:src 不可再生,pnl 代价高尽量保留,dump/feature 可再生
