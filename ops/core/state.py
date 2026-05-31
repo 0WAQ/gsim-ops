@@ -41,6 +41,7 @@ class FactorRecord:
     deleted_at: str | None = None
     last_fail_stage: str | None = None
     last_fail_reason: str | None = None
+    version: int = 1
     check_history: list[CheckRecord] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -52,5 +53,6 @@ class FactorRecord:
     def from_dict(cls, d: dict) -> "FactorRecord":
         d = dict(d)
         d["status"] = FactorStatus(d["status"])
+        d.setdefault("version", 1)
         d["check_history"] = [CheckRecord.from_dict(c) for c in d.get("check_history", [])]
         return cls(**d)

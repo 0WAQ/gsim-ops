@@ -36,12 +36,14 @@ uv run ops sync status               # Quick local-vs-remote summary (no data sc
 uv run ops sync verify               # Slow: rclone check across all dirs
 uv run ops rm AlphaXxx               # 软删除:仅打 DELETED 标,文件保留
 uv run ops rm AlphaXxx --force       # 同时删本地 dump + feature(保留 src/pnl)
-uv run ops resubmit AlphaXxx         # 将 active 因子打回 staging 重新审查
-uv run ops resubmit AlphaXxx -s rejected   # 从 recycle 召回 rejected 因子
-uv run ops resubmit AlphaXxx -s deleted    # 复活 deleted 因子(soft-delete 仍保留 src)
-uv run ops resubmit AlphaXxx --purge # 同时清除 dump + feature(保留 src/pnl)
-uv run ops resubmit -u wbai          # 批量:wbai 所有 active 因子(apt 风格确认)
-uv run ops resubmit -u wbai -y       # 批量,跳过确认
+uv run ops resubmit -u wbai -s 20260401 -f Alpha   # 已有因子提交新代码(version += 1)
+uv run ops resubmit -u wbai -s 20260401            # 批量:该日期下所有已存在因子
+uv run ops recheck AlphaXxx          # 原代码不变,重跑 check 流水线
+uv run ops recheck AlphaXxx -s rejected   # 从 recycle 召回 rejected 因子
+uv run ops recheck AlphaXxx -s deleted    # 复活 deleted 因子(soft-delete 仍保留 src)
+uv run ops recheck AlphaXxx --purge  # 同时清除 dump + feature(保留 src/pnl)
+uv run ops recheck -u wbai           # 批量:wbai 所有 active 因子(apt 风格确认)
+uv run ops recheck -u wbai -y        # 批量,跳过确认
 ```
 
 No test suite exists. Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
@@ -61,7 +63,8 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | Subcommand | Purpose | Module |
 |------------|---------|--------|
 | `submit` | Copy factors from dropbox (or recycle fallback) to staging, generate `meta.json`, mark SUBMITTED | `ops/services/submit/` |
-| `resubmit` | Move ACTIVE factor back to staging, flip state to SUBMITTED for re-check | `ops/services/resubmit/` |
+| `resubmit` | Existing factor with new code from dropbox, version += 1, mark SUBMITTED | `ops/services/resubmit/` |
+| `recheck` | Move ACTIVE/REJECTED/DELETED factor back to staging for re-check (code unchanged) | `ops/services/recheck/` |
 | `check` | 8-stage alpha factor validation pipeline (runs in-place on staging) | `ops/services/check/` |
 | `status` | Query factor lifecycle state | `ops/services/status/` |
 | `backfill` | One-shot: generate `meta.json` + ACTIVE for existing factors in `alpha_src/` | `ops/services/backfill/` |
