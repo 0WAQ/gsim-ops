@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**ops** is a Python CLI for alpha factor validation, backtesting, and lifecycle management. It orchestrates a 6-stage validation pipeline for quantitative trading factors before they enter the production factor library.
+**ops** is a Python CLI for alpha factor validation, backtesting, and lifecycle management. It orchestrates a 7-stage validation pipeline for quantitative trading factors before they enter the production factor library.
 
 ## Commands
 
@@ -13,7 +13,7 @@ uv sync                              # Install dependencies (uses uv, not pip)
 uv run ops --help                    # CLI help
 uv run ops submit -u wbai -s 20260401            # Submit a day's factors from dropbox
 uv run ops submit -u wbai -s 20260401 -f Alpha   # Submit one factor
-uv run ops check                                 # Run 6-stage pipeline on staging
+uv run ops check                                 # Run 7-stage pipeline on staging
 uv run ops status AlphaXxx                       # Query factor lifecycle state
 uv run ops status -u wbai --status submitted     # Filter by author/state
 uv run ops backfill --dry-run                    # Preview backfill on alpha_src/
@@ -56,7 +56,7 @@ uv run <cmd>     # Run command in venv
 
 ## Architecture
 
-Entry point: `ops/main.py` (argparse dispatcher). Each subcommand lives in its own package under `ops/` with an `args.py` (CLI registration) and implementation module.
+Entry point: `ops/main.py` (argparse dispatcher). CLI registration in `ops/cli/*.py`, business logic in `ops/services/*/`.
 
 Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (orchestration) → `core/` (data models) + `infra/` (I/O, external systems). `utils/` for shared utilities.
 
@@ -65,7 +65,8 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `submit` | Copy factors from dropbox (or recycle fallback) to staging, generate `meta.json`, mark SUBMITTED | `ops/services/submit/` |
 | `resubmit` | Existing factor with new code from dropbox, version += 1, mark SUBMITTED | `ops/services/resubmit/` |
 | `recheck` | Move ACTIVE/REJECTED/DELETED factor back to staging for re-check (code unchanged) | `ops/services/recheck/` |
-| `check` | 8-stage alpha factor validation pipeline (runs in-place on staging) | `ops/services/check/` |
+| `check` | 7-stage validation pipeline (runs in-place on staging) | `ops/services/check/` |
+| `run` | Run backtest on factors in library | `ops/services/run/` |
 | `status` | Query factor lifecycle state | `ops/services/status/` |
 | `backfill` | One-shot: generate `meta.json` + ACTIVE for existing factors in `alpha_src/` | `ops/services/backfill/` |
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
@@ -81,7 +82,7 @@ Removed subcommands: `cp`, `scp`, `compiler`.
 **Destructive operations are opt-in.** Default behavior never deletes user data. Every destructive path lives behind an explicit flag or a separate subcommand. Established patterns:
 
 - `ops rm` defaults to state-only soft-delete. `--force` removes local dump + feature only.
-- `ops resubmit` defaults to move + state flip. `--purge` removes dump + feature.
+- `ops resubmit` copies new code from dropbox to staging, version += 1.
 - `ops sync push` is additive, never deletes remote objects.
 - Bulk operations default to dry-run; require `--apply` (or equivalent) to execute.
 - State merge prefers data preservation over precision: tied `updated_at` keeps local.
@@ -148,17 +149,21 @@ AlphaXxx/
 - **Dead code**: `infra/notify/email.py` is commented out
 - **Debug residual**: `utils/func.py` has a `debug()` with infinite loop
 - **Feishu credentials hardcoded**: `infra/notify/feishu_send.py` — move to config/env later
-- **BacktestError duplicate**: `utils/exception/exception.py` (stub) vs `infra/gsim/runner.py` (real)
-- **Checker inheritance inconsistent**: `ComplianceChecker` and `CorrelationChecker` don't inherit `Checker` base
 - **`core/alpha/metadata.py` has I/O**: `_modify_always()`, `save()`, `get_v2npy_files()` — extract to services/infra
 
 ## Plans & Roadmap
 
 See `docs/factor-state-machine.md` for the factor lifecycle design (state definitions, transitions, data product rules, version control direction).
 
-### Factor State Machine Refactor (待实现)
+### Factor State Machine Refactor (待修复)
 
-当前代码中 `resubmit` 命令需重命名为 `recheck`,新建 `resubmit` 命令实现"从 dropbox 拿新代码覆盖已有因子"。`submit` 需加校验:拒绝已存在因子。state record 需加 `version` 字段。
+代码与 `docs/factor-state-machine.md` 设计文档存在以下不一致:
+
+1. **submit 未拒绝已存在因子** (`services/submit/submit.py:97`): `store.put()` 无条件覆盖,应先检查 state 中是否已存在同名因子,存在则拒绝并提示用 resubmit
+2. **submit 有 recycle fallback** (`services/submit/submit.py:134-140`): dropbox 找不到时从 recycle 提交,应删除此逻辑(已有因子走 resubmit/recheck)
+3. **recheck REJECTED 代码来源错误** (`services/recheck/recheck.py:88`): `_locate_source` 对 REJECTED 走 `_find_in_recycle`,应统一从 alpha_src 拿
+4. **recheck REJECTED 产物未自动清理** (`services/recheck/recheck.py`): REJECTED recheck 时应自动清掉 pnl/dump/feature(无生产顾虑),当前默认保留
+5. **to_recycle 未按失败阶段区分产物** (`services/check/check.py:147-178`): 对所有失败阶段统一清 dump+feature,但 compliance/correlation 失败时应保留 dump 并生成 feature
 
 ### Sync Storage Optimization
 

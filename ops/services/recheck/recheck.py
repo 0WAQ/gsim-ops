@@ -85,7 +85,8 @@ def _locate_source(rec: FactorRecord, config: Config) -> Path | None:
         src = config.alpha_src / name
         return src if src.exists() else None
     if rec.status == FactorStatus.REJECTED:
-        return _find_in_recycle(name, config.recycle)
+        src = config.alpha_src / name
+        return src if src.exists() else None
     if rec.status == FactorStatus.DELETED:
         # soft-delete 默认保留 alpha_src;--force 才删 dump/feature(src 仍保留)
         # 若 src 已被外部清理,则尝试 recycle
@@ -158,15 +159,22 @@ def _recheck_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
     _clean_pycache(src)
 
     # 先 move,再 transition:崩在中间由 reconcile 修
-    # (ACTIVE + in staging → SUBMITTED;REJECTED / DELETED 同理需 reconcile 兜底)
     prev_status = rec.status.value
     shutil.move(str(src), str(dst))
     _rewrite_module_path(dst)
 
-    if purge:
+    # REJECTED recheck 自动清掉产物(无生产顾虑,check 会重新产出)
+    # ACTIVE/DELETED 仅在 --purge 时清
+    if rec.status == FactorStatus.REJECTED or purge:
         removed = _purge_artifacts(name, config)
         for r in removed:
             info(f"    ✔ 已删除 {r}")
+        # REJECTED 额外清 pnl
+        if rec.status == FactorStatus.REJECTED:
+            pnl = config.alpha_pnl / name
+            if pnl.exists():
+                shutil.rmtree(pnl)
+                info(f"    ✔ 已删除 alpha_pnl/{name}")
 
     store.transition(name, FactorStatus.SUBMITTED)
     info(f"  ✔ {name} {prev_status} → submitted")

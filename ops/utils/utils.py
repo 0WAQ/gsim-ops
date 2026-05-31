@@ -6,7 +6,7 @@ import subprocess as sp
 from pathlib import Path
 from typing import Optional
 
-from .exception.exception import BacktestError
+from ops.infra.gsim.runner import BacktestError
 
 
 class LowerAction(argparse.Action):

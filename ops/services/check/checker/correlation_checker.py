@@ -14,7 +14,7 @@ class CorrelationFail(CheckFail):
         super().__init__("correlation", *args)
 
 
-class CorrelationChecker:
+class CorrelationChecker(Checker):
     def __init__(self, config: Config):
         self.ret: float = config.correlation["ret%"]
         self.tvr: float = config.correlation["tvr%"]

@@ -64,6 +64,12 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
                store: StateStore) -> bool:
     submitted_at = datetime.now().isoformat(timespec="seconds")
 
+    existing = store.get(staging_dir.name)
+    if existing is not None:
+        error(f"  ✘  {staging_dir.name} 已存在于 state 中"
+              f"(status={existing.status.value}),请用 ops resubmit 提交新代码")
+        return False
+
     py_files = sorted(staging_dir.glob("*.py"))
     xml_files = sorted(staging_dir.glob("*.xml"))
     if len(py_files) != 1 or len(xml_files) != 1:
@@ -129,26 +135,14 @@ def run_submit(args):
 
     banner("因子提交")
     found = _iter_dropbox_dirs(config, users, start, end, factor_name)
-    recycled: list[tuple[str, Path]] = []
 
-    # Recycle fallback: when not in dropbox, search recycle for re-submission
-    if not found and factor_name is not None:
-        rc = _find_recycled_factor(config, factor_name)
-        if rc is not None:
-            user, rc_dir = rc
-            info(f"  未在 dropbox 找到 {factor_name},从 recycle 重新提交")
-            recycled.append((user, rc_dir))
-
-    if not found and not recycled:
+    if not found:
         warn("没找到任何因子目录")
         bottom()
         return
 
     user_of = {d: user for user, d in found}
-    for user, d in recycled:
-        user_of[d] = user
-
-    src_dirs = [d for _, d in found] + [d for _, d in recycled]
+    src_dirs = [d for _, d in found]
     staging_dirs = copy_to_staging(config, src_dirs)
 
     passed = failed = 0

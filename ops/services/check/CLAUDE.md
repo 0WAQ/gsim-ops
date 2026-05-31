@@ -1,8 +1,8 @@
 # Check Pipeline
 
-`CheckerPipeline` in `check.py` runs 8 stages sequentially per factor:
+`CheckerPipeline` in `check.py` runs 7 stages sequentially per factor:
 
-0. **Validate** - Short backtest (20241201-20241231) without DataFirewall — validates factor code/config can run at all
+0. **Validate** - Minimal backtest (20241201-20241202) without DataFirewall — validates factor code/config can run at all
 1. **Checkbias** - Short backtest (20241201-20241231) with DataFirewall injection for forward-looking bias detection
 2. **Checkpoint** - Breakpoint stability validation (5-day checkpoint)
 3. **Long Backtest** - Full historical backtest (20150101-20251231), pure run, no checks

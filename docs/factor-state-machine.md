@@ -8,8 +8,8 @@
 | ACTIVE | 通过验证,生产因子 |
 | REJECTED | 验证未通过,不合格 |
 
-- CHECKING 不作为独立状态,是 SUBMITTED 的运行中瞬态
-- DELETED 不是状态,是删除操作的结果——执行后因子从系统中彻底消失(清所有文件 + state 记录)
+- CHECKING 是 check 运行中的瞬态(代码中为独立状态值,由 reconcile 自动修复回 SUBMITTED/ACTIVE/REJECTED)
+- DELETED 是 soft-delete 标记,state record 保留,文件可选保留(ops rm 默认仅标记,--force 删 dump+feature)
 - DECAYING / RETIRED 暂未实现
 
 ## 命令体系
@@ -47,18 +47,18 @@ recycle 是给研究员看的 REJECTED 因子副本。
 | 状态 | alpha_src | alpha_pnl | alpha_dump | alpha_feature | recycle |
 |---|---|---|---|---|---|
 | SUBMITTED | 无(在 staging) | 无 | 无 | 无 | — |
-| ACTIVE | 有 | 有 | 有 | 有 | — |
+| ACTIVE | 有 | 有 | 有 | 有(需 ops pack) | — |
 | REJECTED(checkbias/checkpoint 失败) | 有 | 无 | 无 | 无 | 有 |
-| REJECTED(compliance/correlation 失败) | 有 | 有 | 有 | 有 | 有 |
+| REJECTED(compliance/correlation 失败) | 有 | 有 | 无 | 无 | 有 |
 
 ## 转移时数据产物规则
 
 | 转移 | alpha_src | alpha_pnl | alpha_dump | alpha_feature |
 |---|---|---|---|---|
 | submit (新因子→SUBMITTED) | 无(在 staging) | 无 | 无 | 无 |
-| check 通过 (→ACTIVE) | staging 移入 | 新产出 | 新产出 | 新产出 |
+| check 通过 (→ACTIVE) | staging 移入 | 新产出 | 新产出 | 无(需 ops pack 单独产出) |
 | check 失败 checkbias/checkpoint (→REJECTED) | 保留 src | 不保留 | 不保留 | 无 |
-| check 失败 compliance/correlation (→REJECTED) | 保留 src | 保留 | 保留 | 生成并保留 |
+| check 失败 compliance/correlation (→REJECTED) | 保留 src | 保留 | 清除 | 清除 |
 | recheck (ACTIVE→SUBMITTED) | 保留(拷贝到 staging) | 保留 | 保留 | 保留 |
 | recheck (REJECTED→SUBMITTED) | 保留(拷贝到 staging) | 清掉 | 清掉 | 清掉 |
 | resubmit (新代码, version+=1) | 新代码到 staging,旧 src 保留 | 保留 | 保留 | 保留 |

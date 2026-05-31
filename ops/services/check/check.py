@@ -151,7 +151,6 @@ class CheckerPipeline:
             shutil.rmtree(dst_dir)
         self._clean_pycache(factor.dir)
 
-        # rejected 因子保留 src + pnl(若存在);不保留 dump / feature
         # alpha_src: 从 staging 复制一份(staging 原物随后移到 recycle 归档)
         src_dst = self.config.alpha_src / factor.name
         if src_dst.exists():
@@ -159,18 +158,38 @@ class CheckerPipeline:
         shutil.copytree(factor.dir, src_dst)
         self._rewrite_module_path(src_dst)
 
-        # alpha_pnl: 长回测产物;只在 correlation 阶段之后存在
-        if factor.pnl_file.exists():
-            shutil.copy2(factor.pnl_file, self.config.alpha_pnl / factor.name)
+        # 按失败阶段区分产物保留策略:
+        # - compliance/correlation 失败: 保留 pnl + dump,生成 feature
+        # - checkbias/checkpoint 失败: 不保留 pnl/dump/feature(数据不完整)
+        _LATE_STAGES = {"compliance", "correlation"}
 
-        # 清理可能存在的 dump / feature 残留(防御性,正常 staging 路径不会有)
-        dump_dir = self.config.alpha_dump / factor.name
-        if dump_dir.exists():
-            shutil.rmtree(dump_dir)
-        for v in ("v1", "v2"):
-            f = self.config.alpha_feature / f"{factor.name}.{v}.npy"
-            if f.exists():
-                f.unlink()
+        if e.stage in _LATE_STAGES:
+            # 保留 pnl
+            if factor.pnl_file.exists():
+                shutil.copy2(factor.pnl_file, self.config.alpha_pnl / factor.name)
+            # 保留 dump
+            dump_src = self.config.alpha_dump / factor.alpha_dir.name
+            if factor.alpha_dir.exists() and not dump_src.exists():
+                shutil.move(str(factor.alpha_dir), str(dump_src))
+            # 生成 feature
+            from ops.services.pack.pack import pack_one, load_universe, PACK_L
+            try:
+                nio = load_universe(self.config.nio_data_path)
+                _, instruments, date_to_idx = nio
+                shape = (PACK_L, len(instruments))
+                pack_one(factor.name, self.config.alpha_dump,
+                         self.config.alpha_feature, date_to_idx, shape)
+            except Exception:
+                pass
+        else:
+            # checkbias/checkpoint: 清掉 dump + feature(短期数据不完整)
+            dump_dir = self.config.alpha_dump / factor.name
+            if dump_dir.exists():
+                shutil.rmtree(dump_dir)
+            for v in ("v1", "v2"):
+                f = self.config.alpha_feature / f"{factor.name}.{v}.npy"
+                if f.exists():
+                    f.unlink()
 
         # 归档到 recycle
         shutil.move(factor.dir, dst_dir)

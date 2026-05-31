@@ -26,7 +26,7 @@ class Position:
         self.long_count = long_count
         self.short_count = shrot_count
 
-class ComplianceChecker:
+class ComplianceChecker(Checker):
     def __init__(self, config: Config):
         self.config = config
         self.max_position_pct: float = config.compliance["max_position_pct"]

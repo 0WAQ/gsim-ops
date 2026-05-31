@@ -1,3 +1,0 @@
-
-class BacktestError(Exception):
-    ...
