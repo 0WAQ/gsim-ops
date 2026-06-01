@@ -3,11 +3,11 @@
 Source layout:  alpha_dump/AlphaXxx/{year}/{month}/{YYYYMMDD}{v1|v2}.npy   (each is shape (H,))
 Target layout:  alpha_feature/AlphaXxx.{v1|v2}.npy                          (memmap, shape (L, H))
 
-The per-date file at date D is placed at row date_to_idx[D] - 1, because
-gsim stores the *next-day* signal computed at the close of day D — when
-read back as a feature on day D-1's row, it's used as the previous-day
-prediction.
+Offset depends on each factor's `delay` (from meta.json):
+- delay=0: dump at date D is written at the same di — row = date_to_idx[D]
+- delay=1: dump at date D is next-day signal — row = date_to_idx[D] - 1
 """
+import json
 import os
 import random
 import shutil
@@ -36,6 +36,23 @@ def load_universe(nio_data_path: Path) -> tuple[np.ndarray, np.ndarray, dict[int
     dates = np.array(np.memmap(nio_data_path / DATES_FILE, mode="r", dtype=int))
     ins = np.array(np.memmap(nio_data_path / INSTRUMENTS_FILE, mode="r", dtype=np.dtype("U32")))
     return dates, ins, {int(d): i for i, d in enumerate(dates)}
+
+
+def _read_delay(name: str, alpha_src: Path) -> int:
+    """Read delay from meta.json. Defaults to 1 (legacy assumption) if missing/unreadable."""
+    meta = alpha_src / name / "meta.json"
+    if not meta.exists():
+        warn(f"{name} meta.json 缺失,默认 delay=1")
+        return 1
+    try:
+        return int(json.loads(meta.read_text()).get("delay", 1))
+    except Exception as e:
+        warn(f"{name} 读取 delay 失败 ({e}),默认 delay=1")
+        return 1
+
+
+def _offset_for_delay(delay: int) -> int:
+    return 0 if delay == 0 else -1
 
 
 def _iter_date_files(factor_dump_dir: Path):
@@ -81,14 +98,16 @@ def _atomic_write_memmap(target: Path, ram: np.ndarray) -> None:
 
 
 def verify_sample(name: str, factor_dump_dir: Path, alpha_feature: Path,
-                  date_to_idx: dict[int, int], shape: tuple[int, int]) -> None:
+                  date_to_idx: dict[int, int], shape: tuple[int, int],
+                  delay: int) -> None:
     """Pick up to VERIFY_SAMPLES random dates that have source files, compare
     each source against the corresponding row in the target memmap. Raise on
     any mismatch.
     """
+    offset = _offset_for_delay(delay)
     candidates = [c for c in _iter_date_files(factor_dump_dir)
                   if (di := date_to_idx.get(c[0])) is not None
-                  and 0 <= di - 1 < shape[0]]
+                  and 0 <= di + offset < shape[0]]
     if not candidates:
         return
     picks = random.sample(candidates, min(VERIFY_SAMPLES, len(candidates)))
@@ -96,7 +115,7 @@ def verify_sample(name: str, factor_dump_dir: Path, alpha_feature: Path,
     mms: dict[tuple[str], np.memmap] = {}
     try:
         for date, version, src_path in picks:
-            di = date_to_idx[date] - 1
+            di = date_to_idx[date] + offset
             if version not in mms:
                 mms[version] = np.memmap(alpha_feature / f"{name}.{version}.npy",
                                          mode="r", shape=shape, dtype=DTYPE)
@@ -115,17 +134,18 @@ def verify_sample(name: str, factor_dump_dir: Path, alpha_feature: Path,
 
 def pack_one(name: str, alpha_dump: Path, alpha_feature: Path,
              date_to_idx: dict[int, int], shape: tuple[int, int],
-             verify: bool = True) -> None:
+             delay: int, verify: bool = True) -> None:
     """Full rewrite: build RAM matrix from per-date files, write memmap atomically."""
     L, H = shape
     ram = {v: np.full((L, H), np.nan, dtype=DTYPE) for v in VERSIONS}
+    offset = _offset_for_delay(delay)
 
     factor_dump_dir = alpha_dump / name
     for date, version, f in _iter_date_files(factor_dump_dir):
         di = date_to_idx.get(date)
         if di is None:
             continue
-        di -= 1
+        di += offset
         if di < 0 or di >= L:
             continue
         arr = np.load(f)
@@ -138,7 +158,7 @@ def pack_one(name: str, alpha_dump: Path, alpha_feature: Path,
         _atomic_write_memmap(alpha_feature / f"{name}.{v}.npy", ram[v])
 
     if verify:
-        verify_sample(name, factor_dump_dir, alpha_feature, date_to_idx, shape)
+        verify_sample(name, factor_dump_dir, alpha_feature, date_to_idx, shape, delay)
 
 
 def pack_one_incremental(name: str, dates: list[int], config: Config) -> None:
@@ -148,15 +168,17 @@ def pack_one_incremental(name: str, dates: list[int], config: Config) -> None:
     nio = load_universe(config.nio_data_path)
     universe_dates, instruments, date_to_idx = nio
     shape = (PACK_L, len(instruments))
+    delay = _read_delay(name, config.alpha_src)
 
     v1 = config.alpha_feature / f"{name}.v1.npy"
     v2 = config.alpha_feature / f"{name}.v2.npy"
     if not v1.exists() or not v2.exists():
-        pack_one(name, config.alpha_dump, config.alpha_feature, date_to_idx, shape)
+        pack_one(name, config.alpha_dump, config.alpha_feature, date_to_idx, shape, delay)
         return
 
     factor_dump_dir = config.alpha_dump / name
     wanted = set(dates) if dates else None
+    offset = _offset_for_delay(delay)
 
     mms = {v: np.memmap(config.alpha_feature / f"{name}.{v}.npy",
                         mode="r+", shape=shape, dtype=DTYPE) for v in VERSIONS}
@@ -167,7 +189,7 @@ def pack_one_incremental(name: str, dates: list[int], config: Config) -> None:
             di = date_to_idx.get(date)
             if di is None:
                 continue
-            di -= 1
+            di += offset
             if di < 0 or di >= PACK_L:
                 continue
             arr = np.load(f)
@@ -196,11 +218,11 @@ def _is_packed(name: str, alpha_feature: Path) -> bool:
 
 def _pack_worker(name: str, alpha_dump: Path, alpha_feature: Path,
                  date_to_idx: dict[int, int], shape: tuple[int, int],
-                 verify: bool) -> tuple[str, str, str]:
+                 delay: int, verify: bool) -> tuple[str, str, str]:
     """Returns (name, status, msg). status in {ok, locked, failed}."""
     try:
         with factor_lock(name):
-            pack_one(name, alpha_dump, alpha_feature, date_to_idx, shape, verify=verify)
+            pack_one(name, alpha_dump, alpha_feature, date_to_idx, shape, delay, verify=verify)
         return (name, "ok", "")
     except FactorLocked:
         return (name, "locked", "held by another process")
@@ -246,7 +268,8 @@ def run_pack(args):
     workers = max(1, min(workers, len(candidates)))
     with ProcessPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_pack_worker, n, config.alpha_dump, config.alpha_feature,
-                               date_to_idx, shape, verify) for n in candidates]
+                               date_to_idx, shape, _read_delay(n, config.alpha_src), verify)
+                   for n in candidates]
         total = len(futures)
         for i, fut in enumerate(as_completed(futures), 1):
             name, status, msg = fut.result()

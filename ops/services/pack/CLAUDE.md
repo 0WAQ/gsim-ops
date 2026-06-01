@@ -5,15 +5,11 @@ Aggregates per-date `.npy` dumps into per-factor matrices for downstream consume
 **Source**: `alpha_dump/AlphaXxx/{year}/{month}/{YYYYMMDD}{v1|v2}.npy` (each shape `(H,)`)
 **Target**: `alpha_feature/AlphaXxx.{v1|v2}.npy` — memmap, shape `(PACK_L, H)` = `(3900, 5484)`, float64
 
-**Offset rule**: Per-date file at date `D` is placed at row `date_to_idx[D] - 1`. Gsim stores the *next-day* signal computed at close of day `D` — when read back as a feature on day `D-1`'s row, it serves as the previous-day prediction.
+**Offset rule (delay-dependent)**: per-date file at date `D` is placed at row `date_to_idx[D] + offset`, where `offset` is read from each factor's `meta.json` `delay` field:
+- `delay=0` → `offset = 0` (gsim writes dump at the same di it acts on)
+- `delay=1` → `offset = -1` (signal computed at close of D is used to trade D+1, so it sits on row D-1 as "yesterday's prediction")
 
-> **Known critical bug — offset is delay-dependent, current pack hardcodes delay=1 semantics.**
->
-> The `di → di-1` mapping is only correct for **delay=1** factors (signal computed at close of `D`, used to trade `D+1` — read back at row of `D` so downstream sees it as "yesterday's prediction"). For **delay=0** factors, gsim writes the dump at the same `di` it acts on, so the correct mapping is `di → di` (no shift).
->
-> Current `pack.py` applies the `-1` shift unconditionally, so **every delay=0 factor's feature is misaligned by one day**. Downstream models reading the feature memmap see yesterday's signal labeled as today's, leaking 1d of look-ahead in one direction or losing 1d of signal in the other depending on how the consumer interprets the row.
->
-> **Fix sketch (deferred)**: pack must read each factor's `meta.json` for `delay`, then choose the offset (`0` for delay=0, `-1` for delay=1). `verify_sample` and the incremental path (`pack_one_incremental`) need the same branching. Re-pack all delay=0 factors once the fix lands. Until fixed, treat any model trained on delay=0 features as suspect.
+Missing/unreadable `meta.json` defaults to `delay=1` with a warning, preserving legacy behavior. `pack_one`, `pack_one_incremental`, and `verify_sample` all branch on the same `delay`. `run_pack` looks up delay once per candidate before dispatching to workers.
 
 ## Shape Policy
 
