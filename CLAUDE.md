@@ -145,6 +145,8 @@ AlphaXxx/
 
 ## Known Technical Debt (Deferred)
 
+- **`sync diff` 判等只看 size,漏掉等大小内容漂移**: `ops/services/sync/diff.py:90-104` 用 `lo.size == ro.size` 判 `identical`。`alpha_feature/*.npy` 是定长 memmap (`PACK_L, H = 3900, 5484` × float64),pack 重写后 size 不变 → diff 误判 `identical` → `sync push` 不上传,远端永远是旧内容。**实际触发场景**: 2026-06-01 `e887338` 修了 pack delay-dependent offset bug,本地重打了 677 个 delay=0 因子的 feature,但 `ops sync push --dry-run` 显示无变化,远端仍是错位版本。修复方向二选一:(a) `diff()` 在 size 相同时再比 mtime,本地显著新则升级为 `differ`(走 `newer_side` 仲裁,注意误判:不同机器 touch 同 size 文件是正常场景);(b) 实现 `ops sync verify --deep` + `push --deep` 用 S3 etag/md5 比较。修完后需手动把这 677 个 feature 强推一次(或对全部 delay=0 因子 force re-push)同步远端。
+
 - **Stub files**: `core/alpha/results/base.py`, `results/checkpoint.py`, `results/checkbias.py`
 - **Dead code**: `infra/notify/email.py` is commented out
 - **Debug residual**: `utils/func.py` has a `debug()` with infinite loop

@@ -32,6 +32,8 @@ Sync 改成"真同步":每次都列举两端,直接 diff。
 - `walk_local(root)` → `{relpath: FileInfo(size, mtime)}` 遍历本地数据目录(跳过 dotfile)。
 - `list_remote(s3, prefix)` → 同结构 + S3 LastModified/ETag。基于 `S3Client.list_objects` 分页列举,千级因子量级一次几百毫秒到一两秒。
 - `diff(local, remote)` → `DirDiff` 四类清单:`only_local / only_remote / differ / identical`。判等只看 size(content 漂移由 `verify --deep` 后续覆盖,暂未实现)。
+
+  > **Known bug (待修复)**: `alpha_feature/*.npy` 是定长 memmap (`PACK_L, H` × float64),内容变了 size 不变 → diff 误判 `identical`,`sync push` 不上传。2026-06-01 pack delay-bug 修复后本地重打 677 个 delay=0 因子,但 `ops sync push --dry-run` 看不到差异,远端仍是错位版本。修复方向二选一:(a) size 相同时再比 mtime,本地显著新升级为 `differ`(注意:不同机器 touch 同 size 文件是正常场景,可能误判);(b) 实现 `verify --deep` + `push --deep` 用 S3 etag/md5 比较。修完后需手动 force re-push 这 677 个文件同步远端。
 - `newer_side(rel, d)` → `local / remote / tie`。`MTIME_TOLERANCE = 2s` 吸收文件系统量化和 S3 上传时间差。
 
 ## Push (`push`)
