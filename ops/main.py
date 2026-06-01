@@ -13,6 +13,7 @@ from ops.cli.sync import add_sync_subparser
 from ops.cli.rm import add_rm_subparser
 from ops.cli.resubmit import add_resubmit_subparser
 from ops.cli.recheck import add_recheck_subparser
+from ops.cli.approve import add_approve_subparser
 
 
 def main():
@@ -39,6 +40,7 @@ def main():
     add_rm_subparser(subparsers)
     add_resubmit_subparser(subparsers)
     add_recheck_subparser(subparsers)
+    add_approve_subparser(subparsers)
 
     args = parser.parse_args()
     args.func(args)
