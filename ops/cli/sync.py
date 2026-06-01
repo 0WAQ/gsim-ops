@@ -11,13 +11,11 @@ def add_sync_subparser(subparsers: argparse._SubParsersAction):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Example:
-    ops sync push                  # 推送本地新变更 + state merge
+    ops sync push                  # 推送本地新文件 + state merge
     ops sync push --dry-run        # 干跑
-    ops sync pull                  # 拉远端 state + 本地缺失的因子
+    ops sync pull                  # 拉远端 state + 远端新增/更新的文件
     ops sync status                # 本地 vs 远端 state 快速对比
-    ops sync verify                # rclone check 全量校验(慢)
-
-首次在新机器上跑 push/pull 都会自动处理(扫盘建 manifest / 空盘全量拉)。
+    ops sync verify                # 三个数据目录文件级两端校验
 """,
     )
 
@@ -31,14 +29,10 @@ Example:
         p.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
         p.set_defaults(func=run_sync)
 
-    p = sub.add_parser("status", help="基于 manifest + 远端 state 的快速对比")
+    p = sub.add_parser("status", help="基于 state 的快速对比(不扫数据目录)")
     p.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
     p.set_defaults(func=run_sync)
 
-    p = sub.add_parser("verify", help="rclone check 全量校验(慢)")
-    p.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
-    p.set_defaults(func=run_sync)
-
-    p = sub.add_parser("rebuild", help="无条件重建本地 sync manifest")
+    p = sub.add_parser("verify", help="三个数据目录文件级两端校验")
     p.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
     p.set_defaults(func=run_sync)

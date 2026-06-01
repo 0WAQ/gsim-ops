@@ -17,64 +17,67 @@ Cross-server factor library sync via S3. Ships **data + state together** so a ne
 
 **`library_id`** (`Config.library_id`): defaults to `alpha_src.parent.name` (e.g. `alphalib`), overridable via `sync.library_id`. Two machines pointing at the same logical library get the same id regardless of absolute paths — which is what lets state files travel.
 
+`config.yaml` 与 `config.prod.yaml` 默认共用 `library_id = alphalib` → 同一个 S3 prefix、同一份本地 cache。这是有意为之:staging 与 prod 共享因子库视图,只是 `alpha_src` 物理路径不同。SUBMITTED 状态因子在 staging 目录(非 `alpha_src`),sync 不会推它的数据;它的 state 条目会通过 merge 漂到远端,作为"in flight"元数据,远端 pull 端按 status 跳过,不污染数据。
+
 ## Cache Layout (`ops/infra/cache.py`)
 
-- Old: `~/.cache/ops/{md5(config_path)[:8]}.{index|metrics|datasources}.json` + `~/.cache/ops/factor_state.json`
-- New: `~/.cache/ops/lib/<library_id>/{index,metrics,datasources,factor_state}.json`
-- `cache_path(library_id, filename, legacy_hash=...)` resolves the new path and one-shot migrates any legacy file on first call — no manual migration step
-- `index.json` is **not** synced (1h TTL, regenerated on demand); locks (`~/.cache/ops/locks/`) are fcntl, per-machine, never synced
+- `~/.cache/ops/lib/<library_id>/{index,metrics,datasources,factor_state}.json`
+- `index.json` is **not** synced (1h TTL, regenerated on demand); locks (`~/.cache/ops/locks/`) are fcntl, per-machine, never synced.
+- Manifest 文件 (`sync_manifest.json`) 已废弃,现在 sync 不再维护任何本地指纹缓存。
 
-## Per-subdir Transfer Strategy
+## True Diff Engine (`diff.py`)
 
-| Subdir | Method | Why |
-|---|---|---|
-| `alpha_feature` | direct S3 upload per file | 2 large .npy per factor |
-| `alpha_src`, `alpha_pnl` | S3 upload_dir / upload | Few small files |
+Sync 改成"真同步":每次都列举两端,直接 diff。
 
-**Note**: `alpha_dump` is not synced — it is a local-only intermediate product.
+- `walk_local(root)` → `{relpath: FileInfo(size, mtime)}` 遍历本地数据目录(跳过 dotfile)。
+- `list_remote(s3, prefix)` → 同结构 + S3 LastModified/ETag。基于 `S3Client.list_objects` 分页列举,千级因子量级一次几百毫秒到一两秒。
+- `diff(local, remote)` → `DirDiff` 四类清单:`only_local / only_remote / differ / identical`。判等只看 size(content 漂移由 `verify --deep` 后续覆盖,暂未实现)。
+- `newer_side(rel, d)` → `local / remote / tie`。`MTIME_TOLERANCE = 2s` 吸收文件系统量化和 S3 上传时间差。
 
-## Transport
+## Push (`push`)
 
-`ops/infra/s3.py` (`S3Client`) wraps boto3. Config in `sync.s3` (endpoint_url, access_key_id, secret_access_key, bucket). ThreadPoolExecutor(8 workers) parallelizes push/pull.
+每个数据目录独立 diff:
+- `only_local` → 上传。
+- `differ` 且本地更新 → 覆盖远端。
+- `differ` 且远端更新或 tie → 报冲突,**不**覆盖远端(让用户先 pull)。
+- `only_remote` → 静默忽略(删除是 gc 的职责,sync 不删远端)。
+- 并发 `ThreadPoolExecutor(8)` 上传。
 
-## Manifest Fingerprint (`manifest.py`)
+Pre-push check 基于 `updated_at` 而非 key set:只有当远端某 key 的 `updated_at` 严格新于本地才报 behind,避免本地清过 orphan 后 push 被卡。
 
-`SyncManifest` tracks per-factor mtimes for incremental push:
-- `src_mtime` / `pnl_mtime` / `feature_mtime` — max mtime in each subtree
-- `dump_latest` / `dump_count` — retained for local `ops pack` incremental detection (not used by sync)
+## Pull (`pull`)
 
-Scan walks one `os.scandir(alpha_src)` (one stat per factor, not per file), descending into a factor's dirs only when its top-level fingerprint moved. Changed factors are uploaded via boto3. Manifest is only advanced after successful upload; partial pushes naturally re-send next time.
+State merge 在前,然后每个数据目录 diff:
+- `only_remote` + `differ` 且远端更新 → 候选下载。
+- 候选名 → 查 `factor_state.json` 的 status:DELETED / SUBMITTED 跳过(tombstone 不拉数据,SUBMITTED 在 staging 不进库)。
+- `differ` 且本地更新或 tie → 报冲突,**不**覆盖本地(让用户先 push)。
+
+REJECTED 与 ACTIVE 一视同仁:按远端实际存在的文件拉,缺哪个就少哪个。
 
 ## State Merge (`merge.py`)
 
-Each of `factor_state.json`, `metrics.json`, `datasources.json` carries a per-entry `updated_at` ISO timestamp. The sync step:
-1. Download remote `.state/<file>` to tmp
-2. Per-name: pick the entry with newer `updated_at`; tie → keep local
-3. Atomic write merged result to local, then upload to remote
+三个状态文件 (`factor_state.json`, `metrics.json`, `datasources.json`) 都按 per-entry `updated_at` ISO 时间戳合并:
+1. 下载远端 `.state/<file>` 到 tmp。
+2. Per-name:取 `updated_at` 较新的;平局保留本地。
+3. 原子写本地,然后上传到远端。
 
-`factor_state.json` merge holds the JsonStateStore fcntl lock so a concurrent `ops check` finishing on this machine can't lose its write. Missing `updated_at` on legacy entries treated as `1970-01-01`. `index.json` is **not** synced (1h TTL, regenerable). `sync_manifest.json` is per-machine, also not synced.
-
-## First-run
-
-No `--bootstrap` / `init` flags exposed:
-- `ops sync push` on a machine without a manifest: treats it as empty — every factor looks new to `scan_changes`. Upload is additive so already-present remote files are skipped; manifest is written only after a successful push.
-- `ops sync pull` on an empty machine (zero local factors): full S3 download of every data dir, then build the manifest from what just landed.
-
-## Pull Semantics
-
-Pull always merges state first. If the local library is empty, falls back to a full S3 download of every data dir. Otherwise uses the merged `factor_state.json` as the "remote manifest of factor names": names present in remote state but missing on local disk are fetched (parallelized via ThreadPoolExecutor).
+`factor_state.json` merge 时持 `JsonStateStore` 的 fcntl 锁,避免并发 `ops check` 写丢失。Missing `updated_at` 视作 `1970-01-01`。
 
 ## --force-state
 
-When local state was intentionally pruned (e.g., cleaned orphan records after deleting empty factor dirs), the pre-push check would refuse because remote state has more keys. `--force-state` skips both the pre-push check and the timestamp merge — it uploads local state files directly to overwrite remote. Use sparingly; normal push should go through merge.
+本地 state 被刻意修剪过(例:清掉 orphan)且远端 still 有的场景。`--force-state` 跳过 pre-push check 和 timestamp merge,直接用本地 state 覆盖远端。慎用。
 
-## Soft-delete Interaction
+## Soft-delete
 
-`ops rm <name>` flips state to `DELETED` (a tombstone) — `list`/`health` hide it by default; `ops list -s deleted` shows them. The tombstone propagates to other machines via the next `ops sync push` (state merge). **Sync never deletes remote objects** — soft-delete on machine A causes machine B's next `list` to drop the factor too, but the remote files persist. Reclaiming remote disk for deleted factors is the job of the (deferred) `ops sync gc`. `ops rm --force` drops the *local* dump dir + feature `.npy` (src/pnl always kept).
+`ops rm <name>` 把 state flip 成 DELETED(tombstone)。Pull 端按 status 跳过该因子数据;远端实际文件 sync 永不删,需要 `ops sync gc`(尚未实现)回收。
+
+## Verify
+
+`ops sync verify` 实跑:对三个数据目录两端列举 → 输出 `only_local / only_remote / 大小不一致` 三类清单。只读,不修改任何东西。后续可加 `--deep` 启 etag 校验。
 
 ## Operations
 
-- `ops sync push` — incremental data + state merge
-- `ops sync pull` — state merge + pull factors referenced by state but missing locally
-- `ops sync status` — counts only (no data scan); reports local-vs-remote-state diff
-- `ops sync verify` — placeholder (alpha_dump verify removed)
+- `ops sync push` — list+diff 文件级增量推送 + state merge
+- `ops sync pull` — state merge + list+diff 文件级增量拉取(按 status 过滤)
+- `ops sync status` — 不扫数据目录,只对比两端 state 总数 / 仅本地 / 仅远端 / 远端更新数
+- `ops sync verify` — 三个数据目录文件级两端校验

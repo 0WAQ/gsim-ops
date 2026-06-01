@@ -58,6 +58,24 @@ class S3Client:
                     keys.append(k)
         return keys
 
+    def list_objects(self, prefix: str) -> list[dict]:
+        """List object metadata under prefix.
+
+        Returns list of {key, size, mtime (epoch float), etag} dicts.
+        Used by the sync diff engine to compare against local inventory.
+        """
+        out: list[dict] = []
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                out.append({
+                    "key": obj["Key"],
+                    "size": int(obj["Size"]),
+                    "mtime": obj["LastModified"].timestamp(),
+                    "etag": obj.get("ETag", "").strip('"'),
+                })
+        return out
+
     def upload_dir(self, local_dir: Path, prefix: str) -> int:
         """Upload all files under local_dir to prefix/. Returns file count."""
         count = 0
