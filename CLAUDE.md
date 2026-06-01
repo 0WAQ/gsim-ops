@@ -177,3 +177,5 @@ See `docs/factor-state-machine.md` for the factor lifecycle design (state defini
 **Phase 2 — gsim FeatureReader + sync 瘦身（已完成）**: alpha_dump 降级为纯本地中间产物，sync 只传 alpha_src / alpha_pnl / alpha_feature / .state
 
 **Phase 3 — ops pack 增量模式（待实现）**: `ops pack --date YYYYMMDD`、PACK_L 动态化、并发安全
+
+**Phase 4 — Alphalib 存储后端打通(长期)**: 按数据类别分别用 Git / JuiceFS / DB 替代当前 sync 模型。详见 `.claude/plans.md` 的 "Alphalib Storage Backend Migration"。

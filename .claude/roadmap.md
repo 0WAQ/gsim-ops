@@ -25,6 +25,7 @@ Feature checklist. Done items are kept for reference. See `docs/plans.md` for de
 - [ ] `ops sync gc` - Reclaim remote files for DELETED factors (opt-in, separate from push/pull)
 - [ ] `ops factor` namespace consolidating add/rm/check/run/info/list (see `docs/plans.md`)
 - [ ] Daily incremental pack path (rows > 20251231; buffer / generational / zarr — design pending)
+- [ ] Alphalib storage backend migration (Git for src + JuiceFS for pnl/feature + DB for .state — see `.claude/plans.md`)
 - [ ] Factor registry, versioning, tags/categories
 - [ ] Enable/disable, archive/unarchive factors
 

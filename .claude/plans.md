@@ -191,3 +191,62 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | 2 | Implement `ops factor run` (re-run + re-pack one factor in place). |
 | 3 | Add `ops sync gc` with dry-run/apply. |
 | 4 | Drop the flat aliases (one-shot deprecation, after team is on the new shape). |
+
+## Alphalib Storage Backend Migration (Not Started)
+
+远端是对象存储 (S3-compatible),gsim 和用户态代码依赖 POSIX 文件系统。当前 `ops sync` 做手工 push/pull 桥接,机器变多 + 每台都有写时,维护成本和一致性风险都会涨。短期已通过修补 sync 逻辑临时使用,长期目标是按数据类别用对的后端,让 alphalib 对调用方表现为本地文件系统。
+
+**数据特性分类**:
+
+| 类别 | 大小 | 写模式 | 写主体 | 一致性要求 |
+|---|---|---|---|---|
+| `alpha_src` (.py/.xml/.md) | KB,文本 | 极低(submit/resubmit) | 单 author | 强(代码不可乱) |
+| `alpha_pnl` (空格 csv) | 几十 KB ~ MB | 日增 append 一行 | 单机 owner | 中(可重算) |
+| `alpha_feature` (np.memmap) | ~170 MB/因子,定长 | 日增写一行(原地) | 单机 owner | 中(并发读多) |
+| `alpha_checkpoint` (pickle,未来) | 未定 | 整文件重写 | 单机 owner | 取决于设计 |
+| `.state` | KB | 高(每次状态转移) | 多机都会写 | 强(merge 冲突=故障) |
+
+**已知约束**:
+- 当前 1-2 台机器,会扩到 3-4 台
+- 写是分区的:新因子在 author 本机生产+pack,旧因子在中央机统一日更生产+pack。同一文件不会有跨机并发写
+- 读是全局共享的:所有机器都要看到所有因子的最新 feature/pnl 做研究和复测
+- size-only diff bug 当前用临时 sync 改动绕过,长期不应在 sync 模型里继续打补丁
+
+**目标架构**:
+
+```
+alpha_src/          → Git (内部 GitLab/Gitea)
+alpha_pnl/          → JuiceFS  (append 友好,chunk diff 友好)
+alpha_feature/      → JuiceFS  (memmap + 日增写一行,chunk-level diff 强需求)
+alpha_checkpoint/   → JuiceFS  (前提:按因子/日期切碎,文件 < 10MB)
+                      or 本地 SSD (如果可再生,完全绕开同步)
+.state/             → PostgreSQL / Redis / SQLite  (脱离文件,获得真正的锁)
+```
+
+**选型理由**:
+
+- **JuiceFS**: POSIX 完整(gsim 无需改),metadata 引擎做分布式锁,数据 chunk 化存对象存储(默认 4MB block),本地 cache LRU 命中热数据。memmap 写一行只脏化对应 chunk,~4MB 上传,比 sync 全量重传 170MB/因子小约 40x。代价:多维护一个 metadata 服务(Redis/TiKV),首次需 `juicefs sync` 把现有 S3 数据导成 chunk 格式
+- **alpha_src 走 Git**: 现有 submit/resubmit 已经手工模拟 commit/version,直接用 Git 白送 history/diff/blame/code review,对象存储里没有这些
+- **.state 脱离文件**: 当前"tied updated_at 留本地"是没有强一致环境下的补丁,多机并发写一定会丢更新,只是概率低。机器变多后必须升级
+
+**设计原则**(给将来引入 checkpoint 等新数据类型时的指引):
+
+1. 粒度切碎:按因子 + 时间段拆分,避免单个大文件被反复全量重写
+2. 优先 append/列存:npy/npz/parquet 优于 pickle,pickle 仅用于小型非数值结构
+3. 不可再生才上共享存储:可重算的中间产物应该放本地 SSD,绕开所有同步
+4. immutable 优于 mutable:日志型(每次新文件)比覆盖型对 chunk-diff 友好
+
+**迁移路径**(分阶段,低风险,每个 Phase 可独立部署可回退):
+
+| Phase | 内容 | 备注 |
+|---|---|---|
+| A | 修补 sync 短期可用 | 进行中,size-only bug 绕过,撑到长期方案落地 |
+| B | `alpha_src` 迁 Git | 改造成本最低,收益直观。`ops submit/resubmit` 改写为 `git commit + push` |
+| C | `.state` 迁数据库 | 优先级看多机并发写频率,频率高就提前做 |
+| D | JuiceFS PoC | 单机挂载 + 新 bucket,影子模式双写 1-2 周,验证 gsim 读写、ops pack 并发 |
+| E | `alpha_feature` + `alpha_pnl` 切 JuiceFS | 全量 `juicefs sync` 导入,切 config 指向挂载点,`ops sync push/pull` 退役 |
+| F | checkpoint 落地 | 按设计原则实现,默认放 JuiceFS,可再生的版本放本地 SSD |
+
+**关联 TODO**:
+- `ops pack` 增量模式(roadmap 别处提到)在 Phase E 之前完成更好,但 JuiceFS chunk diff 不强依赖它
+- Phase E 完成后,`ops sync verify` 可降级为"挂载点 vs 备份 bucket"的对账巡检
