@@ -9,6 +9,7 @@ Remote layout (S3 bucket):
 Local alpha_dump is a local-only intermediate product (not synced).
 """
 import json
+import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -96,16 +97,16 @@ def _split_for_push(result: DirDiff) -> tuple[list[str], list[str]]:
 
 
 def _push_dir(name: str, local_root: Path, remote_prefix: str,
-              s3: S3Client, *, dry_run: bool) -> int:
+              s3: S3Client, *, dry_run: bool, deep: bool = False) -> int:
     """Diff one data dir between local and S3, upload missing/local-newer
     files, warn on conflicts. Returns number of failed uploads."""
     local = walk_local(local_root)
     remote = list_remote(s3, remote_prefix)
-    result = diff(local, remote)
+    result = diff(local, remote, deep_root=local_root if deep else None)
     to_upload, conflicts = _split_for_push(result)
     info(f"  本地: {len(local)}  远端: {len(remote)}  "
          f"一致: {len(result.identical)}  待传: {len(to_upload)}  "
-         f"冲突: {len(conflicts)}")
+         f"冲突: {len(conflicts)}" + ("  [deep]" if deep else ""))
     if conflicts:
         warn(f"  ⚠ {len(conflicts)} 个文件远端更新或 mtime 持平,跳过避免覆盖")
         for rel in conflicts[:5]:
@@ -117,7 +118,12 @@ def _push_dir(name: str, local_root: Path, remote_prefix: str,
 
     def _upload_one(rel: str) -> str | None:
         try:
-            s3.upload(local_root / rel, f"{remote_prefix}/{rel}")
+            remote_mtime = s3.upload(local_root / rel, f"{remote_prefix}/{rel}")
+            if remote_mtime is not None:
+                try:
+                    os.utime(local_root / rel, (remote_mtime, remote_mtime))
+                except OSError:
+                    pass
             return None
         except Exception as e:
             return f"{rel}: {e}"
@@ -167,7 +173,8 @@ def _state_behind(local: dict, remote: dict) -> list[str]:
     return out
 
 
-def push(config: Config, *, dry_run: bool = False, force_state: bool = False) -> int:
+def push(config: Config, *, dry_run: bool = False, force_state: bool = False,
+         deep: bool = False) -> int:
     s3 = _make_s3(config)
     pfx = _pfx(config)
     library_id = config.library_id
@@ -194,9 +201,9 @@ def push(config: Config, *, dry_run: bool = False, force_state: bool = False) ->
                 info("  · 远端 state 不存在,跳过检查")
 
     for d in DATA_DIRS:
-        banner(f"push {d}")
+        banner(f"push {d}" + (" (deep)" if deep else ""))
         failed += _push_dir(d, getattr(config, d), f"{pfx}/{d}",
-                            s3, dry_run=dry_run)
+                            s3, dry_run=dry_run, deep=deep)
 
     banner("push state" + (" (force)" if force_state else " (merge)"))
     if force_state:
@@ -290,18 +297,19 @@ def _split_for_pull(result: DirDiff, subdir: str,
 
 
 def _pull_dir(name: str, local_root: Path, remote_prefix: str,
-              s3: S3Client, state: dict, *, dry_run: bool) -> int:
+              s3: S3Client, state: dict, *, dry_run: bool,
+              deep: bool = False) -> int:
     """Diff one data dir, download what's missing/remote-newer (filtering
     DELETED/SUBMITTED), warn on conflicts. Returns number of failed
     downloads."""
     local = walk_local(local_root)
     remote = list_remote(s3, remote_prefix)
-    result = diff(local, remote)
+    result = diff(local, remote, deep_root=local_root if deep else None)
     to_download, skipped_state, conflicts = _split_for_pull(result, name, state)
     info(f"  本地: {len(local)}  远端: {len(remote)}  "
          f"一致: {len(result.identical)}  待拉: {len(to_download)}  "
          f"跳过(DELETED/SUBMITTED): {len(skipped_state)}  "
-         f"冲突: {len(conflicts)}")
+         f"冲突: {len(conflicts)}" + ("  [deep]" if deep else ""))
     if conflicts:
         warn(f"  ⚠ {len(conflicts)} 个文件本地更新或 mtime 持平,跳过避免覆盖")
         for rel in conflicts[:5]:
@@ -315,6 +323,12 @@ def _pull_dir(name: str, local_root: Path, remote_prefix: str,
     def _download_one(rel: str) -> str | None:
         try:
             s3.download(f"{remote_prefix}/{rel}", local_root / rel)
+            ro = result.remote.get(rel)
+            if ro is not None:
+                try:
+                    os.utime(local_root / rel, (ro.mtime, ro.mtime))
+                except OSError:
+                    pass
             return None
         except Exception as e:
             return f"{rel}: {e}"
@@ -333,7 +347,7 @@ def _pull_dir(name: str, local_root: Path, remote_prefix: str,
     return failed_count
 
 
-def pull(config: Config, *, dry_run: bool = False) -> int:
+def pull(config: Config, *, dry_run: bool = False, deep: bool = False) -> int:
     s3 = _make_s3(config)
     pfx = _pfx(config)
     library_id = config.library_id
@@ -345,9 +359,9 @@ def pull(config: Config, *, dry_run: bool = False) -> int:
     state = _load_state(cache_path(library_id, "factor_state.json"))
 
     for d in DATA_DIRS:
-        banner(f"pull {d}")
+        banner(f"pull {d}" + (" (deep)" if deep else ""))
         failed += _pull_dir(d, getattr(config, d), f"{pfx}/{d}",
-                            s3, state, dry_run=dry_run)
+                            s3, state, dry_run=dry_run, deep=deep)
     return failed
 
 # PLACEHOLDER_CHUNK_8
@@ -390,12 +404,14 @@ def status(config: Config) -> int:
     return 0
 
 
-def verify(config: Config) -> int:
+def verify(config: Config, *, deep: bool = False) -> int:
     """Real two-end inventory check.
 
     Lists alpha_src / alpha_pnl / alpha_feature on both ends and reports
     only_local / only_remote / size-differ counts per dir. Read-only —
-    never touches files or remote state.
+    never touches files or remote state. With `deep=True`, additionally
+    recomputes local etag for size-matching files and promotes any
+    content drift into the differ bucket.
 
     Returns the total number of discrepancies (0 = perfectly in sync).
     """
@@ -403,11 +419,11 @@ def verify(config: Config) -> int:
     pfx = _pfx(config)
     total_bad = 0
     for d in DATA_DIRS:
-        banner(f"verify {d}")
+        banner(f"verify {d}" + (" (deep)" if deep else ""))
         local_root: Path = getattr(config, d)
         local = walk_local(local_root)
         remote = list_remote(s3, f"{pfx}/{d}")
-        result = diff(local, remote)
+        result = diff(local, remote, deep_root=local_root if deep else None)
         info(f"  本地: {len(local)}  远端: {len(remote)}  一致: {len(result.identical)}")
         if result.is_clean():
             info("  ✔ 完全一致")
@@ -441,12 +457,14 @@ def verify(config: Config) -> int:
 def run_sync(args) -> None:
     config = Config.load(args.config_path)
     action: str = args.action
+    deep: bool = getattr(args, "deep", False)
     if action in ("push", "pull"):
         if action == "push":
             failed = push(config, dry_run=args.dry_run,
-                          force_state=getattr(args, "force_state", False))
+                          force_state=getattr(args, "force_state", False),
+                          deep=deep)
         else:
-            failed = pull(config, dry_run=args.dry_run)
+            failed = pull(config, dry_run=args.dry_run, deep=deep)
         banner(f"{action} 汇总")
         if failed:
             error(f"✘ 失败: {failed}")
@@ -458,7 +476,7 @@ def run_sync(args) -> None:
         status(config)
         bottom()
     elif action == "verify":
-        failed = verify(config)
+        failed = verify(config, deep=deep)
         banner("verify 汇总")
         if failed:
             warn(f"⚠ 不一致: {failed}")

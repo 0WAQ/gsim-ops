@@ -5,16 +5,18 @@ fingerprint approach now that alpha_dump is no longer synced and the
 remaining data volume (alpha_src + alpha_pnl + alpha_feature) is small
 enough to enumerate directly.
 """
+import hashlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ops.infra.s3 import S3Client
+from ops.infra.s3 import S3Client, S3_MULTIPART_CHUNKSIZE, S3_MULTIPART_THRESHOLD
 
 
 # Cross-machine mtime drift tolerance (seconds). Filesystems quantize to 1s
-# and S3 LastModified is upload time, not file mtime — so a few-second gap
-# between identically-sized files should not be flagged.
+# and S3 LastModified is upload time, so the calibration step (sync.py)
+# touches local mtime to match remote after every transfer. Tolerance
+# handles the residual sub-second drift.
 MTIME_TOLERANCE = 2.0
 
 
@@ -72,7 +74,9 @@ def list_remote(s3: S3Client, prefix: str) -> dict[str, FileInfo]:
     """List S3 objects under prefix, return {relpath: FileInfo}.
 
     `prefix` is normalized to end with `/` internally so the returned
-    relpaths are clean (no leading slash).
+    relpaths are clean (no leading slash). `mtime` is the S3 LastModified
+    epoch (== upload time, not original file mtime — the sync transport
+    calibrates local mtime to this value on transfer).
     """
     pfx = prefix.rstrip("/") + "/"
     out: dict[str, FileInfo] = {}
@@ -86,25 +90,57 @@ def list_remote(s3: S3Client, prefix: str) -> dict[str, FileInfo]:
 
 
 def diff(local: dict[str, FileInfo],
-         remote: dict[str, FileInfo]) -> DirDiff:
-    """Compare two inventories by size.
+         remote: dict[str, FileInfo],
+         *, deep_root: Path | None = None) -> DirDiff:
+    """Compare two inventories.
 
-    A file is `identical` iff sizes match. Content drift with identical
-    size is rare in this codebase (npy + source files) and is the job of
-    `verify --deep` to catch via etag/md5.
+    Default (no deep_root):
+      - size differs                                   → `differ`
+      - size matches but local.mtime > remote.mtime+tol → `differ`
+        (catches in-place rewrites like pack which keep size but bump
+        mtime; asymmetric so the reverse — remote LastModified > local
+        mtime + tol with matching size — stays `identical`, since that's
+        the normal post-upload state on a machine that hasn't been
+        calibrated yet)
+      - otherwise                                       → `identical`
+
+    Deep (deep_root passed):
+      For every entry that the default rule marks `identical`, recompute
+      local etag with the pinned multipart chunksize and compare to the
+      remote etag. Mismatch → `differ`. This catches same-size content
+      drift that mtime can't see.
     """
     out = DirDiff(local=dict(local), remote=dict(remote))
     for rel, lo in local.items():
         ro = remote.get(rel)
         if ro is None:
             out.only_local.append(rel)
-        elif lo.size == ro.size:
-            out.identical.append(rel)
-        else:
+        elif lo.size != ro.size:
             out.differ.append(rel)
+        elif lo.mtime > ro.mtime + MTIME_TOLERANCE:
+            out.differ.append(rel)
+        else:
+            out.identical.append(rel)
     for rel in remote:
         if rel not in local:
             out.only_remote.append(rel)
+
+    if deep_root is not None:
+        promoted: list[str] = []
+        still_identical: list[str] = []
+        for rel in out.identical:
+            ro = out.remote[rel]
+            if not ro.etag:
+                still_identical.append(rel)
+                continue
+            local_etag = compute_s3_etag(deep_root / rel)
+            if local_etag != ro.etag:
+                promoted.append(rel)
+            else:
+                still_identical.append(rel)
+        out.identical = still_identical
+        out.differ.extend(promoted)
+
     out.only_local.sort()
     out.only_remote.sort()
     out.differ.sort()
@@ -128,3 +164,33 @@ def newer_side(rel: str, d: DirDiff,
     if abs(lo.mtime - ro.mtime) <= tolerance:
         return "tie"
     return "local" if lo.mtime > ro.mtime else "remote"
+
+
+def compute_s3_etag(path: Path,
+                    chunksize: int = S3_MULTIPART_CHUNKSIZE,
+                    threshold: int = S3_MULTIPART_THRESHOLD) -> str:
+    """Compute the etag boto3 would produce for this file.
+
+    Single-part (size < threshold): plain MD5 hex.
+    Multipart: md5(concat(md5(part) for part in parts)).hex() + '-N'
+
+    Must use the same threshold/chunksize as upload time, else the
+    multipart etag won't match. Both come from infra/s3.py constants
+    that the S3Client TransferConfig also uses, so they stay in sync.
+    """
+    size = path.stat().st_size
+    if size < threshold:
+        h = hashlib.md5()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    part_md5s: list[bytes] = []
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(chunksize)
+            if not chunk:
+                break
+            part_md5s.append(hashlib.md5(chunk).digest())
+    composite = hashlib.md5(b"".join(part_md5s)).hexdigest()
+    return f"{composite}-{len(part_md5s)}"

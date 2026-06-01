@@ -7,8 +7,16 @@ import os
 from pathlib import Path
 
 import boto3
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
+
+
+# Multipart settings pinned so the etag we compute locally matches what
+# S3 returns. Changing these silently breaks the deep diff path; bump
+# both sides together if ever changed.
+S3_MULTIPART_CHUNKSIZE = 8 * 1024 * 1024
+S3_MULTIPART_THRESHOLD = 8 * 1024 * 1024
 
 
 class S3Client:
@@ -25,15 +33,28 @@ class S3Client:
                 retries={"max_attempts": 3, "mode": "adaptive"},
             ),
         )
+        self._transfer = TransferConfig(
+            multipart_threshold=S3_MULTIPART_THRESHOLD,
+            multipart_chunksize=S3_MULTIPART_CHUNKSIZE,
+        )
 
-    def upload(self, local: Path, key: str) -> None:
-        self._client.upload_file(str(local), self._bucket, key)
+    def upload(self, local: Path, key: str) -> float | None:
+        """Upload local file. Returns remote LastModified as epoch float
+        (None on failure to read it back)."""
+        self._client.upload_file(str(local), self._bucket, key,
+                                 Config=self._transfer)
+        try:
+            head = self._client.head_object(Bucket=self._bucket, Key=key)
+            return head["LastModified"].timestamp()
+        except ClientError:
+            return None
 
     def download(self, key: str, local: Path) -> bool:
         """Download key to local path. Returns False if key doesn't exist."""
         local.parent.mkdir(parents=True, exist_ok=True)
         try:
-            self._client.download_file(self._bucket, key, str(local))
+            self._client.download_file(str(self._bucket), key, str(local),
+                                       Config=self._transfer)
             return True
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":

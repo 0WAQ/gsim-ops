@@ -29,11 +29,14 @@ uv run ops health --fix              # Auto-refresh missing metrics/datasources
 uv run ops pack                      # Aggregate alpha_dump → alpha_feature (skip already-packed)
 uv run ops pack --force              # Rewrite all factors
 uv run ops pack --factor AlphaXxx    # Pack one factor
-uv run ops sync push                 # Incremental push (manifest-driven + state merge)
+uv run ops sync push                 # 两端 list+diff 增量推送(size + mtime 兜底)+ state merge
 uv run ops sync push --dry-run       # Preview transfers
-uv run ops sync pull                 # Pull state (merge) + factors missing locally
+uv run ops sync push --deep          # 等大小再走 etag 比对捕捉内容漂移(慢)
+uv run ops sync pull                 # state merge + 拉远端新增/更新的文件(按 status 过滤)
+uv run ops sync pull --deep          # 同上,等大小走 etag
 uv run ops sync status               # Quick local-vs-remote summary (no data scan)
-uv run ops sync verify               # Slow: rclone check across all dirs
+uv run ops sync verify               # 三个数据目录两端文件级校验
+uv run ops sync verify --deep        # 加 etag 校验,捕捉等大小漂移(慢,读全部本地文件)
 uv run ops rm AlphaXxx               # 软删除:仅打 DELETED 标,文件保留
 uv run ops rm AlphaXxx --force       # 同时删本地 dump + feature(保留 src/pnl)
 uv run ops resubmit -u wbai -s 20260401 -f Alpha   # 已有因子提交新代码(version += 1)
@@ -148,8 +151,6 @@ AlphaXxx/
 - **boto3** - S3-compatible object storage (sync)
 
 ## Known Technical Debt (Deferred)
-
-- **`sync diff` 判等只看 size,漏掉等大小内容漂移**: `ops/services/sync/diff.py:90-104` 用 `lo.size == ro.size` 判 `identical`。`alpha_feature/*.npy` 是定长 memmap (`PACK_L, H = 3900, 5484` × float64),pack 重写后 size 不变 → diff 误判 `identical` → `sync push` 不上传,远端永远是旧内容。**实际触发场景**: 2026-06-01 `e887338` 修了 pack delay-dependent offset bug,本地重打了 677 个 delay=0 因子的 feature,但 `ops sync push --dry-run` 显示无变化,远端仍是错位版本。修复方向二选一:(a) `diff()` 在 size 相同时再比 mtime,本地显著新则升级为 `differ`(走 `newer_side` 仲裁,注意误判:不同机器 touch 同 size 文件是正常场景);(b) 实现 `ops sync verify --deep` + `push --deep` 用 S3 etag/md5 比较。修完后需手动把这 677 个 feature 强推一次(或对全部 delay=0 因子 force re-push)同步远端。
 
 - **Stub files**: `core/alpha/results/base.py`, `results/checkpoint.py`, `results/checkbias.py`
 - **Dead code**: `infra/notify/email.py` is commented out
