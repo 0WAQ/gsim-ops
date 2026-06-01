@@ -95,14 +95,13 @@ def diff(local: dict[str, FileInfo],
     """Compare two inventories.
 
     Default (no deep_root):
-      - size differs                                   → `differ`
-      - size matches but local.mtime > remote.mtime+tol → `differ`
-        (catches in-place rewrites like pack which keep size but bump
-        mtime; asymmetric so the reverse — remote LastModified > local
-        mtime + tol with matching size — stays `identical`, since that's
-        the normal post-upload state on a machine that hasn't been
-        calibrated yet)
-      - otherwise                                       → `identical`
+      - size differs                                → `differ`
+      - size matches but |local.mtime - remote.mtime| > tol → `differ`
+        (symmetric: catches in-place rewrites from either side. On the
+        machine that did the rewrite, local.mtime > remote.mtime; on
+        any other machine, remote.mtime > local.mtime because the
+        previous pull calibrated local to the old LastModified)
+      - otherwise                                   → `identical`
 
     Deep (deep_root passed):
       For every entry that the default rule marks `identical`, recompute
@@ -117,7 +116,7 @@ def diff(local: dict[str, FileInfo],
             out.only_local.append(rel)
         elif lo.size != ro.size:
             out.differ.append(rel)
-        elif lo.mtime > ro.mtime + MTIME_TOLERANCE:
+        elif abs(lo.mtime - ro.mtime) > MTIME_TOLERANCE:
             out.differ.append(rel)
         else:
             out.identical.append(rel)

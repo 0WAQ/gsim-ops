@@ -35,10 +35,13 @@ Sync 改成"真同步":每次都列举两端,直接 diff。
 
 判等规则(默认):
 1. `local.size != remote.size` → `differ`
-2. size 相同 **且** `local.mtime > remote.mtime + MTIME_TOLERANCE` → `differ`(覆盖原地重写场景:pack 重写 `.npy` size 不变但 mtime 跳到现在)
+2. size 相同 **且** `|local.mtime - remote.mtime| > MTIME_TOLERANCE` → `differ`
 3. 否则 → `identical`
 
-规则 2 是**非对称**的:只看本地是否显著新于远端,不看反向。因为"远端比本地新 + size 相等"在我们的传输模式下,只可能是上传时间晚于本地文件 mtime,不是真漂移。
+规则 2 是**对称**的。看似 push 端只关心"本地是否更新"、pull 端只关心"远端是否更新",但其实两边必须用同一套判等才不会漏:
+- 同一台机器 pack 重写后 push:`local.mtime > remote.mtime` 触发
+- 另一台机器 pull 该重写文件:本地 mtime 是上次 pull 时 calibrate 到的**老** LastModified,远端是这次 push 的**新** LastModified → `remote.mtime > local.mtime` 触发
+方向由后续 `newer_side(rel, d)` 判断(local / remote / tie),push 只在 `local` 时上传,pull 只在 `remote` 时下载,tie 报冲突。
 
 判等规则(`deep_root` 非 None):在默认规则之上,对每个 `identical` 文件再用 `compute_s3_etag()` 本地复算 etag,跟远端 etag 比;不匹配 → 升级为 `differ`。覆盖"size 相等内容真漂移"的盲区(代价:读盘算 md5,~500 MB/s)。
 
