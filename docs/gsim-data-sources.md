@@ -1,6 +1,40 @@
 # Gsim 数据源参考
 
-本文档列举 gsim 中可用的数据源（Dmgr 模块）。完整列表见 `/usr/local/gsim/gsim/data/module/__init__.py` 和 `/datasvc/template/config.read_cache.xml`。
+本文档列举 gsim 中可用的数据源(Dmgr 模块),面向**在 gsim 框架内开发因子**的场景。完整列表见 `/usr/local/gsim/gsim/data/module/__init__.py` 和 `/datasvc/template/config.read_cache.xml`(111 个 `<Data id>` 注册项)。
+
+> 物理数据层(memmap 文件布局、形状、填充进度、快照机制)请看 [cc-data-layout.md](cc-data-layout.md)。本文档专注于"XML 注册 + `dr.getData()` 调用"这一层。
+
+## 数据分层
+
+```
+rawdata  →  cc (common cache)  →  dm (data manager)  →  alpha-feature
+   ↓             ↓                      ↓                      ↓
+原始数据源     /datasvc/data/cc_all   gsim Dmgr 模块         自建特征层
+```
+
+- **rawdata**: `/datasvc/rawdata/{rawdata_wind, rawdata_datayes, rawdata_citics, rawdata_datayes_unused}`
+- **cc**: `/datasvc/data/{cc, cc_2024, cc_2025, cc_all}`,memmap 标准化 cache
+- **dm**: gsim DataManager 模块(本文档的主角),用 `<Data module="Dmgr*">` 注册,基于 cc / rawdata build
+- **alpha-feature**: 自建特征(`cn_equity_feature*` / `realtime` / `delta`),也可通过 Dmgr 注册供 gsim 使用
+
+gsim 的 XML `<Data>` 注册项实际上在加载某个 dm 模块,该模块再读 rawdata / cc 下的物理文件。
+
+## 内部命名 ↔ gsim Module 对照
+
+| 内部叫法 | XML id 前缀 | Dmgr Module | 增量 |
+|---|---|---|---|
+| **424 因子** | `equ_factor_*`(15 个) | `Dmgrequ_factor_*` | ✅ datayes |
+| **精品因子** | `equ_fancy_factors_table1~10` | `Dmgr_equ_fancy_factors_tableN` | ✅ datayes |
+| **AI 盈利预测** | `*_fore_annual` / `*_fore_quarter` | `DmgrWbai_AIFcst_*` / `source_ref/` | ✅ datayes |
+| **分析师预测** | `ashareconsensusrollingdata_*`(8 口径) | `Dmgr_consensusexpectationfactor.py` 等 | ✅ wind |
+| **h2l 高频转低频因子** | `equ_h2l_factor_t1~t4` | `source_ref/Dmgr_equ_h2l_factor_t*.py` | ❌ **停更**(rawdata_datayes_unused) |
+| **高频衍生表** | `hf_daily_der_table_1~9` + `hf_daily_auction_table` | `source_ref/Dmgr_hf_daily_*.py` | ❌ **停更** |
+| **L2 feature** | `cn_equity_feature/*` / `cn_equity_feature_5min/*` | `dm_src/dmgr_*.py`(yq_212 / fb_224 / fguo / sli / zzk 等) | ✅ 自研 |
+| **行业聚合** | `DmgrPwang_industry_equ_fancy_factors` | dm_src 下,pwang 同事作品 | ✅ |
+| **资金流** | `AShareMoneyFlow` | `DmgrAShareMoneyFlow` | ✅ wind |
+| **5min 行情** | `Interval5m` | `source_ref/interval_5m_zx.py` | ✅ citics |
+| **市场指标** | `Dmgr_MktRet` / `Dmgr_adv20` / `DmgrWbai_AIndexCSI*Weight` | dm_src / source_ref | ✅ |
+| **外部研究员信号** | `signal_rsh` | — | ❌ **已弃用** |
 
 ## 调用范式
 
@@ -201,11 +235,11 @@ self.np = dr.getData('ashareincome.net_profit_excl_min_int_inc')
 self.ocf = dr.getData('asharecashflow.operate_cash_flow')
 ```
 
-## 一致预期数据
+## 分析师预测(ashareconsensusrollingdata 系列)
 
-DataYes 一致预期数据，按周期分模块：
+公司内部俗称 **"分析师预测"**,Wind 一致预期数据,按口径分 8 个模块,每个模块 17 字段,共 136 字段:
 
-| ID | 周期 |
+| ID | 口径 |
 |----|------|
 | `ashareconsensusrollingdata_CAGR` | 复合增长率 |
 | `ashareconsensusrollingdata_FTTM` | 滚动 TTM |
@@ -216,37 +250,37 @@ DataYes 一致预期数据，按周期分模块：
 | `ashareconsensusrollingdata_YOY` | 同比 |
 | `ashareconsensusrollingdata_YOY2` | 两年同比 |
 
-常用字段：`est_eps`, `est_pe`, `est_roe`, `est_oper_rev`, `est_oper_profit` 等。
+常用字段:`est_eps`, `est_pe`, `est_roe`, `est_oper_rev`, `est_oper_profit` 等。
 
-调用：
+调用:
 
 ```python
 self.eps_fy1 = dr.getData('ashareconsensusrollingdata_FY1.est_eps')
 ```
 
-## 因子数据（equ_factor 系列）
+## 424 因子(equ_factor 系列)
 
-DataYes 因子库，按类别分模块：
+公司内部俗称 **"424 因子"**,DataYes 因子库,按类别分 15 个模块,共 433 个字段:
 
 | ID | 类别 |
 |----|------|
-| `equ_factor_oc` | OC（Order Capacity） |
+| `equ_factor_oc` | OC(Order Capacity / 经营周期) |
 | `equ_factor_growth` | 成长 |
 | `equ_factor_power` | 动量 |
 | `equ_factor_cf` | 现金流 |
-| `equ_factor_psi` | PSI |
-| `equ_factor_sc` | SC |
-| `equ_factor_vs` | VS |
-| `equ_factor_return` | 回报 |
-| `equ_factor_volume` | 量价 |
-| `equ_factor_trend` | 趋势 |
-| `equ_factor_pq` | PQ |
-| `equ_factor_derive` | 衍生 |
-| `equ_factor_obos` | 超买超卖 |
+| `equ_factor_psi` | PSI(每股指标) |
+| `equ_factor_sc` | SC(资本结构) |
+| `equ_factor_vs` | VS(估值 / 市值) |
+| `equ_factor_return` | 回报(BARRA 风格 Alpha/Beta/Gain/Cmra) |
+| `equ_factor_volume` | 量能(DAVOL) |
+| `equ_factor_trend` | 趋势(AD/EMA/MACD) |
+| `equ_factor_pq` | PQ(估值 / 质量) |
+| `equ_factor_derive` | 财务衍生(TTM) |
+| `equ_factor_obos` | 超买超卖(ADTM/ATR/BIAS) |
 | `equ_factor_ma` | 均线 |
-| `equ_factor_af` | AF |
+| `equ_factor_af` | AF(一致预期) |
 
-注册示例：
+注册示例:
 
 ```xml
 <Data id="equ_factor_return" module="Dmgrequ_factor_return"
@@ -254,16 +288,16 @@ DataYes 因子库，按类别分模块：
     niomapprivate="true"/>
 ```
 
-## Fancy 因子（equ_fancy_factors）
+## 精品因子(equ_fancy_factors)
 
-DataYes 高阶因子表，gsim 内置 1-8，配置中可扩展到 10：
+公司内部俗称 **"精品因子"**,DataYes 高阶因子表,共 10 个表 / 208 字段。gsim 内置 1-8,9-10 通过自定义模块路径注册:
 
 | ID | 范围 |
 |----|------|
 | `equ_fancy_factors_table1` ~ `table8` | gsim 内置 |
 | `equ_fancy_factors_table9` ~ `table10` | 通过自定义模块路径注册 |
 
-注册：
+注册:
 
 ```xml
 <Data id="equ_fancy_factors_table1" 
@@ -271,6 +305,42 @@ DataYes 高阶因子表，gsim 内置 1-8，配置中可扩展到 10：
     dataPath="/datasvc/rawdata/rawdata_datayes/equ_fancy_factors_table1"
     niomapprivate="true"/>
 ```
+
+## 行业 + 精品因子聚合(DmgrPwang)
+
+`DmgrPwang_industry_equ_fancy_factors`(82 字段),pwang 同事 build,基于 dm 层做的行业聚合 + 精品因子组合(包含 t10 + YOY 衍生)。属于 dm 层产物。
+
+## h2l 高频转低频因子(equ_h2l_factor) — 已停更
+
+**rawdata_datayes_unused 来源,无增量**,只能用历史段做研究,实盘 / OOS 看不到新数据。
+
+| ID | 字段数 |
+|----|--------|
+| `equ_h2l_factor_t1` | 31 |
+| `equ_h2l_factor_t2` | 31 |
+| `equ_h2l_factor_t3` | 30 |
+| `equ_h2l_factor_t4` | 30 |
+
+字段:买卖意图、5min 振幅、阻力价、APT_INFLOW_RATIO 等。
+
+位于 `/usr/local/gsim/source_ref/`,需通过完整路径注册。
+
+## 高频衍生表(hf_daily_*) — 已停更
+
+**rawdata_datayes_unused 来源,无增量**。10 个表 / 247 个字段:
+
+| ID | 主题 |
+|----|------|
+| `hf_daily_auction_table` | 集合竞价 |
+| `hf_daily_der_table_1` | 价格压力 |
+| `hf_daily_der_table_2` | 流动性弹性 |
+| `hf_daily_der_table_3` | 主动买盘 |
+| `hf_daily_der_table_4` | 日内动量 |
+| `hf_daily_der_table_5` | 当日盘口 |
+| `hf_daily_der_table_6` | 振幅 / 方向 |
+| `hf_daily_der_table_7` | 行为指标 |
+| `hf_daily_der_table_8` | 撤单 / 试单 |
+| `hf_daily_der_table_9` | 大单买卖 |
 
 ## 自定义 DPV 系列
 
@@ -295,23 +365,23 @@ DataYes 高阶因子表，gsim 内置 1-8，配置中可扩展到 10：
     dataPath="/usr/local/gsim/dm_src/dmgr_dpv.py" niomapprivate="true"/>
 ```
 
-## AI 盈利预测
+## AI 盈利预测(*_fore_annual / *_fore_quarter)
 
-需要在 XML 中通过完整路径注册，源码在 `source_ref/`：
+公司内部俗称 **"AI 盈利预测"**,DataYes 预测财报,需要在 XML 中通过完整路径注册,源码在 `source_ref/`。`(T, K, N)` 三维 — K=3 (FY0/FY1/FY2) 或 K=12 (未来 12 个季度):
 
-| ID | 说明 |
-|----|------|
-| `balance_sheet_fore_annual` | 资产负债表年度预测 |
-| `cash_flow_statement_fore_annual` | 现金流年度预测 |
-| `finance_ratio_fore_annual` | 财务比率年度预测 |
-| `financial_summary_fore_annual` | 财务汇总年度预测 |
-| `financial_summary_fore_quarter` | 财务汇总季度预测 |
-| `income_statement_fore_annual` | 利润表年度预测 |
-| `income_statement_fore_quarter` | 利润表季度预测 |
-| `revenue_forecast_annual` | 营收年度预测 |
-| `revenue_forecast_quarter` | 营收季度预测 |
+| ID | K | 字段数 |
+|----|---|--------|
+| `balance_sheet_fore_annual` | 3 | 41 |
+| `cash_flow_statement_fore_annual` | 3 | 23 |
+| `finance_ratio_fore_annual` | 3 | 37 |
+| `financial_summary_fore_annual` | 3 | 22 |
+| `income_statement_fore_annual` | 3 | 42 |
+| `revenue_forecast_annual` | 3 | 2 |
+| `financial_summary_fore_quarter` | 12 | 12 |
+| `income_statement_fore_quarter` | 12 | 32 |
+| `revenue_forecast_quarter` | 12 | 2 |
 
-注册示例：
+注册示例:
 
 ```xml
 <Data id="revenue_forecast_annual"
@@ -320,7 +390,7 @@ DataYes 高阶因子表，gsim 内置 1-8，配置中可扩展到 10：
     niomapprivate="true"/>
 ```
 
-调用：
+调用:
 
 ```python
 self.rev_fa = dr.getData('revenue_forecast_annual.revenue')
@@ -333,23 +403,31 @@ self.rev_fa = dr.getData('revenue_forecast_annual.revenue')
 | `DmgrWbai_AIndexCSI500Weight` | 中证 500 权重 |
 | `DmgrWbai_AIndexCSI1000Weight` | 中证 1000 权重 |
 
-## 高频/Level2 数据（部分需特殊申请）
+## L2 自建特征(cn_equity_feature 系列)
 
-`/usr/local/gsim/dm_src/` 下还有以下自定义模块（默认在 `config.read_cache.xml` 中被注释）：
+我们自己基于 L2 行情(逐笔成交 + 五档盘口)build 的多频率特征,属于 alpha-feature 层。`/usr/local/gsim/dm_src/` 下提供对应 Dmgr,默认在 `config.read_cache.xml` 中被注释,**按需取消注释**。
 
 | ID | 说明 |
 |----|------|
-| `yq_212_5min` | 宇其 Level2 5min 频 K 线 |
-| `fb_224_5min` | FB Level2 5min |
-| `fguo_*` | Fguo 系列特征（多个） |
-| `zzk_*` | ZZK 系列特征 |
-| `Dmgr_MarketStats` | 市场统计 |
-| `Dmgr_adv20` | 20 日均量（`Dmgr_advN.py`，需传 `ndays`） |
-| `Dmgr_MktRet` | 市场收益 |
-| `Dmgr_gfv2aa` / `Dmgr_L2ZZK` / `DmgrSli_021*` / `gfl2_5m` | 其它高频/Level2 特征 |
-| `DmgrPwang_industry_equ_fancy_factors` | 行业级 fancy 因子 |
+| `yq_212_5min` | 宇其 L2 5min 频(410 字段) |
+| `fb_224_5min` | FB L2 5min(450 字段) |
+| `dw_57_5min` | dw L2 5min 五档(57 字段) |
+| `fguo_*` | fguo 系列日级特征(max/trade2/trade3/ywang/0105/0106/1208/1209/1224/1230 等,共 4844 字段) |
+| `sli_021*` | sli 系列日级特征(0206/0210~15,1366 字段) |
+| `zzk_19` | zzk 系列 trade count(17 字段) |
+| `feature_cuts_1430` | 14:30 切片(32 字段) |
 
-部分模块（如 `hf_daily_*`、`equ_h2l_factor_t*`）位于 `/usr/local/gsim/source_ref/`，需通过完整路径注册。
+物理布局参考 [cc-data-layout.md § 11) L2 feature](cc-data-layout.md)。
+
+## 其他 dm 层模块
+
+| ID | 说明 |
+|----|------|
+| `Dmgr_MarketStats` | 市场统计 |
+| `Dmgr_adv20` | 20 日均量(`Dmgr_advN.py`,需传 `ndays`) |
+| `Dmgr_MktRet` | 市场收益 |
+| `Dmgr_gfv2aa` / `Dmgr_L2ZZK` / `DmgrSli_021*` / `gfl2_5m` | 其它高频 / L2 特征(`dm_src/`) |
+| `DmgrPwang_industry_equ_fancy_factors` | 行业 + 精品因子聚合(pwang 同事) |
 
 需要时取消注释并按需配置 `dataPath`。
 
@@ -372,9 +450,11 @@ self.rev_fa = dr.getData('revenue_forecast_annual.revenue')
 
 ## 参考资料
 
-- Gsim 架构：[gsim-architecture.md](gsim-architecture.md)
-- XML 配置：[gsim-xml-config.md](gsim-xml-config.md)
-- 因子开发流程：[gsim-factor-workflow.md](gsim-factor-workflow.md)
-- 完整数据源配置：`/datasvc/template/config.read_cache.xml`
-- gsim 数据模块源码：`/usr/local/gsim/gsim/data/module/`
-- 自定义数据模块：`/usr/local/gsim/dm_src/`、`/usr/local/gsim/source_ref/`
+- 物理数据布局(memmap、形状、快照):[cc-data-layout.md](cc-data-layout.md)
+- Gsim 架构:[gsim-architecture.md](gsim-architecture.md)
+- XML 配置:[gsim-xml-config.md](gsim-xml-config.md)
+- 因子开发流程:[gsim-factor-workflow.md](gsim-factor-workflow.md)
+- 完整数据源配置:`/datasvc/template/config.read_cache.xml`(111 个 `<Data>` 注册项)
+- gsim 数据模块源码:`/usr/local/gsim/gsim/data/module/`
+- 自定义数据模块:`/usr/local/gsim/dm_src/`、`/usr/local/gsim/source_ref/`
+- 完整字段清单(物理层):[cc_all_fields.csv](cc_all_fields.csv)

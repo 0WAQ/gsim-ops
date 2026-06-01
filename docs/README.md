@@ -10,7 +10,8 @@
 |-----|------|---------|
 | [gsim-factor-workflow.md](gsim-factor-workflow.md) | 因子开发完整流程 | 开发新因子时 |
 | [gsim-xml-config.md](gsim-xml-config.md) | XML 配置详细说明 | 配置回测时 |
-| [gsim-data-sources.md](gsim-data-sources.md) | 可用数据源参考 | 查找数据源时 |
+| [gsim-data-sources.md](gsim-data-sources.md) | gsim 框架数据源 API(XML / dr.getData) | gsim 内开发因子时 |
+| [cc-data-layout.md](cc-data-layout.md) | /datasvc/data/{cc, cc_2024, cc_2025, cc_all} 物理布局 | 跳过 gsim 直接做因子挖掘 / ML 时 |
 | [gsim-architecture.md](gsim-architecture.md) | 架构、模块、工具链 | 了解框架时 |
 | [gsim-factor-validation.md](gsim-factor-validation.md) | 入库检测流程和标准 | 准备提交时 |
 | [gsim-changelog.md](gsim-changelog.md) | Gsim 更新日志 | 跟踪新特性时 |
