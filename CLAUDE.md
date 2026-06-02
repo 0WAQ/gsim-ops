@@ -29,14 +29,14 @@ uv run ops health --fix              # Auto-refresh missing metrics/datasources
 uv run ops pack                      # Aggregate alpha_dump → alpha_feature (skip already-packed)
 uv run ops pack --force              # Rewrite all factors
 uv run ops pack --factor AlphaXxx    # Pack one factor
-uv run ops sync push                 # 两端 list+diff 增量推送(size + mtime 兜底)+ state merge
+uv run ops sync push                 # 两端 list+diff 增量推送 (etag 权威) + state merge
 uv run ops sync push --dry-run       # Preview transfers
-uv run ops sync push --deep          # 等大小再走 etag 比对捕捉内容漂移(慢)
-uv run ops sync pull                 # state merge + 拉远端新增/更新的文件(按 status 过滤)
-uv run ops sync pull --deep          # 同上,等大小走 etag
+uv run ops sync push --deep          # 忽略本地 etag 缓存重算(慢)
+uv run ops sync pull                 # state merge + 拉远端新增/变更的文件(按 status 过滤)
+uv run ops sync pull --deep          # 同上,忽略本地 etag 缓存重算
 uv run ops sync status               # Quick local-vs-remote summary (no data scan)
-uv run ops sync verify               # 三个数据目录两端文件级校验
-uv run ops sync verify --deep        # 加 etag 校验,捕捉等大小漂移(慢,读全部本地文件)
+uv run ops sync verify               # 三个数据目录 etag 级两端校验
+uv run ops sync verify --deep        # 忽略缓存重算,捕捉缓存里 mtime/size 没动但内容已坏(慢)
 uv run ops rm AlphaXxx               # 软删除:仅打 DELETED 标,文件保留
 uv run ops rm AlphaXxx --force       # 同时删本地 dump + feature(保留 src/pnl)
 uv run ops resubmit -u wbai -s 20260401 -f Alpha   # 已有因子提交新代码(version += 1)

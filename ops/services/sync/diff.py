@@ -1,22 +1,29 @@
 """True sync diff engine.
 
-Lists both ends, computes per-directory diff. Replaces the manifest-based
-fingerprint approach now that alpha_dump is no longer synced and the
-remaining data volume (alpha_src + alpha_pnl + alpha_feature) is small
-enough to enumerate directly.
+Lists both ends, computes per-directory diff. Identity is by S3 etag
+(boto3 multipart-aware) — mtime no longer participates in identical vs.
+differ classification. The local etag is cached in `etag_cache.py` keyed
+on (rel, mtime, size) so steady-state syncs don't re-hash 482GB.
+
+mtime survives only as: (1) the cache invalidation key, and (2) the
+direction signal in `newer_side` when a `differ` entry needs a tie-break.
+The direction signal is a known-imperfect heuristic — see CLAUDE.md.
 """
 import hashlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tqdm import tqdm
+
 from ops.infra.s3 import S3Client, S3_MULTIPART_CHUNKSIZE, S3_MULTIPART_THRESHOLD
+from ops.services.sync import etag_cache
 
 
-# Cross-machine mtime drift tolerance (seconds). Filesystems quantize to 1s
-# and S3 LastModified is upload time, so the calibration step (sync.py)
-# touches local mtime to match remote after every transfer. Tolerance
-# handles the residual sub-second drift.
+# Cross-machine mtime drift tolerance (seconds). mtime no longer drives
+# identical vs. differ — etag does — but `newer_side` still uses mtime as
+# the direction heuristic for `differ` entries, and tolerance absorbs the
+# residual filesystem-quantization / S3-LastModified drift there.
 MTIME_TOLERANCE = 2.0
 
 
@@ -34,7 +41,7 @@ class DirDiff:
     Buckets are disjoint: every relpath that appears in either side lands in
     exactly one of `only_local` / `only_remote` / `differ` / `identical`.
     `local` / `remote` carry full metadata for callers that need mtime to
-    break ties on `differ` entries.
+    break ties on `differ` entries via `newer_side`.
     """
     only_local: list[str] = field(default_factory=list)
     only_remote: list[str] = field(default_factory=list)
@@ -47,15 +54,28 @@ class DirDiff:
         return not (self.only_local or self.only_remote or self.differ)
 
 
-def walk_local(root: Path) -> dict[str, FileInfo]:
-    """Walk root, return {relpath: FileInfo}. Empty dict if root missing.
+def walk_local(root: Path, *, subdir: str, cache: dict,
+               recompute: bool = False,
+               progress_desc: str | None = None) -> dict[str, FileInfo]:
+    """Walk root, returning {relpath: FileInfo} with etag populated.
 
-    Dotfiles are skipped to match the existing convention used by the
-    rest of the codebase (the remote `.state/` prefix is hidden too).
+    For each file: stat, then either hit the etag cache on (mtime, size)
+    or recompute via `compute_s3_etag` and update the cache in-place. The
+    caller is responsible for `etag_cache.save(...)` afterwards.
+
+    `recompute=True` ignores the cache for this walk (still updates it
+    with fresh values). Used by `--deep`.
+
+    Dotfiles are skipped to match the rest of the codebase's convention
+    (the remote `.state/` prefix is hidden too).
     """
     out: dict[str, FileInfo] = {}
     if not root.exists():
         return out
+
+    # Two-pass: first stat everything to know the total, then hash with
+    # progress feedback only for cache misses (so a no-op sync stays silent).
+    candidates: list[tuple[str, Path, float, int]] = []
     for dirpath, _, filenames in os.walk(root):
         for fname in filenames:
             if fname.startswith("."):
@@ -66,7 +86,28 @@ def walk_local(root: Path) -> dict[str, FileInfo]:
             except OSError:
                 continue
             rel = str(full.relative_to(root))
-            out[rel] = FileInfo(size=st.st_size, mtime=st.st_mtime)
+            candidates.append((rel, full, st.st_mtime, st.st_size))
+
+    to_hash: list[tuple[str, Path, float, int]] = []
+    for rel, full, mtime, size in candidates:
+        cached = (None if recompute
+                  else etag_cache.lookup(cache, subdir, rel, mtime, size))
+        if cached is not None:
+            out[rel] = FileInfo(size=size, mtime=mtime, etag=cached)
+        else:
+            to_hash.append((rel, full, mtime, size))
+
+    if to_hash:
+        desc = progress_desc or f"hash {subdir}"
+        for rel, full, mtime, size in tqdm(to_hash, desc=f"  {desc}",
+                                           unit="file"):
+            try:
+                etag = compute_s3_etag(full)
+            except OSError:
+                continue
+            etag_cache.put(cache, subdir, rel, mtime, size, etag)
+            out[rel] = FileInfo(size=size, mtime=mtime, etag=etag)
+
     return out
 
 
@@ -76,7 +117,9 @@ def list_remote(s3: S3Client, prefix: str) -> dict[str, FileInfo]:
     `prefix` is normalized to end with `/` internally so the returned
     relpaths are clean (no leading slash). `mtime` is the S3 LastModified
     epoch (== upload time, not original file mtime — the sync transport
-    calibrates local mtime to this value on transfer).
+    calibrates local mtime to this value on transfer, which both keeps
+    the etag cache warm and gives `newer_side` a usable direction signal
+    for files that haven't been edited since their last transfer).
     """
     pfx = prefix.rstrip("/") + "/"
     out: dict[str, FileInfo] = {}
@@ -90,55 +133,30 @@ def list_remote(s3: S3Client, prefix: str) -> dict[str, FileInfo]:
 
 
 def diff(local: dict[str, FileInfo],
-         remote: dict[str, FileInfo],
-         *, deep_root: Path | None = None) -> DirDiff:
-    """Compare two inventories.
+         remote: dict[str, FileInfo]) -> DirDiff:
+    """Compare two inventories. etag is the authority.
 
-    Default (no deep_root):
-      - size differs                                → `differ`
-      - size matches but |local.mtime - remote.mtime| > tol → `differ`
-        (symmetric: catches in-place rewrites from either side. On the
-        machine that did the rewrite, local.mtime > remote.mtime; on
-        any other machine, remote.mtime > local.mtime because the
-        previous pull calibrated local to the old LastModified)
-      - otherwise                                   → `identical`
+    - rel only on one side          → `only_local` / `only_remote`
+    - both sides + etags match      → `identical`
+    - both sides + etags differ     → `differ`
 
-    Deep (deep_root passed):
-      For every entry that the default rule marks `identical`, recompute
-      local etag with the pinned multipart chunksize and compare to the
-      remote etag. Mismatch → `differ`. This catches same-size content
-      drift that mtime can't see.
+    Note: an empty local or remote etag (e.g. listing without etag, or a
+    walk that failed to hash) is treated as "unknown" and falls to
+    `differ` to be safe — better an extra transfer than a missed change.
     """
     out = DirDiff(local=dict(local), remote=dict(remote))
     for rel, lo in local.items():
         ro = remote.get(rel)
         if ro is None:
             out.only_local.append(rel)
-        elif lo.size != ro.size:
-            out.differ.append(rel)
-        elif abs(lo.mtime - ro.mtime) > MTIME_TOLERANCE:
-            out.differ.append(rel)
-        else:
+            continue
+        if lo.etag and ro.etag and lo.etag == ro.etag:
             out.identical.append(rel)
+        else:
+            out.differ.append(rel)
     for rel in remote:
         if rel not in local:
             out.only_remote.append(rel)
-
-    if deep_root is not None:
-        promoted: list[str] = []
-        still_identical: list[str] = []
-        for rel in out.identical:
-            ro = out.remote[rel]
-            if not ro.etag:
-                still_identical.append(rel)
-                continue
-            local_etag = compute_s3_etag(deep_root / rel)
-            if local_etag != ro.etag:
-                promoted.append(rel)
-            else:
-                still_identical.append(rel)
-        out.identical = still_identical
-        out.differ.extend(promoted)
 
     out.only_local.sort()
     out.only_remote.sort()
@@ -151,8 +169,11 @@ def newer_side(rel: str, d: DirDiff,
                tolerance: float = MTIME_TOLERANCE) -> str:
     """For a `differ` entry, return which side's mtime is newer.
 
-    Returns 'local' / 'remote' / 'tie'. Callers use this to decide whether
-    push/pull should overwrite or skip-and-warn.
+    Returns 'local' / 'remote' / 'tie'. **Known limitation**: mtime
+    reflects last-push-time after calibration, not last-production-time,
+    so cross-machine out-of-order pushes can pick the wrong winner. Sync
+    cannot resolve this without external version metadata (deferred,
+    see CLAUDE.md "Plans").
     """
     lo = d.local.get(rel)
     ro = d.remote.get(rel)

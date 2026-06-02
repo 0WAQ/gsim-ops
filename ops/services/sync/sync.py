@@ -11,6 +11,7 @@ Local alpha_dump is a local-only intermediate product (not synced).
 import json
 import os
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from tqdm import tqdm
 from ops.infra.config import Config
 from ops.infra.s3 import S3Client
 from ops.infra.cache import cache_path
+from ops.services.sync import etag_cache
 from ops.services.sync.merge import MERGERS
 from ops.services.sync.diff import (
     DirDiff, walk_local, list_remote, diff, newer_side,
@@ -97,24 +99,35 @@ def _split_for_push(result: DirDiff) -> tuple[list[str], list[str]]:
 
 
 def _push_dir(name: str, local_root: Path, remote_prefix: str,
-              s3: S3Client, *, dry_run: bool, deep: bool = False) -> int:
+              s3: S3Client, *, library_id: str, dry_run: bool,
+              recompute: bool = False) -> int:
     """Diff one data dir between local and S3, upload missing/local-newer
-    files, warn on conflicts. Returns number of failed uploads."""
-    local = walk_local(local_root)
+    files, warn on conflicts. Returns number of failed uploads.
+
+    `recompute=True` ignores the local etag cache for this walk (—deep).
+    """
+    cache = etag_cache.load(library_id)
+    local = walk_local(local_root, subdir=name, cache=cache,
+                       recompute=recompute)
     remote = list_remote(s3, remote_prefix)
-    result = diff(local, remote, deep_root=local_root if deep else None)
+    result = diff(local, remote)
     to_upload, conflicts = _split_for_push(result)
     info(f"  本地: {len(local)}  远端: {len(remote)}  "
          f"一致: {len(result.identical)}  待传: {len(to_upload)}  "
-         f"冲突: {len(conflicts)}" + ("  [deep]" if deep else ""))
+         f"冲突: {len(conflicts)}" + ("  [recompute]" if recompute else ""))
     if conflicts:
         warn(f"  ⚠ {len(conflicts)} 个文件远端更新或 mtime 持平,跳过避免覆盖")
         for rel in conflicts[:5]:
             highlight(f"    ≠ {name}/{rel}")
         if len(conflicts) > 5:
             highlight(f"    … 另 {len(conflicts) - 5} 个")
+    etag_cache.prune(cache, name, set(local.keys()))
     if not to_upload or dry_run:
+        etag_cache.save(library_id, cache)
         return 0
+
+    updates: list[tuple[str, float, int, str]] = []
+    updates_lock = threading.Lock()
 
     def _upload_one(rel: str) -> str | None:
         try:
@@ -124,6 +137,10 @@ def _push_dir(name: str, local_root: Path, remote_prefix: str,
                     os.utime(local_root / rel, (remote_mtime, remote_mtime))
                 except OSError:
                     pass
+                lo = local.get(rel)
+                if lo is not None and lo.etag:
+                    with updates_lock:
+                        updates.append((rel, remote_mtime, lo.size, lo.etag))
             return None
         except Exception as e:
             return f"{rel}: {e}"
@@ -139,6 +156,10 @@ def _push_dir(name: str, local_root: Path, remote_prefix: str,
                 failed_count += 1
                 warn(f"    ✘ {err}")
     progress.close()
+
+    for rel, mtime, size, etag in updates:
+        etag_cache.put(cache, name, rel, mtime, size, etag)
+    etag_cache.save(library_id, cache)
     return failed_count
 
 
@@ -201,9 +222,10 @@ def push(config: Config, *, dry_run: bool = False, force_state: bool = False,
                 info("  · 远端 state 不存在,跳过检查")
 
     for d in DATA_DIRS:
-        banner(f"push {d}" + (" (deep)" if deep else ""))
+        banner(f"push {d}" + (" (recompute)" if deep else ""))
         failed += _push_dir(d, getattr(config, d), f"{pfx}/{d}",
-                            s3, dry_run=dry_run, deep=deep)
+                            s3, library_id=library_id, dry_run=dry_run,
+                            recompute=deep)
 
     banner("push state" + (" (force)" if force_state else " (merge)"))
     if force_state:
@@ -297,38 +319,50 @@ def _split_for_pull(result: DirDiff, subdir: str,
 
 
 def _pull_dir(name: str, local_root: Path, remote_prefix: str,
-              s3: S3Client, state: dict, *, dry_run: bool,
-              deep: bool = False) -> int:
+              s3: S3Client, state: dict, *, library_id: str, dry_run: bool,
+              recompute: bool = False) -> int:
     """Diff one data dir, download what's missing/remote-newer (filtering
     DELETED/SUBMITTED), warn on conflicts. Returns number of failed
     downloads."""
-    local = walk_local(local_root)
+    cache = etag_cache.load(library_id)
+    local = walk_local(local_root, subdir=name, cache=cache,
+                       recompute=recompute)
     remote = list_remote(s3, remote_prefix)
-    result = diff(local, remote, deep_root=local_root if deep else None)
+    result = diff(local, remote)
     to_download, skipped_state, conflicts = _split_for_pull(result, name, state)
     info(f"  本地: {len(local)}  远端: {len(remote)}  "
          f"一致: {len(result.identical)}  待拉: {len(to_download)}  "
          f"跳过(DELETED/SUBMITTED): {len(skipped_state)}  "
-         f"冲突: {len(conflicts)}" + ("  [deep]" if deep else ""))
+         f"冲突: {len(conflicts)}" + ("  [recompute]" if recompute else ""))
     if conflicts:
         warn(f"  ⚠ {len(conflicts)} 个文件本地更新或 mtime 持平,跳过避免覆盖")
         for rel in conflicts[:5]:
             highlight(f"    ≠ {name}/{rel}")
         if len(conflicts) > 5:
             highlight(f"    … 另 {len(conflicts) - 5} 个")
+    etag_cache.prune(cache, name, set(local.keys()))
     if not to_download or dry_run:
+        etag_cache.save(library_id, cache)
         return 0
     local_root.mkdir(parents=True, exist_ok=True)
 
+    updates: list[tuple[str, float, int, str]] = []
+    updates_lock = threading.Lock()
+
     def _download_one(rel: str) -> str | None:
         try:
-            s3.download(f"{remote_prefix}/{rel}", local_root / rel)
+            ok = s3.download(f"{remote_prefix}/{rel}", local_root / rel)
+            if not ok:
+                return f"{rel}: 远端 key 404 (list 之后被删/被覆盖?)"
             ro = result.remote.get(rel)
             if ro is not None:
                 try:
                     os.utime(local_root / rel, (ro.mtime, ro.mtime))
                 except OSError:
                     pass
+                if ro.etag:
+                    with updates_lock:
+                        updates.append((rel, ro.mtime, ro.size, ro.etag))
             return None
         except Exception as e:
             return f"{rel}: {e}"
@@ -344,6 +378,10 @@ def _pull_dir(name: str, local_root: Path, remote_prefix: str,
                 failed_count += 1
                 warn(f"    ✘ {err}")
     progress.close()
+
+    for rel, mtime, size, etag in updates:
+        etag_cache.put(cache, name, rel, mtime, size, etag)
+    etag_cache.save(library_id, cache)
     return failed_count
 
 
@@ -359,9 +397,10 @@ def pull(config: Config, *, dry_run: bool = False, deep: bool = False) -> int:
     state = _load_state(cache_path(library_id, "factor_state.json"))
 
     for d in DATA_DIRS:
-        banner(f"pull {d}" + (" (deep)" if deep else ""))
+        banner(f"pull {d}" + (" (recompute)" if deep else ""))
         failed += _pull_dir(d, getattr(config, d), f"{pfx}/{d}",
-                            s3, state, dry_run=dry_run, deep=deep)
+                            s3, state, library_id=library_id,
+                            dry_run=dry_run, recompute=deep)
     return failed
 
 # PLACEHOLDER_CHUNK_8
@@ -408,22 +447,28 @@ def verify(config: Config, *, deep: bool = False) -> int:
     """Real two-end inventory check.
 
     Lists alpha_src / alpha_pnl / alpha_feature on both ends and reports
-    only_local / only_remote / size-differ counts per dir. Read-only —
-    never touches files or remote state. With `deep=True`, additionally
-    recomputes local etag for size-matching files and promotes any
-    content drift into the differ bucket.
+    only_local / only_remote / etag-differ counts per dir. Read-only —
+    never touches files or remote state.
+
+    `deep=True` ignores the local etag cache and re-hashes every local
+    file — use to catch corruption that may have happened in-place
+    without updating mtime/size.
 
     Returns the total number of discrepancies (0 = perfectly in sync).
     """
     s3 = _make_s3(config)
     pfx = _pfx(config)
+    library_id = config.library_id
     total_bad = 0
     for d in DATA_DIRS:
-        banner(f"verify {d}" + (" (deep)" if deep else ""))
+        banner(f"verify {d}" + (" (recompute)" if deep else ""))
         local_root: Path = getattr(config, d)
-        local = walk_local(local_root)
+        cache = etag_cache.load(library_id)
+        local = walk_local(local_root, subdir=d, cache=cache, recompute=deep)
         remote = list_remote(s3, f"{pfx}/{d}")
-        result = diff(local, remote, deep_root=local_root if deep else None)
+        result = diff(local, remote)
+        etag_cache.prune(cache, d, set(local.keys()))
+        etag_cache.save(library_id, cache)
         info(f"  本地: {len(local)}  远端: {len(remote)}  一致: {len(result.identical)}")
         if result.is_clean():
             info("  ✔ 完全一致")
@@ -441,12 +486,13 @@ def verify(config: Config, *, deep: bool = False) -> int:
             if len(result.only_remote) > 10:
                 highlight(f"    … 另 {len(result.only_remote) - 10} 个")
         if result.differ:
-            warn(f"  大小不一致 ({len(result.differ)}):")
+            warn(f"  内容不一致 ({len(result.differ)}):")
             for rel in result.differ[:10]:
                 lo = result.local[rel]
                 ro = result.remote[rel]
                 side = newer_side(rel, result)
-                highlight(f"    ≠ {rel}  local={lo.size}  remote={ro.size}  newer={side}")
+                highlight(f"    ≠ {rel}  local={lo.size}/{lo.etag[:8]}  "
+                          f"remote={ro.size}/{ro.etag[:8]}  newer={side}")
             if len(result.differ) > 10:
                 highlight(f"    … 另 {len(result.differ) - 10} 个")
         total_bad += (len(result.only_local) + len(result.only_remote)
