@@ -122,11 +122,13 @@ Located at `/usr/local/gsim/`. The core backtesting engine that ops interacts wi
 
 ```
 /mnt/storage/alphalib/
-├── alpha_src/      # Factor source code
-├── alpha_pnl/      # Backtest results (PNL)
-├── alpha_dump/     # Daily target positions per factor
-└── alpha_feature/  # Aggregated alpha_dump data
+├── alpha_src/      # Factor source code        — alpha_src/<name>/        目录
+├── alpha_pnl/      # Backtest results (PNL)    — alpha_pnl/<name>         单文件 ⚠
+├── alpha_dump/     # Daily target positions    — alpha_dump/<name>/       目录(内含每日小文件)
+└── alpha_feature/  # Aggregated alpha_dump     — alpha_feature/<name>.{v}.npy  单文件
 ```
+
+**⚠ alpha_pnl/<name> 是单文件,不是目录**。删除用 `Path.unlink()`,不要用 `shutil.rmtree()`(`Errno 20: Not a directory`)。alpha_feature 同理是单文件。只有 alpha_src / alpha_dump 是目录。
 
 ### Factor Directory Structure
 

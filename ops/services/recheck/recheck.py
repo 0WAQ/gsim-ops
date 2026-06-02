@@ -169,11 +169,11 @@ def _recheck_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
         removed = _purge_artifacts(name, config)
         for r in removed:
             info(f"    ✔ 已删除 {r}")
-        # REJECTED 额外清 pnl
+        # REJECTED 额外清 pnl(alpha_pnl/<name> 是单文件,不是目录)
         if rec.status == FactorStatus.REJECTED:
             pnl = config.alpha_pnl / name
             if pnl.exists():
-                shutil.rmtree(pnl)
+                pnl.unlink()
                 info(f"    ✔ 已删除 alpha_pnl/{name}")
 
     store.transition(name, FactorStatus.SUBMITTED)
