@@ -73,9 +73,9 @@ class CorrelationChecker(Checker):
         if not self.passed(metrics):
             raise CorrelationFail(CorrResult(metrics))
 
-        # 4. 找出最大相关系数
-        max_corr_factor, max_corr = max(corrs, key=lambda x: abs(x[1]))
-        
+        # 4. 找出最大相关系数 (bcorr 输出已排序，取最后一行)
+        max_corr_factor, max_corr = corrs[-1]
+
         # 5. 如果相关性低，直接通过
         if abs(max_corr) < self.corr_threshold:
             return CorrResult(metrics, max_corr, max_corr_factor, 0)

@@ -70,7 +70,8 @@ def _compute_max_bcorr(factor: FactorInfo, config: Config) -> dict | None:
     others = [(n, c) for n, c in corrs if n != factor.name]
     if not others:
         return None
-    name, corr = max(others, key=lambda x: abs(x[1]))
+    # bcorr 输出已排序，取最后一行（最大相关系数）
+    name, corr = others[-1]
     return {"max_bcorr": corr, "max_bcorr_factor": name}
 
 

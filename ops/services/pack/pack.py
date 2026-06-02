@@ -234,7 +234,10 @@ def run_pack(args):
     from pathlib import Path as _P
     config_path: _P = args.config_path
     factor_name: str | None = args.factor
+    user: str | None = getattr(args, "user", None)
+    status: str | None = getattr(args, "status", None)
     force: bool = args.force
+    dry_run: bool = getattr(args, "dry_run", False)
     verify: bool = not args.no_verify
     workers: int = args.workers
 
@@ -251,6 +254,24 @@ def run_pack(args):
     else:
         candidates = _list_dump_factors(config.alpha_dump)
 
+    # 按 user/status 过滤
+    if user or status:
+        from ops.infra.store import JsonStateStore
+        store = JsonStateStore(config.state_file)
+        records = store.list()
+
+        filtered = set()
+        for r in records:
+            if user and r.get("author") != user:
+                continue
+            if status and r.get("status") != status:
+                continue
+            filtered.add(r["name"])
+
+        before = len(candidates)
+        candidates = [n for n in candidates if n in filtered]
+        info(f"按 user={user} status={status} 过滤: {before} → {len(candidates)}")
+
     if not force:
         before = len(candidates)
         candidates = [n for n in candidates if not _is_packed(n, config.alpha_feature)]
@@ -259,6 +280,13 @@ def run_pack(args):
         info(f"扫描 {len(candidates)} 个因子 (--force)")
 
     if not candidates:
+        bottom()
+        return
+
+    if dry_run:
+        info(f"待打包因子 ({len(candidates)}):")
+        for n in candidates:
+            info(f"  - {n}")
         bottom()
         return
 
