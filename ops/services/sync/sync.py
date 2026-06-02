@@ -115,10 +115,18 @@ def _push_dir(name: str, local_root: Path, remote_prefix: str,
     remote = list_remote(s3, remote_prefix)
     result = diff(local, remote)
     to_upload, conflicts = _split_for_push(result, force_overwrite=force_overwrite)
+
+    # For alpha_src, also show factor count (top-level dirs)
+    extra = ""
+    if name == "alpha_src":
+        local_factors = len({p.split("/")[0] for p in local.keys()})
+        remote_factors = len({p.split("/")[0] for p in remote.keys()})
+        extra = f"  (本地 {local_factors} 因子, 远端 {remote_factors} 因子)"
+
     info(f"  本地: {len(local)}  远端: {len(remote)}  "
          f"一致: {len(result.identical)}  待传: {len(to_upload)}  "
          f"冲突: {len(conflicts)}" + ("  [recompute]" if recompute else "")
-         + ("  [force-overwrite]" if force_overwrite else ""))
+         + ("  [force-overwrite]" if force_overwrite else "") + extra)
     if conflicts:
         warn(f"  ⚠ {len(conflicts)} 个文件 etag 不同,跳过(需手工解决:删远端或先 pull)")
         for rel in conflicts[:5]:
@@ -329,10 +337,18 @@ def _pull_dir(name: str, local_root: Path, remote_prefix: str,
     remote = list_remote(s3, remote_prefix)
     result = diff(local, remote)
     to_download, skipped_state, conflicts = _split_for_pull(result, name, state)
+
+    # For alpha_src, also show factor count (top-level dirs)
+    extra = ""
+    if name == "alpha_src":
+        local_factors = len({p.split("/")[0] for p in local.keys()})
+        remote_factors = len({p.split("/")[0] for p in remote.keys()})
+        extra = f"  (本地 {local_factors} 因子, 远端 {remote_factors} 因子)"
+
     info(f"  本地: {len(local)}  远端: {len(remote)}  "
          f"一致: {len(result.identical)}  待拉: {len(to_download)}  "
          f"跳过(DELETED/SUBMITTED): {len(skipped_state)}  "
-         f"冲突: {len(conflicts)}" + ("  [recompute]" if recompute else ""))
+         f"冲突: {len(conflicts)}" + ("  [recompute]" if recompute else "") + extra)
     if conflicts:
         warn(f"  ⚠ {len(conflicts)} 个文件 etag 不同,跳过(需手工解决:删本地或先 push)")
         for rel in conflicts[:5]:
