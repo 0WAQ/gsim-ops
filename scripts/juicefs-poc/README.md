@@ -2,7 +2,7 @@
 
 验证 JuiceFS 作为 alphalib 共享文件系统是否满足 gsim + ops 的使用模式。详细动机和迁移路径见 `.claude/plans.md` 的 "Alphalib Storage Backend Migration"。
 
-**第一轮 PoC 已通过 (2026-06-02)**,关键指标见底部"实测结果"。
+**两轮 PoC 已通过 (2026-06-02)**,本机能验证的全部完成。剩余项需要第二/第三台机器,见底部"下一步"。
 
 ## 拓扑(PoC 阶段)
 
@@ -61,6 +61,8 @@ export MINIO_ROOT_PASSWORD=<root-sk>
 | `03-format-mount.sh` | `juicefs format` + `juicefs mount --writeback` | `sudo -E bash 03-format-mount.sh` |
 | `04-verify-basic.sh` | 5 项基础测试(读写/flock/stat/可见性) | `bash 04-verify-basic.sh` |
 | `05-verify-memmap.sh` | alpha_feature 模式仿真 | `bash 05-verify-memmap.sh` |
+| `06-verify-git.sh` | Git on JuiceFS 500 提交基线 + ZFS 对照 | `bash 06-verify-git.sh` |
+| `07-verify-redis-failure.sh` | Redis 故障注入(stop/start,观察 IO 行为) | `sudo -E bash 07-verify-redis-failure.sh` |
 | `99-teardown.sh` | 卸载;`--purge` 才删数据 | `sudo -E bash 99-teardown.sh [--purge]` |
 
 挂载后 `/tank/vault/alphalib/` 是 root 拥有但 mode 777,wbai 用户可直接读写,不需要再 sudo。
@@ -78,14 +80,27 @@ export MINIO_ROOT_PASSWORD=<root-sk>
 | 100 行随机扫描 | 54 ms | ✅ |
 | 跨进程 reopen 读 | bit-level 一致 | ✅ |
 
-## 第二轮 TODO
+## 第二轮结果 (2026-06-02)
 
-- [ ] 完整 `ops check` 在 JuiceFS 上跑一个真实因子,PNL 与本地 bit-level 对比
-- [ ] `ops pack --date YYYYMMDD` 增量模式落地 + 量化 MinIO 上 chunk 增量(预期 ~4MB/天/因子)
-- [ ] 跨节点验证(第二台机器挂同一卷,验证 A 写 B 立刻可见)
-- [ ] flock 跨节点真锁(同上前提)
-- [ ] Redis 短暂挂掉:JuiceFS hang 行为 + 自动恢复
-- [ ] Git on JuiceFS 性能 —— Phase D 前置依赖,模拟几百因子量级 `git log/blame`
+| 验证项 | 结论 |
+|---|---|
+| **完整 `ops check` 跑真实因子** | ✅ `OPS_CONFIG=config.juicefs.yaml ops check` 全流水线通过(AlphaWbaiReversal),耗时 ~3.5min 持平本地。**暴露 bug**:state store 忽略 `-c` 参数,已记 `CLAUDE.md` tech debt |
+| **Git on JuiceFS 性能** | ✅ 500 commit 基线:JuiceFS commit 75ms (vs 本地 ZFS 21ms,3.5x),`git log/blame/status/diff` 全部 <250ms。**Phase D 共享工作区模式可行,不需要降级到 bare repo + clone** |
+| **Redis 故障注入** | ✅ 结论非常明确:**JuiceFS 不 hang,Redis 一停立刻 EIO**。所有 syscall(读/写/stat/unlink)全部失败,整个挂载点瘫。**Phase C 上线前必须配 Redis Sentinel 主从**,详见 `.claude/plans.md` 的 "Redis HA 部署" |
+| ops pack 增量模式 | ⏸ 设计完成,实施暂缓 —— 见 `.claude/plans.md` 的 "ops pack Incremental Mode" |
+| 跨节点验证 | ⏸ 等第二台机器 |
+
+## 下一步(交接给后续 session)
+
+按优先级:
+
+1. **修 `_default_state_path()` 接受 caller 的 config**(`ops/infra/store/__init__.py:11`,工程量小,独立可做,详见 `CLAUDE.md` Known Technical Debt)
+2. **跨节点验证**(等第二台机器):
+   - 把 Redis 改为监听 `0.0.0.0` + 设密码 + ACL,目前只绑 `127.0.0.1`
+   - 第二台机 `juicefs mount` 同一卷,验证 A 写 B 立刻可见 + flock 跨节点真锁
+3. **Redis Sentinel 部署**(等第三台机器,Phase C 硬前置):见 `.claude/plans.md` 的 "Redis HA 部署"
+4. **Phase C 全量迁入**:`juicefs sync` 把现有 `/mnt/storage/alphalib/` 灌进新 bucket,切 config,`ops sync push/pull` 退役
+5. **Phase D/E/F**:Git 接入、`.state` 简化、checkpoint 落地
 
 ## 失败回退
 
