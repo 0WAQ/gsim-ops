@@ -24,7 +24,7 @@ Feature checklist. Done items are kept for reference. See `docs/plans.md` for de
 - [x] `ops rm` - Soft-delete a factor (DELETED tombstone; `--force` drops local dump+feature)
 - [ ] `ops sync gc` - Reclaim remote files for DELETED factors (opt-in, separate from push/pull)
 - [ ] `ops factor` namespace consolidating add/rm/check/run/info/list (see `docs/plans.md`)
-- [ ] Daily incremental pack path (rows > 20251231; buffer / generational / zarr — design pending)
+- [ ] Daily incremental pack path (`ops pack --date YYYYMMDD`,设计已完成暂缓实施 — 详见 `.claude/plans.md` "ops pack Incremental Mode")
 - [ ] Alphalib storage backend migration (single JuiceFS mount + Redis metadata; Git runs on top of JuiceFS — see `.claude/plans.md`)
 - [ ] Factor registry, versioning, tags/categories
 - [ ] Enable/disable, archive/unarchive factors

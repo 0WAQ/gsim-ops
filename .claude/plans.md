@@ -285,7 +285,62 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 - 脚本: `scripts/juicefs-poc/`
 
 **关联 TODO**:
-- `ops pack` 增量模式(roadmap 别处提到)在 Phase C 之前完成更好,但 JuiceFS chunk diff 不强依赖它
+- `ops pack` 增量模式见下面独立章节"ops pack Incremental Mode";在 Phase C 之前完成更好,但 JuiceFS chunk diff 不强依赖它
 - Phase D 可以和 Phase C 并行,因为 Git 改造不依赖 JuiceFS 是否切完;但放在 C 之后做,因为要先验证 FUSE 上 git 的性能可接受(B-2 包含此项)
 - Phase C 完成后,`ops sync` 整个子命令可以删除或保留 `verify` 作为对账
 - PoC 期间用了 MinIO root key(暴露在过日志里),进 Phase C 前要旋转一次,并申请专用受限 key
+
+## ops pack Incremental Mode (Not Started)
+
+把 `ops pack` 从"全量重写 alpha_feature/{name}.{v}.npy"升级成"按需只覆写指定日期那一行"。这是 Phase 3 的 roadmap 项,设计已完成,工程量小但**暂缓实施**(2026-06-02 决定)。
+
+**为什么需要**:
+- 当前每次 `ops pack` 都重写整文件(170 MB/因子)。在 JuiceFS 上意味着所有 chunk 都脏化,全量上传,40x 浪费
+- 增量模式下 mmap('r+') 只写指定行 → 单 chunk(4 MB)脏化 → S3 增量 ~4 MB
+- 是 Phase E 切到 JuiceFS 后,日更场景成本的主要决定因素
+
+**为什么暂缓**:
+- 现有 `ops sync` 模型下,即使做了增量 pack,sync 那侧仍按文件级 size+mtime 比对,等大小判断会漏掉(等做完 JuiceFS 迁移再做才能真正吃到收益)
+- Phase B-2 第二轮 PoC 可以用一次性脚本量化 chunk 增量(不需要正式集成到 ops),数据足够支撑 Phase C 决策
+
+**已实现部分**:
+- `ops/services/pack/pack.py:164` 的 `pack_one_incremental(name, dates, config)` 已写好:`mmap('r+')` 覆写指定行,目标不存在则回退全量
+- 缺的只是 CLI 接入和 worker 路由
+
+**待做(总工程量 ~30 行代码 + 0.5 小时验证)**:
+
+1. **CLI 加 `--date YYYYMMDD`**(`ops/cli/pack.py`):
+   ```
+   ops pack --date 20260602                     # 所有有该日期 dump 的因子
+   ops pack --date 20260602 -f AlphaXxx         # 单因子单日期
+   ops pack --date 20260601,20260602            # 多日期,逗号分隔
+   ```
+   不支持 range / "last:N" 之类的复杂语法,先简单
+
+2. **互斥规则**:
+   - `--date` + `--force` → 报错(语义冲突)
+   - `--date` + `--factor` → 允许
+   - `--date` 无 `--factor` → 扫所有 `alpha_dump/Alpha*/{Y}/{M}/{date}*.npy` 存在的因子
+
+3. **service 层小重构**:`pack_one_incremental` 签名从 `(name, dates, config)` 改成 `(name, dates, alpha_dump, alpha_feature, alpha_src, date_to_idx, shape, delay, verify)`,和 `pack_one` 对齐。避免在 worker 子进程里重复 `load_universe()`
+
+4. **`_pack_worker` 加分支**:`dates is None ? pack_one : pack_one_incremental`,保留 `factor_lock` 包装(per-factor 串行,天然解决"同因子同天并发覆写"的竞争)
+
+5. **验证脚本**(在 JuiceFS PoC 环境跑一次,不入正式代码):
+   ```bash
+   B0=$(rclone size poc:alphalib-juicefs/ --json | jq .bytes)
+   ops pack -c config.juicefs.yaml --date 20251231 -f AlphaWbaiReversal
+   sleep 10  # writeback 上传
+   B1=$(rclone size poc:alphalib-juicefs/ --json | jq .bytes)
+   echo "delta = $((B1 - B0)) bytes"
+   ```
+   **预期 delta ≈ 4 MB(单 chunk),vs 全量 ~170 MB。这数字定 Phase C 成本估算的生死**
+
+**不打算做的**:
+- `--verify-only-touched-dates`:增量 sample 验证。增量本身简单(只覆写一行),出错概率低,verify 收益不大;默认行为可让用户用 `--no-verify` 加速
+- `PACK_L` 动态化:独立的 roadmap 项,和增量无关
+- range / "last:N" 等糖语法:用 cron + 单日期循环即可
+
+**触发条件**:
+- 立即做的前提:Phase D/E 准备启动,需要增量来压成本
+- 或者:有人开始关心日更全量重写的 S3 流量费用
