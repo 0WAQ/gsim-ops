@@ -255,7 +255,7 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | A | 修补 sync 短期可用 | 进行中,size-only bug 绕过,撑到长期方案落地 |
 | B | JuiceFS PoC | **第一轮完成 (2026-06-02)**,见下面"PoC 进展"。剩余项见 Phase B-2 |
 | B-2 | JuiceFS PoC 第二轮 | 真实 `ops check` 跑通、`ops pack` 增量模式 + chunk 增量量化、跨节点验证(等第二台)、Redis 故障注入、Git on JuiceFS 性能 |
-| C | 全量数据迁入 JuiceFS | `juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature / .state 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检) |
+| C | 全量数据迁入 JuiceFS | **前置:Redis HA 必须先上(Sentinel 或 TiKV),详见下方"Redis HA 部署"**。`juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature / .state 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检) |
 | D | alpha_src 接入 Git | 在 `/tank/vault/alphalib/alpha_src/` 初始化 Git 仓库,改造 `ops submit/resubmit` 调 `git add + commit`(加 flock),新增 `ops diff/log/blame` 命令 |
 | E | `.state` merge 逻辑简化 | 删掉"tied updated_at 留本地"补丁,改成"mtime 比较 + per-factor 文件锁";批量修改加全局 flock |
 | F | checkpoint 落地 | 按设计原则实现,默认放 JuiceFS,可再生的版本放本地 SSD |
@@ -272,7 +272,7 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | 完整 `ops check` 跑真实因子 | ✅ AlphaWbaiReversal 全流水线通过 (2026-06-02 第二轮),总耗时 ~3.5min 持平本地。暴露 bug:state store 忽略 `-c`(已记 CLAUDE.md tech debt) |
 | `ops pack` 增量模式 + chunk 增量量化 | ⏸ 留给 B-2 |
 | 跨节点验证 | ⏸ 留给 B-2(等第二台机器) |
-| Redis 故障注入 | ⏸ 留给 B-2 |
+| Redis 故障注入 | ✅ (2026-06-02 第二轮) 结论:**JuiceFS 不 hang,Redis 一停立刻 EIO**。所有 syscall(读/写/stat/unlink)全部失败,整个挂载点瘫。**Phase C 前置:必须上 Redis Sentinel 主从** |
 | Git on JuiceFS 性能 | ✅ 500 提交基线 (2026-06-02 第二轮): commit 75ms (vs ZFS 21ms),`git log/blame/status` 全部 <250ms。**Phase D Model A(共享工作区)可行,不需要降级到 Model B** |
 
 **PoC 拓扑**(本机单点):
@@ -289,6 +289,48 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 - Phase D 可以和 Phase C 并行,因为 Git 改造不依赖 JuiceFS 是否切完;但放在 C 之后做,因为要先验证 FUSE 上 git 的性能可接受(B-2 包含此项)
 - Phase C 完成后,`ops sync` 整个子命令可以删除或保留 `verify` 作为对账
 - PoC 期间用了 MinIO root key(暴露在过日志里),进 Phase C 前要旋转一次,并申请专用受限 key
+
+## Redis HA 部署(Phase C 前置,Not Started)
+
+PoC 第二轮 (2026-06-02) 的故障注入数据证明:**单 Redis 是 JuiceFS 集群的硬单点**。Redis 一停,所有节点的所有文件操作(读/写/stat/unlink)立刻 EIO,正在跑的 `ops check`/`pack`/用户脚本会直接崩。Phase C 上线前必须解决,否则一次 Redis 升级/OOM/systemd 重启就毁掉当天所有产出。
+
+**方案对比**:
+
+| 方案 | 故障切换时间 | 部署复杂度 | 资源占用 | 适合规模 |
+|---|---|---|---|---|
+| 单 Redis + RDB | 不可用(只能恢复数据,不恢复服务) | 极简 | 1 进程 | 仅 PoC |
+| **Redis Sentinel(主从 + 哨兵)** | ~10 秒自动 failover | 中等 | 2 Redis + 3 Sentinel,几百 MB 内存 | **3-10 台节点首选** |
+| Redis Cluster | 同上,分片 | 高 | ≥ 6 节点 | 数据量超百 GB 才需要 |
+| TiKV | 秒级,自带 HA | 高,3 节点起 | 重 | JuiceFS 官方推荐企业级方案 |
+
+**选 Sentinel 的理由**:
+- 我们 metadata 体量(几十万因子文件 + 状态)永远到不了需要 Cluster 分片的规模
+- TiKV 部署运维成本明显高于 Sentinel,边际收益不值
+- 10 秒 failover 窗口可接受 —— 用户脚本如果在这窗口里写入会拿到瞬时 EIO,需要 ops 这层做一次重试包装(放到 Phase E 一起做)
+
+**部署拓扑**(3 节点起,机器够就分散到不同物理机):
+
+```
+node1: redis-master  + sentinel
+node2: redis-replica + sentinel
+node3:                 sentinel    (轻量,可以是 ops 客户端机)
+```
+
+- Sentinel 必须 ≥ 3 个且分散在不同机器,否则脑裂时无法达成 quorum
+- master 和 replica 不能放同一台机,否则机器挂 = 主从同挂 = HA 失效
+- JuiceFS 元信息 URL 从 `redis://127.0.0.1:6379/1` 改成 `redis-sentinel://127.0.0.1:26379,host2:26379,host3:26379/mymaster/1`,JuiceFS 客户端会自动跟随 master 切换
+
+**待做**:
+1. 决定 3 台机器分配(目前只有 2 台,等第三台 → 或者临时把第三个 sentinel 放在 MinIO 服务器上)
+2. 写 Ansible/Shell 部署脚本 + 配置模板(`sentinel.conf` 的 `quorum=2`、`down-after-milliseconds=5000`、`failover-timeout=10000`)
+3. 故障演练:一次完整的 master kill → sentinel 选举 → replica 晋升 → JuiceFS 客户端自动重连 → 业务恢复
+4. RDB + AOF 持久化策略(防止双主同时挂时数据丢失)
+5. 监控:Sentinel 状态 + master 切换告警(挂到 Feishu 或 Prometheus)
+
+**前置依赖**:
+- 第三台机器到位(或 MinIO 那台兼任 sentinel)
+- 内网时钟同步正常(NTP),否则 Sentinel 选举会抖
+- 防火墙开 6379 / 26379
 
 ## ops pack Incremental Mode (Not Started)
 
