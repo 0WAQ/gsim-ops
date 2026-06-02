@@ -253,13 +253,39 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | Phase | 内容 | 备注 |
 |---|---|---|
 | A | 修补 sync 短期可用 | 进行中,size-only bug 绕过,撑到长期方案落地 |
-| B | JuiceFS PoC | 单机挂载 + 新 bucket + Redis,影子模式双写 1-2 周,验证 gsim 读写、ops pack 并发、文件锁行为 |
-| C | 全量数据迁入 JuiceFS | `juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature / .state 从现有 S3 导成 chunk 格式;切 config 指向 `/mnt/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检) |
-| D | alpha_src 接入 Git | 在 `/mnt/alphalib/alpha_src/` 初始化 Git 仓库,改造 `ops submit/resubmit` 调 `git add + commit`(加 flock),新增 `ops diff/log/blame` 命令 |
+| B | JuiceFS PoC | **第一轮完成 (2026-06-02)**,见下面"PoC 进展"。剩余项见 Phase B-2 |
+| B-2 | JuiceFS PoC 第二轮 | 真实 `ops check` 跑通、`ops pack` 增量模式 + chunk 增量量化、跨节点验证(等第二台)、Redis 故障注入、Git on JuiceFS 性能 |
+| C | 全量数据迁入 JuiceFS | `juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature / .state 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检) |
+| D | alpha_src 接入 Git | 在 `/tank/vault/alphalib/alpha_src/` 初始化 Git 仓库,改造 `ops submit/resubmit` 调 `git add + commit`(加 flock),新增 `ops diff/log/blame` 命令 |
 | E | `.state` merge 逻辑简化 | 删掉"tied updated_at 留本地"补丁,改成"mtime 比较 + per-factor 文件锁";批量修改加全局 flock |
 | F | checkpoint 落地 | 按设计原则实现,默认放 JuiceFS,可再生的版本放本地 SSD |
 
+**PoC 进展**(2026-06-02 第一轮):
+
+| 验证项 | 结果 |
+|---|---|
+| 基础读写(小文件 + 100MB) | ✅ 100MB 写 333ms (~300 MB/s),re-read 命中 cache 176ms |
+| flock 跨进程串行化 | ✅ 释放→获得间隔 5ms |
+| metadata 性能(stat 1000 文件) | ✅ 15ms,Redis ping 34µs |
+| **memmap 日增写一行** | ✅ **35ms/因子**,折合 677 因子顺序 pack ≈ 24s |
+| 跨进程可见性 | ✅ 写者退出后,新进程立刻读到一致内容 |
+| 完整 `ops check` 跑真实因子 | ⏸ 留给 B-2 |
+| `ops pack` 增量模式 + chunk 增量量化 | ⏸ 留给 B-2 |
+| 跨节点验证 | ⏸ 留给 B-2(等第二台机器) |
+| Redis 故障注入 | ⏸ 留给 B-2 |
+| Git on JuiceFS 性能 | ⏸ 留给 B-2,是 Phase D 前置依赖 |
+
+**PoC 拓扑**(本机单点):
+
+- 挂载点 `/tank/vault/alphalib/`(和现有 `/tank/vault/storage/` = `/mnt/storage/` 软链同级,不冲突)
+- 本地 Redis (`127.0.0.1:6379`,PoC 期单实例,生产化挪到 MinIO 那台)
+- 本地 cache `/tank/vault/juicefs-cache/`,500 GB 上限
+- MinIO 新 bucket `alphalib-juicefs`(独立于现有 bucket,失败回退零成本)
+- 凭证: 用 MinIO root key,通过环境变量 `MINIO_ROOT_USER/MINIO_ROOT_PASSWORD` 注入(rclone.conf 里的 `external-client` 是受限只读凭证,不够用)
+- 脚本: `scripts/juicefs-poc/`
+
 **关联 TODO**:
 - `ops pack` 增量模式(roadmap 别处提到)在 Phase C 之前完成更好,但 JuiceFS chunk diff 不强依赖它
-- Phase D 可以和 Phase C 并行,因为 Git 改造不依赖 JuiceFS 是否切完;但放在 C 之后做,因为要先验证 FUSE 上 git 的性能可接受
+- Phase D 可以和 Phase C 并行,因为 Git 改造不依赖 JuiceFS 是否切完;但放在 C 之后做,因为要先验证 FUSE 上 git 的性能可接受(B-2 包含此项)
 - Phase C 完成后,`ops sync` 整个子命令可以删除或保留 `verify` 作为对账
+- PoC 期间用了 MinIO root key(暴露在过日志里),进 Phase C 前要旋转一次,并申请专用受限 key
