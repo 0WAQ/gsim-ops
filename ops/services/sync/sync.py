@@ -78,16 +78,23 @@ def _merge_states(config: Config, s3: S3Client, pfx: str,
 # PLACEHOLDER_CHUNK_3
 
 
-def _split_for_push(result: DirDiff) -> tuple[list[str], list[str]]:
+def _split_for_push(result: DirDiff, *,
+                    force_overwrite: bool = False) -> tuple[list[str], list[str]]:
     """From a DirDiff, decide what to upload vs. what to flag as conflict.
 
     Upload: files only on local (new additions).
     Conflict: differ — we never automatically overwrite remote when etag
-    differs. User must manually resolve (delete remote or pull first).
+    differs, unless force_overwrite=True.
     `only_remote` is silently ignored on push (deletion is gc's job).
     """
     to_upload = list(result.only_local)
-    conflicts = list(result.differ)
+    conflicts: list[str] = []
+
+    if force_overwrite:
+        to_upload.extend(result.differ)
+    else:
+        conflicts = list(result.differ)
+
     to_upload.sort()
     conflicts.sort()
     return to_upload, conflicts
@@ -95,21 +102,23 @@ def _split_for_push(result: DirDiff) -> tuple[list[str], list[str]]:
 
 def _push_dir(name: str, local_root: Path, remote_prefix: str,
               s3: S3Client, *, library_id: str, dry_run: bool,
-              recompute: bool = False) -> int:
+              recompute: bool = False, force_overwrite: bool = False) -> int:
     """Diff one data dir between local and S3, upload missing/local-newer
     files, warn on conflicts. Returns number of failed uploads.
 
     `recompute=True` ignores the local etag cache for this walk (—deep).
+    `force_overwrite=True` uploads differ files too (--force-overwrite).
     """
     cache = etag_cache.load(library_id)
     local = walk_local(local_root, subdir=name, cache=cache,
                        recompute=recompute)
     remote = list_remote(s3, remote_prefix)
     result = diff(local, remote)
-    to_upload, conflicts = _split_for_push(result)
+    to_upload, conflicts = _split_for_push(result, force_overwrite=force_overwrite)
     info(f"  本地: {len(local)}  远端: {len(remote)}  "
          f"一致: {len(result.identical)}  待传: {len(to_upload)}  "
-         f"冲突: {len(conflicts)}" + ("  [recompute]" if recompute else ""))
+         f"冲突: {len(conflicts)}" + ("  [recompute]" if recompute else "")
+         + ("  [force-overwrite]" if force_overwrite else ""))
     if conflicts:
         warn(f"  ⚠ {len(conflicts)} 个文件 etag 不同,跳过(需手工解决:删远端或先 pull)")
         for rel in conflicts[:5]:
@@ -190,7 +199,7 @@ def _state_behind(local: dict, remote: dict) -> list[str]:
 
 
 def push(config: Config, *, dry_run: bool = False, force_state: bool = False,
-         deep: bool = False) -> int:
+         deep: bool = False, force_overwrite: bool = False) -> int:
     s3 = _make_s3(config)
     pfx = _pfx(config)
     library_id = config.library_id
@@ -217,10 +226,11 @@ def push(config: Config, *, dry_run: bool = False, force_state: bool = False,
                 info("  · 远端 state 不存在,跳过检查")
 
     for d in DATA_DIRS:
-        banner(f"push {d}" + (" (recompute)" if deep else ""))
+        banner(f"push {d}" + (" (recompute)" if deep else "")
+               + (" (force-overwrite)" if force_overwrite else ""))
         failed += _push_dir(d, getattr(config, d), f"{pfx}/{d}",
                             s3, library_id=library_id, dry_run=dry_run,
-                            recompute=deep)
+                            recompute=deep, force_overwrite=force_overwrite)
 
     banner("push state" + (" (force)" if force_state else " (merge)"))
     if force_state:
@@ -496,7 +506,8 @@ def run_sync(args) -> None:
         if action == "push":
             failed = push(config, dry_run=args.dry_run,
                           force_state=getattr(args, "force_state", False),
-                          deep=deep)
+                          deep=deep,
+                          force_overwrite=getattr(args, "force_overwrite", False))
         else:
             failed = pull(config, dry_run=args.dry_run, deep=deep)
         banner(f"{action} 汇总")

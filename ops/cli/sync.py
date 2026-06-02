@@ -29,6 +29,8 @@ Example:
         p.add_argument("--dry-run", action="store_true", help="只展示,不传输")
         p.add_argument("--force-state", action="store_true",
                        help="跳过 merge,用本地 state 直接覆盖远端(factor_state/metrics/datasources)")
+        p.add_argument("--force-overwrite", action="store_true",
+                       help="强制覆盖远端 differ 文件(etag 不同也传)")
         p.add_argument("--deep", action="store_true",
                        help="忽略本地 etag 缓存,强制重算所有本地 etag(慢)")
         p.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
