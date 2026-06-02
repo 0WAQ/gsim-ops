@@ -50,7 +50,7 @@ def run_backfill(args):
     dry_run: bool = args.dry_run
 
     config = Config.load(config_path)
-    store = default_store()
+    store = default_store(config)
 
     banner("存量回填" + (" (dry-run)" if dry_run else ""))
 

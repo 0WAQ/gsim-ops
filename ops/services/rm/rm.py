@@ -39,7 +39,7 @@ def _purge_artifacts(name: str, config: Config) -> list[str]:
 def run_rm(args) -> None:
     name: str = args.factor_name
     config: Config = Config.load(args.config_path)
-    store = default_store()
+    store = default_store(config)
 
     rec = store.get(name)
     if rec is None:

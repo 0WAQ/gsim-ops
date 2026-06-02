@@ -103,7 +103,7 @@ def run_health(args):
     scanner = LibraryScanner.from_config_path(args.config_path)
     factors = scanner.scan(refresh=args.refresh)
 
-    statuses = {r.name: r.status for r in default_store().list()}
+    statuses = {r.name: r.status for r in default_store(scanner.config).list()}
     factors = [f for f in factors if statuses.get(f.name) != FactorStatus.DELETED]
 
     if args.user:

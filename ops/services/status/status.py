@@ -1,4 +1,5 @@
 from ops.core.state import FactorStatus, FactorRecord
+from ops.infra.config import Config
 from ops.infra.store import default_store
 from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
 
@@ -43,7 +44,8 @@ def _print_detail(rec: FactorRecord) -> None:
 
 
 def run_status(args) -> None:
-    store = default_store()
+    config = Config.load(args.config_path)
+    store = default_store(config)
     name: str | None = args.name
     author: str | None = args.author
     status_filter: str | None = args.status

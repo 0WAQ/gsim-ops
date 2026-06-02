@@ -95,7 +95,7 @@ def _approve_one(rec: FactorRecord, config: Config, store) -> None:
 
 def run_approve(args) -> None:
     config: Config = Config.load(args.config_path)
-    store = default_store()
+    store = default_store(config)
 
     targets, skipped = _resolve_targets(args, store)
     if not targets:

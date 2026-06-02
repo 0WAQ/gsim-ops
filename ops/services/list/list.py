@@ -159,7 +159,7 @@ def apply_filters(factors: list[FactorInfo], filters: list[tuple[str, str, str]]
 def run_list(args):
     scanner = LibraryScanner.from_config_path(args.config_path)
     factors = scanner.scan(refresh=args.refresh)
-    records = {r.name: r for r in default_store().list()}
+    records = {r.name: r for r in default_store(scanner.config).list()}
     statuses = {name: r.status for name, r in records.items()}
 
     if args.user:

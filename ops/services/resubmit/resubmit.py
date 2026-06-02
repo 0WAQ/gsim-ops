@@ -77,7 +77,7 @@ def run_resubmit(args) -> None:
     config_path: Path = args.config_path
 
     config = Config.load(config_path)
-    store = default_store()
+    store = default_store(config)
 
     banner("因子重提交")
     found = _iter_dropbox_dirs(config, users, start, end, factor_name)

@@ -238,7 +238,7 @@ class CheckerPipeline:
             return "locked"
 
     def _run_one_locked(self, factor: AlphaMetadata) -> str:
-        store = default_store()
+        store = default_store(self.config)
         self._ensure_record(factor, store)
         check = CheckRecord(started_at=datetime.now().isoformat(timespec="seconds"))
         store.transition(factor.name, FactorStatus.CHECKING)
@@ -341,7 +341,7 @@ class CheckerPipeline:
 
     def run(self):
         banner("状态校验")
-        counts = reconcile(self.config, default_store())
+        counts = reconcile(self.config, default_store(self.config))
         summary = ", ".join(f"{k}={v}" for k, v in counts.items() if v)
         info(summary or "无需修复")
 

@@ -109,7 +109,7 @@ def run_submit(args):
     config_path: Path = args.config_path
 
     config = Config.load(config_path)
-    store = default_store()
+    store = default_store(config)
 
     banner("因子提交")
     found = _iter_dropbox_dirs(config, users, start, end, factor_name)

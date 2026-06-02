@@ -190,7 +190,7 @@ def _recheck_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
 
 def run_recheck(args) -> None:
     config: Config = Config.load(args.config_path)
-    store = default_store()
+    store = default_store(config)
 
     targets = _resolve_targets(args, store, config)
     if not targets:
