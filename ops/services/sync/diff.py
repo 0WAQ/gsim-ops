@@ -5,9 +5,9 @@ Lists both ends, computes per-directory diff. Identity is by S3 etag
 differ classification. The local etag is cached in `etag_cache.py` keyed
 on (rel, mtime, size) so steady-state syncs don't re-hash 482GB.
 
-mtime survives only as: (1) the cache invalidation key, and (2) the
-direction signal in `newer_side` when a `differ` entry needs a tie-break.
-The direction signal is a known-imperfect heuristic — see CLAUDE.md.
+mtime survives only as the cache invalidation key. Direction selection
+(which side overwrites the other on conflict) has been removed — sync
+never auto-overwrites when etag differs; user must manually resolve.
 """
 import hashlib
 import os
@@ -18,13 +18,6 @@ from tqdm import tqdm
 
 from ops.infra.s3 import S3Client, S3_MULTIPART_CHUNKSIZE, S3_MULTIPART_THRESHOLD
 from ops.services.sync import etag_cache
-
-
-# Cross-machine mtime drift tolerance (seconds). mtime no longer drives
-# identical vs. differ — etag does — but `newer_side` still uses mtime as
-# the direction heuristic for `differ` entries, and tolerance absorbs the
-# residual filesystem-quantization / S3-LastModified drift there.
-MTIME_TOLERANCE = 2.0
 
 
 @dataclass
@@ -163,27 +156,6 @@ def diff(local: dict[str, FileInfo],
     out.differ.sort()
     out.identical.sort()
     return out
-
-
-def newer_side(rel: str, d: DirDiff,
-               tolerance: float = MTIME_TOLERANCE) -> str:
-    """For a `differ` entry, return which side's mtime is newer.
-
-    Returns 'local' / 'remote' / 'tie'. **Known limitation**: mtime
-    reflects last-push-time after calibration, not last-production-time,
-    so cross-machine out-of-order pushes can pick the wrong winner. Sync
-    cannot resolve this without external version metadata (deferred,
-    see CLAUDE.md "Plans").
-    """
-    lo = d.local.get(rel)
-    ro = d.remote.get(rel)
-    if lo is None:
-        return "remote"
-    if ro is None:
-        return "local"
-    if abs(lo.mtime - ro.mtime) <= tolerance:
-        return "tie"
-    return "local" if lo.mtime > ro.mtime else "remote"
 
 
 def compute_s3_etag(path: Path,

@@ -23,7 +23,7 @@ from ops.infra.cache import cache_path
 from ops.services.sync import etag_cache
 from ops.services.sync.merge import MERGERS
 from ops.services.sync.diff import (
-    DirDiff, walk_local, list_remote, diff, newer_side,
+    DirDiff, walk_local, list_remote, diff,
 )
 from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
 
@@ -81,20 +81,15 @@ def _merge_states(config: Config, s3: S3Client, pfx: str,
 def _split_for_push(result: DirDiff) -> tuple[list[str], list[str]]:
     """From a DirDiff, decide what to upload vs. what to flag as conflict.
 
-    Upload: files only on local + differ-where-local-is-newer.
-    Conflict: differ where remote is newer or tie — we never overwrite
-    remote work that we don't have a known-newer version of.
+    Upload: files only on local (new additions).
+    Conflict: differ — we never automatically overwrite remote when etag
+    differs. User must manually resolve (delete remote or pull first).
     `only_remote` is silently ignored on push (deletion is gc's job).
     """
     to_upload = list(result.only_local)
-    conflicts: list[str] = []
-    for rel in result.differ:
-        side = newer_side(rel, result)
-        if side == "local":
-            to_upload.append(rel)
-        else:
-            conflicts.append(rel)
+    conflicts = list(result.differ)
     to_upload.sort()
+    conflicts.sort()
     return to_upload, conflicts
 
 
@@ -116,7 +111,7 @@ def _push_dir(name: str, local_root: Path, remote_prefix: str,
          f"一致: {len(result.identical)}  待传: {len(to_upload)}  "
          f"冲突: {len(conflicts)}" + ("  [recompute]" if recompute else ""))
     if conflicts:
-        warn(f"  ⚠ {len(conflicts)} 个文件远端更新或 mtime 持平,跳过避免覆盖")
+        warn(f"  ⚠ {len(conflicts)} 个文件 etag 不同,跳过(需手工解决:删远端或先 pull)")
         for rel in conflicts[:5]:
             highlight(f"    ≠ {name}/{rel}")
         if len(conflicts) > 5:
@@ -287,24 +282,17 @@ def _split_for_pull(result: DirDiff, subdir: str,
     """From a DirDiff, decide what to download, what to skip due to state,
     and what to flag as conflict.
 
-    Download: only_remote + differ-where-remote-is-newer, restricted to
-    factors whose status is not DELETED / SUBMITTED. Tombstones and
-    in-staging factors should never produce local data via pull.
-    Conflict: differ where local is newer or tie — pull should not
-    overwrite local edits that haven't been pushed.
+    Download: only_remote (new additions), restricted to factors whose
+    status is not DELETED / SUBMITTED. Tombstones and in-staging factors
+    should never produce local data via pull.
+    Conflict: differ — we never automatically overwrite local when etag
+    differs. User must manually resolve (delete local or push first).
     """
     to_download: list[str] = []
     skipped_state: list[str] = []
-    conflicts: list[str] = []
+    conflicts = list(result.differ)
 
     candidates = list(result.only_remote)
-    for rel in result.differ:
-        side = newer_side(rel, result)
-        if side == "remote":
-            candidates.append(rel)
-        else:
-            conflicts.append(rel)
-
     for rel in candidates:
         name = _extract_factor_name(rel, subdir)
         status = _factor_status(state, name)
@@ -315,6 +303,7 @@ def _split_for_pull(result: DirDiff, subdir: str,
 
     to_download.sort()
     skipped_state.sort()
+    conflicts.sort()
     return to_download, skipped_state, conflicts
 
 
@@ -335,7 +324,7 @@ def _pull_dir(name: str, local_root: Path, remote_prefix: str,
          f"跳过(DELETED/SUBMITTED): {len(skipped_state)}  "
          f"冲突: {len(conflicts)}" + ("  [recompute]" if recompute else ""))
     if conflicts:
-        warn(f"  ⚠ {len(conflicts)} 个文件本地更新或 mtime 持平,跳过避免覆盖")
+        warn(f"  ⚠ {len(conflicts)} 个文件 etag 不同,跳过(需手工解决:删本地或先 push)")
         for rel in conflicts[:5]:
             highlight(f"    ≠ {name}/{rel}")
         if len(conflicts) > 5:
@@ -490,9 +479,8 @@ def verify(config: Config, *, deep: bool = False) -> int:
             for rel in result.differ[:10]:
                 lo = result.local[rel]
                 ro = result.remote[rel]
-                side = newer_side(rel, result)
                 highlight(f"    ≠ {rel}  local={lo.size}/{lo.etag[:8]}  "
-                          f"remote={ro.size}/{ro.etag[:8]}  newer={side}")
+                          f"remote={ro.size}/{ro.etag[:8]}")
             if len(result.differ) > 10:
                 highlight(f"    … 另 {len(result.differ) - 10} 个")
         total_bad += (len(result.only_local) + len(result.only_remote)
