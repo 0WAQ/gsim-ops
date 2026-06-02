@@ -159,6 +159,7 @@ AlphaXxx/
 - **Debug residual**: `utils/func.py` has a `debug()` with infinite loop
 - **Feishu credentials hardcoded**: `infra/notify/feishu_send.py` — move to config/env later
 - **`core/alpha/metadata.py` has I/O**: `_modify_always()`, `save()`, `get_v2npy_files()` — extract to services/infra
+- **`-c`/`--config-path` 被 state store 忽略**: `ops/infra/store/__init__.py:11` 的 `_default_state_path()` 写死 `Config.load(get_default_config_path())`,不接受 caller 传入的 config。后果:任何 subcommand 用 `-c other.yaml` 时,state 仍然走默认 config 的 `library_id`,跨 library 操作会串味。Workaround: `OPS_CONFIG=other.yaml` 同步设置。**修法**: `_default_state_path(config: Config) -> Path`,调用方从已 load 的 config 传进来,删除内部的 `Config.load`
 
 ## Plans & Roadmap
 

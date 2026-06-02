@@ -269,11 +269,11 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | metadata 性能(stat 1000 文件) | ✅ 15ms,Redis ping 34µs |
 | **memmap 日增写一行** | ✅ **35ms/因子**,折合 677 因子顺序 pack ≈ 24s |
 | 跨进程可见性 | ✅ 写者退出后,新进程立刻读到一致内容 |
-| 完整 `ops check` 跑真实因子 | ⏸ 留给 B-2 |
+| 完整 `ops check` 跑真实因子 | ✅ AlphaWbaiReversal 全流水线通过 (2026-06-02 第二轮),总耗时 ~3.5min 持平本地。暴露 bug:state store 忽略 `-c`(已记 CLAUDE.md tech debt) |
 | `ops pack` 增量模式 + chunk 增量量化 | ⏸ 留给 B-2 |
 | 跨节点验证 | ⏸ 留给 B-2(等第二台机器) |
 | Redis 故障注入 | ⏸ 留给 B-2 |
-| Git on JuiceFS 性能 | ⏸ 留给 B-2,是 Phase D 前置依赖 |
+| Git on JuiceFS 性能 | ✅ 500 提交基线 (2026-06-02 第二轮): commit 75ms (vs ZFS 21ms),`git log/blame/status` 全部 <250ms。**Phase D Model A(共享工作区)可行,不需要降级到 Model B** |
 
 **PoC 拓扑**(本机单点):
 

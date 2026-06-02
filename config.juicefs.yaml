@@ -1,0 +1,110 @@
+# JuiceFS PoC config.
+#
+# 把 alphalib 五条数据路径(alpha_src / alpha_dump / alpha_pnl / alpha_feature /
+# staging)指向 JuiceFS 挂载点 /tank/vault/alphalib,其它路径(dropbox / gsim /
+# /datasvc)保持本地。recycle 也放进 JuiceFS,保持入库链路全在同一卷上。
+#
+# 用法:uv run ops <cmd> -c config.juicefs.yaml ...
+# 不要拿来跑生产 —— sync 段被注释掉了,且仅供 JuiceFS PoC 第二轮使用。
+
+users:
+  wbai: wenbo@graceim.ai
+  chaoqun: chaoqun@graceim.ai
+  mhe: muyang@graceim.ai
+
+# 基础路径变量
+vars:
+  gsim_home: /usr/local/gsim
+  storage: /mnt/storage
+  workspace: /home/wbai/alpha
+  alphalib_root: /tank/vault/alphalib   # JuiceFS 挂载点
+
+# 路径配置
+path:
+  dropbox_path: ${storage}/dropbox/
+  pnl_prod_path: ${gsim_home}/pnl_prod
+  pnl_pool_path: ${gsim_home}/pnl_pool
+  pnl_alphalib: ${alphalib_root}/alpha_pnl
+  python_path: ${gsim_home}/.venv/bin/python
+
+  pnl_path: ${workspace}/dropbox/pnl
+  alpha_path: ${workspace}/dropbox/alpha
+  checkpoint_path: ${workspace}/dropbox/checkpoint
+  nio_data_path: /datasvc/data/cc_2025
+
+  # 以下五条 + recycle 全部指向 JuiceFS
+  alpha_src: ${alphalib_root}/alpha_src
+  alpha_dump: ${alphalib_root}/alpha_dump
+  alpha_pnl: ${alphalib_root}/alpha_pnl
+  alpha_feature: ${alphalib_root}/alpha_feature
+  staging: ${alphalib_root}/staging
+  recycle: ${alphalib_root}/recycle
+
+# 脚本
+script:
+  run_script: ${gsim_home}/run_cp.py
+  simsummary_script: ${gsim_home}/tools/simsummary.py
+  bcorr_script: ${gsim_home}/dataops/bcorr
+  feishu_script: /home/wbai/gsim-ops/jiance/feishu_send.py
+
+backtest:
+  stats: StatsBench
+  thres: 90
+  index_ret: aindexeodprices.s_dq_pctchange_000852
+
+# checker
+checker:
+  compliance:
+    enabled: true
+    max_position_pct: 0.05
+    min_total_stocks: 100
+    min_long_stocks: 50
+    min_short_stocks: 50
+  checkpoint:
+    enabled: true
+  correlation:
+    enabled: true
+    ret%: 10.0
+    tvr%: 40.0
+    shrp: 2.0
+    corr_threshold: 0.7
+
+# 邮件通知 — PoC 不发邮件,避免误打扰
+notification:
+  summary_emails: []
+  send_author_email: false
+
+# 作者邮箱
+authors:
+  wbai:
+    name: wbai
+    email: wenbo@graceim.ai
+  chaoqun:
+    name: chaoqun
+    email: chaoqun@graceim.ai
+  mhe:
+    name: mhe
+    email: muyang@graceim.ai
+  lzhang:
+    name: lzhang
+    email: linghao@graceim.ai
+  fguo:
+    name: fguo
+    email: fubin@graceim.ai
+  jzhang:
+    name: jzhang
+    email: junjie@graceim.ai
+
+# 运行模式
+mode:
+  max_workers: 4              # PoC 期降低并发,方便观察 IO 行为
+  dry_run: false
+  timeout: 1800
+  dates:
+    - '20251030'
+
+# sync 段 PoC 期不启用 —— JuiceFS 直接接管了"多机共享"职责
+# 但保留 library_id 用来隔离 ~/.cache/ops/lib/ 下的 state 文件,
+# 防止和生产 alphalib(同名 parent.name=alphalib)共用 factor_state.json
+sync:
+  library_id: alphalib-juicefs
