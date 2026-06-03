@@ -52,6 +52,9 @@ $MARK_BEGIN
 bind 0.0.0.0 -::1
 protected-mode yes
 requirepass $PASS_VAL
+# AOF: 防 redis 重启丢 metadata (JuiceFS 元数据全在 redis 里,丢了 = S3 chunk 全废)
+appendonly yes
+appendfsync everysec
 $MARK_END
 EOF
 unset PASS_VAL

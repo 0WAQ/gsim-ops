@@ -46,22 +46,23 @@ ensure_member() {
   info "  + $user -> $grp"
 }
 
-apply_dir() {
+# 只设顶层目录的 owner/mode/setgid。内层文件 ownership 交给具体业务流程:
+#   新建因子 = ops/submit
+#   数据迁移 = 05-migrate.sh (保留作者 uid, 只标 group)
+# 这里 recursive chown 会把作者强制变 root,毁掉 alpha_src 权限模型。
+apply_top_dir() {
   local d=$1 owner=$2 mode=$3
   [[ -d "$d" ]] || { info "  skip $d (不存在)"; return; }
-  sudo setfacl -R -b "$d" 2>/dev/null || true
-  sudo setfacl -R -k "$d" 2>/dev/null || true
-  sudo chown -R "$owner" "$d"
-  sudo chmod -R "$mode" "$d"
-  sudo find "$d" -type d -exec chmod g+s {} +
-  info "  $d  ($owner $mode + setgid)"
+  sudo chown "$owner" "$d"
+  sudo chmod "$mode" "$d"
+  sudo chmod g+s "$d"
+  info "  $d  ($owner $mode setgid, top-level only)"
 }
 
 info "[1/4] 本地 sidecar $JFS_LOCAL_DIR"
 sudo mkdir -p "$JFS_LOCAL_DIR"
 for d in "${LOCAL_DIRS[@]}"; do sudo mkdir -p "$JFS_LOCAL_DIR/$d"; done
-sudo chown -R "$REAL_USER:$REAL_GROUP" "$JFS_LOCAL_DIR"
-sudo chmod -R u=rwX,g=rwX,o=rX "$JFS_LOCAL_DIR"
+# 顶层 owner/mode 留给 [4/4] apply_top_dir 统一管,不在这里 -R 递归避免毁数据。
 
 info "[2/4] 挂载点里 ${LOCAL_DIRS[*]} 改 symlink"
 for d in "${LOCAL_DIRS[@]}"; do
@@ -107,15 +108,15 @@ info "[4/4] 应用权限"
 # JFS 顶层
 sudo chown "root:$GRP_DATA" "$JFS_MOUNT"; sudo chmod 2755 "$JFS_MOUNT"
 info "  $JFS_MOUNT  (root:$GRP_DATA 2755)"
-apply_dir "$JFS_MOUNT/alpha_src"     "root:$GRP_CORE" "u=rwX,g=rX,o="
-apply_dir "$JFS_MOUNT/alpha_pnl"     "root:$GRP_DATA" "u=rwX,g=rwX,o=rX"
-apply_dir "$JFS_MOUNT/alpha_feature" "root:$GRP_DATA" "u=rwX,g=rwX,o=rX"
+apply_top_dir "$JFS_MOUNT/alpha_src"     "root:$GRP_CORE" 2750
+apply_top_dir "$JFS_MOUNT/alpha_pnl"     "root:$GRP_DATA" 2775
+apply_top_dir "$JFS_MOUNT/alpha_feature" "root:$GRP_DATA" 2775
 
 # 本地 sidecar 顶层
 sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR"; sudo chmod 2755 "$JFS_LOCAL_DIR"
 info "  $JFS_LOCAL_DIR  (root:$GRP_DATA 2755)"
-apply_dir "$JFS_LOCAL_DIR/staging"    "root:$GRP_CORE" "u=rwX,g=rwX,o="
-apply_dir "$JFS_LOCAL_DIR/alpha_dump" "root:$GRP_DATA" "u=rwX,g=rwX,o=rX"
+apply_top_dir "$JFS_LOCAL_DIR/staging"    "root:$GRP_CORE" 2770
+apply_top_dir "$JFS_LOCAL_DIR/alpha_dump" "root:$GRP_DATA" 2775
 
 # recycle: sticky 顶层, 子目录(嵌套一层 unixId)按用户单独 chown
 RECYCLE="$JFS_LOCAL_DIR/recycle"

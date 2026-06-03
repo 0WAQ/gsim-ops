@@ -202,10 +202,34 @@ sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR/alpha_dump";   sudo chmod 2775 "$JFS
 sudo chown root:root        "$JFS_LOCAL_DIR/recycle";      sudo chmod 1755 "$JFS_LOCAL_DIR/recycle"
 info "  $JFS_LOCAL_DIR/{alpha_dump,staging,recycle} 就绪"
 
-info "==> [6/6] 验证挂载点"
+info "==> [6/6] 验证挂载点 + sidecar 一致性"
 require_mountpoint "$JFS_MOUNT"
 info "  $JFS_MOUNT mounted"
 ls "$JFS_MOUNT" | sed 's/^/    /'
+
+# JFS 里 alpha_dump/staging/recycle 是主节点 02-layout 建的 symlink,
+# target 是绝对路径 (主节点的 $JFS_LOCAL_DIR/*)。本机 $JFS_LOCAL_DIR
+# 必须和主节点完全一致,否则 symlink dangling = 业务路径全废。
+SIDECAR_OK=1
+for d in alpha_dump staging recycle; do
+  L="$JFS_MOUNT/$d"
+  if [[ ! -L "$L" ]]; then
+    warn "  $d 不是 symlink (主节点没跑 02-layout,或卷里还没建好)"
+    continue
+  fi
+  expected="$JFS_LOCAL_DIR/$d"
+  actual=$(readlink "$L")
+  if [[ "$actual" != "$expected" ]]; then
+    warn "  $L -> $actual"
+    warn "    但本机 JFS_LOCAL_DIR=$JFS_LOCAL_DIR (期望 $expected)"
+    warn "    跨节点必须一致:改 $HOST_ENV 的 JFS_LOCAL_DIR 后重跑 join.sh"
+    SIDECAR_OK=0
+  elif [[ ! -d "$L/" ]]; then
+    warn "  $L symlink dangling: 本机缺 $expected"
+    SIDECAR_OK=0
+  fi
+done
+(( SIDECAR_OK )) && info "  sidecar symlinks 一致"
 
 echo
 info "DONE. 跨节点挂载就绪。"

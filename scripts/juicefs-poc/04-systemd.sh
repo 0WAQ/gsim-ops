@@ -56,7 +56,9 @@ ExecStart=$JUICEFS_BIN mount \\
   --writeback \\
   --background \\
   $JFS_META_URL $JFS_MOUNT
-ExecStop=$JUICEFS_BIN umount $JFS_MOUNT
+# 三级 fallback: 标准 umount → fusermount lazy → umount -l
+# 防有进程持有 mount 时卡 deactivating。前两步失败也继续 (- 前缀 + bash || 链)。
+ExecStop=/bin/bash -c '$JUICEFS_BIN umount $JFS_MOUNT 2>/dev/null || /bin/fusermount -uz $JFS_MOUNT 2>/dev/null || /bin/umount -l $JFS_MOUNT 2>/dev/null || true'
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=60

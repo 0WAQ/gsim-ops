@@ -52,13 +52,23 @@ else
 fi
 
 info "[3/4] juicefs format (幂等)"
-juicefs format \
-  --storage minio \
-  --bucket "${MINIO_ENDPOINT}/${JFS_BUCKET}" \
-  --access-key "$MINIO_ACCESS_KEY" \
-  --secret-key "$MINIO_SECRET_KEY" \
-  "$JFS_META_URL" \
-  "$JFS_NAME"
+# 已 format 过就跳,避开 --access-key/--secret-key 进 ps cmdline 二次暴露。
+# 第一次跑时 redis 还没加密(03 之后才有),juicefs status 不带 auth 也能查;
+# 跑过 03 后 status 会 NOAUTH,说明卷在 — 也跳。
+PROBE_OUT=$(juicefs status "$JFS_META_URL" 2>&1 || true)
+if   echo "$PROBE_OUT" | grep -q '"Name"'; then
+  info "  已 format,跳过"
+elif echo "$PROBE_OUT" | grep -qiE 'noauth|wrong[ -]?pass'; then
+  info "  redis 已加密 (03 跑过), 卷应已存在, 跳过 format"
+else
+  juicefs format \
+    --storage minio \
+    --bucket "${MINIO_ENDPOINT}/${JFS_BUCKET}" \
+    --access-key "$MINIO_ACCESS_KEY" \
+    --secret-key "$MINIO_SECRET_KEY" \
+    "$JFS_META_URL" \
+    "$JFS_NAME"
+fi
 
 info "[4/4] 临时挂载 $JFS_MOUNT"
 if [[ ! -d "$JFS_MOUNT" ]]; then
