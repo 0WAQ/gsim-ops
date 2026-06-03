@@ -56,6 +56,7 @@ export MINIO_ROOT_PASSWORD=<root-sk>
 | `07-verify-redis-failure.sh` | Redis 故障注入 |
 | `08-relocate-local-dirs.sh` | `alpha_dump / staging / recycle` 改 symlink → 本地 sidecar |
 | `09-setup-perms.sh` | 应用权限模型(见下) |
+| `10-systemd-unit.sh` | 写 `juicefs-alphalib.service`,开机自挂(依赖 redis-server) |
 | `99-teardown.sh` | 卸载(`--purge` 删数据) |
 
 ## 验证结果 (2026-06-02)
@@ -107,10 +108,9 @@ JFS  /tank/vault/alphalib/        root:alpha-data 2755
 
 - [x] PoC 两轮通过(基础 IO / memmap / git / Redis 故障)
 - [x] 08 sidecar 改 symlink
-- [x] 09 重写为 setgid + umask 模型,不依赖 ACL
-- [ ] 09 重跑一次(应用新规则到 alphalib.local)
-- [ ] 装 `/etc/profile.d/ops-umask.sh`
-- [ ] Step 2 持久化(systemd unit for redis-server + JuiceFS .mount unit)
+- [x] 09 权限模型(setgid + umask,无 ACL)
+- [x] 装 `/etc/profile.d/ops-umask.sh`
+- [ ] 10 systemd unit(脚本写好,待 install + 重启验证)
 - [ ] 跨节点验证(等第二台机器)
 - [ ] Redis Sentinel(等第三台机器)
 - [ ] 全量数据迁入
