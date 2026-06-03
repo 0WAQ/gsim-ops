@@ -3,6 +3,8 @@
 #
 # - 依赖 redis-server.service (Requires + After):redis 没起来不挂,避免 EIO
 # - ExecStop=juicefs umount 触发 writeback cache 刷盘,防止断电丢数据
+# - 如果 /etc/juicefs/alphalib.env 存在,通过 EnvironmentFile 注入 META_PASSWORD,
+#   URL 里不带密码(防止 ps 泄露)
 # - 参数来自 00-config.sh,本脚本生成 unit 文件,不写死路径
 #
 # 幂等。可重跑覆盖。
@@ -16,17 +18,37 @@ JUICEFS_BIN="$(command -v juicefs)"
 
 UNIT_NAME="juicefs-${JFS_NAME}.service"
 UNIT_PATH="/etc/systemd/system/$UNIT_NAME"
+ENV_FILE="/etc/juicefs/${JFS_NAME}.env"
+
+# 跨节点:依赖 redis-server.service 只在 redis 本机有意义。
+# 默认开,如果 JFS_META_URL 指向远端(127.0.0.1 / localhost 之外的 host),
+# 用户可设 JFS_REDIS_LOCAL=0 关掉这条依赖。
+JFS_REDIS_LOCAL="${JFS_REDIS_LOCAL:-1}"
+
+REQ_LINE=""
+AFTER_LINE="After=network-online.target"
+if [[ "$JFS_REDIS_LOCAL" == "1" ]]; then
+  REQ_LINE="Requires=redis-server.service"
+  AFTER_LINE="After=network-online.target redis-server.service"
+fi
+
+ENV_LINE=""
+if sudo test -f "$ENV_FILE"; then
+  ENV_LINE="EnvironmentFile=$ENV_FILE"
+  echo "  检测到 $ENV_FILE,将通过 EnvironmentFile 注入 META_PASSWORD"
+fi
 
 echo "[1/4] 渲染 unit -> $UNIT_PATH"
 sudo tee "$UNIT_PATH" >/dev/null <<EOF
 [Unit]
 Description=JuiceFS mount $JFS_MOUNT
-After=network-online.target redis-server.service
+$AFTER_LINE
 Wants=network-online.target
-Requires=redis-server.service
+$REQ_LINE
 
 [Service]
 Type=forking
+$ENV_LINE
 ExecStartPre=/bin/mkdir -p $JFS_MOUNT
 ExecStart=$JUICEFS_BIN mount \\
   --cache-dir=$JFS_CACHE_DIR \\

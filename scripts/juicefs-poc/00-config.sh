@@ -34,10 +34,10 @@ export MINIO_SECRET_KEY="${MINIO_ROOT_PASSWORD:-${MINIO_SECRET_KEY:-$(_rclone_ge
 export RCLONE_PROFILE
 
 if [[ -z "$MINIO_ENDPOINT" || -z "$MINIO_ACCESS_KEY" || -z "$MINIO_SECRET_KEY" ]]; then
-  echo "error: MinIO credentials not found." >&2
-  echo "  set env vars: MINIO_ENDPOINT / MINIO_ROOT_USER / MINIO_ROOT_PASSWORD" >&2
-  echo "  or fill in:   $RCLONE_CONF [$RCLONE_PROFILE]" >&2
-  exit 1
+  # 不再 exit。client-only 节点(mount 不需要 S3 凭证,只 02-prepare/03-format 需要)
+  # 让那些脚本自己检查。这里只 warn 一下。
+  echo "warn: MinIO credentials not set (env vars or $RCLONE_CONF [$RCLONE_PROFILE])." >&2
+  echo "      02-prepare.sh / 03-format-mount.sh 需要才会 hard fail。" >&2
 fi
 
 # ---- JuiceFS PoC 参数 ----

@@ -5,6 +5,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./00-config.sh
 
+if [[ -z "$MINIO_ENDPOINT" || -z "$MINIO_ACCESS_KEY" || -z "$MINIO_SECRET_KEY" ]]; then
+  echo "ERROR: 03-format 需要 MinIO 凭证(juicefs format 要写 storage 配置)。" >&2
+  echo "  client-only 节点不应该跑这个脚本,只跑挂载用 systemd unit (10-systemd-unit.sh)。" >&2
+  exit 1
+fi
+
 BUCKET_URL="${MINIO_ENDPOINT}/${JFS_BUCKET}"
 
 echo "[1/3] formatting JuiceFS volume '$JFS_NAME'..."

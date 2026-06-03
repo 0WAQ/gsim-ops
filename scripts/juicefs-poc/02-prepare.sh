@@ -6,6 +6,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./00-config.sh
 
+# 这里真用 MinIO 凭证,缺一不可
+if [[ -z "$MINIO_ENDPOINT" || -z "$MINIO_ACCESS_KEY" || -z "$MINIO_SECRET_KEY" ]]; then
+  echo "ERROR: 02-prepare 需要 MinIO 凭证。设 MINIO_ROOT_USER/MINIO_ROOT_PASSWORD 或 rclone.conf" >&2
+  exit 1
+fi
+
 # 写一份临时 rclone 配置,用 trap 兜底清理
 TMP_CONF="$(mktemp -t juicefs-poc-rclone-XXXXXX.conf)"
 trap 'rm -f "$TMP_CONF"' EXIT
