@@ -55,7 +55,7 @@ info "==> [1/5] juicefs client"
 if command -v juicefs >/dev/null; then
   info "  已装: $(juicefs version | head -1)"
 else
-  JFS_CLIENT_ONLY=1 bash ./bootstrap.sh install
+  JFS_CLIENT_ONLY=1 sudo -E bash ./00-install.sh
 fi
 
 info "==> [2/5] 密码 -> $ENV_FILE"
@@ -87,7 +87,7 @@ sudo bash -c ". $ENV_FILE && redis-cli -h $META_HOST -p $META_PORT -a \"\$META_P
 info "  PONG"
 
 info "==> [4/5] 渲染 unit + start"
-JFS_META_URL="$META_URL" JFS_REDIS_LOCAL=0 sudo -E bash ./bootstrap.sh systemd >/dev/null
+JFS_META_URL="$META_URL" JFS_REDIS_LOCAL=0 sudo -E bash ./04-systemd.sh >/dev/null
 if systemctl is-active --quiet "$SVC"; then
   info "  $SVC 已 running"
 else

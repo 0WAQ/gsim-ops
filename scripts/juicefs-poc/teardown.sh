@@ -23,7 +23,7 @@ fi
 
 if ! $PURGE; then
   info "[2/2] PRESERVE: 卷 + bucket + cache 都保留"
-  echo "  重新挂载: sudo systemctl start $SVC  (或 bootstrap.sh provision)"
+  echo "  重新挂载: sudo systemctl start $SVC  (或重跑 01-provision.sh)"
   echo "  彻底销毁: 重跑加 --purge"
   exit 0
 fi
