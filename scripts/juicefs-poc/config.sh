@@ -31,6 +31,13 @@ fi
 export JFS_NAME="${JFS_NAME:-alphalib}"
 export JFS_BUCKET="${JFS_BUCKET:-alphalib-juicefs}"
 export JFS_META_URL="${JFS_META_URL:-redis://127.0.0.1:6379/0}"
+
+# Per-host 路径覆盖:/tank/vault 只在 160 (ZFS pool) 上有。
+# /etc/juicefs-poc.env 里直接赋值即可:JFS_MOUNT=/xxx / JFS_LOCAL_DIR=/yyy / JFS_CACHE_DIR=/zzz。
+# set -a 让文件里的裸赋值自动 export;文件值覆盖下面的 hardcoded 默认。
+if [[ -f /etc/juicefs-poc.env ]]; then
+  set -a; source /etc/juicefs-poc.env; set +a
+fi
 export JFS_MOUNT="${JFS_MOUNT:-/tank/vault/alphalib}"
 export JFS_LOCAL_DIR="${JFS_LOCAL_DIR:-${JFS_MOUNT}.local}"
 export JFS_CACHE_DIR="${JFS_CACHE_DIR:-/tank/vault/juicefs-cache}"

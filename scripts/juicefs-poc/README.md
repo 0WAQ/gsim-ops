@@ -49,14 +49,33 @@ verify_memmap.py    alpha_feature memmap 仿真,verify.sh memmap 调
 | `JFS_NAME` | `alphalib` | 卷名;决定 unit 名 `juicefs-<name>.service` 和 env 文件名 |
 | `JFS_BUCKET` | `alphalib-juicefs` | MinIO bucket |
 | `JFS_MOUNT` | `/tank/vault/alphalib` | 挂载点 |
-| `JFS_LOCAL_DIR` | `/tank/vault/alphalib.local` | 本地 sidecar(每机一份,不进 JFS) |
+| `JFS_LOCAL_DIR` | `${JFS_MOUNT}.local` | 本地 sidecar(每机一份,不进 JFS) |
 | `JFS_CACHE_DIR` | `/tank/vault/juicefs-cache` | 本地 chunk cache |
 | `JFS_CACHE_SIZE_MB` | `512000` | cache 上限(500 GB) |
 | `JFS_META_URL` | `redis://127.0.0.1:6379/0` | client 节点覆盖为主节点 IP |
 | `JFS_REDIS_LOCAL` | `1` | 0 = unit 不依赖本地 redis-server.service(给 join 用) |
 | `JFS_CLIENT_ONLY` | `0` | 1 = `00-install.sh` 跳过 redis(给 join 用) |
 
-**MinIO 凭证只在 `01-provision.sh` 需要**。挂载、AUTH、跨节点全程不用。
+### Per-host 路径覆盖
+
+`/tank/vault/...` 只在 160 (ZFS pool) 上存在,其他节点磁盘布局可能完全不同。
+`config.sh` 自动 source `/etc/juicefs-poc.env`,文件里的值覆盖默认。格式:
+
+```bash
+# /etc/juicefs-poc.env  (mode 644, owned by root)
+JFS_MOUNT=/mnt/jfs/alphalib
+JFS_CACHE_DIR=/mnt/jfs/cache
+JFS_LOCAL_DIR=/mnt/jfs/alphalib.local
+```
+
+Client 节点首次跑 `join.sh` 必须带 `--mount / --cache`(`--local` 可省,默认 `<mount>.local`),
+join.sh 会把它们写进 `/etc/juicefs-poc.env`,之后再跑可省略。
+
+主节点想用非默认路径同理:手写 `/etc/juicefs-poc.env`,然后从 `00-install.sh` 起步。
+
+### MinIO 凭证
+
+只在 `01-provision.sh` 需要。挂载、AUTH、跨节点全程不用。
 环境变量优先级:`MINIO_ROOT_USER/PASSWORD` > `MINIO_ACCESS_KEY/SECRET_KEY` > `rclone.conf [39000]`。
 带 sudo 必须 `sudo -E` 透传环境。
 
@@ -82,9 +101,15 @@ sudo systemctl start juicefs-alphalib.service
 sudo grep -oP 'META_PASSWORD=\K.*' /etc/juicefs/alphalib.env
 scp -r scripts/juicefs-poc <client>:/tmp/
 
-# [client]
-ssh <client> 'sudo bash /tmp/juicefs-poc/join.sh --meta-host 10.9.100.160'
+# [client] 首次:必须给 --mount 和 --cache (会写到 /etc/juicefs-poc.env)
+ssh <client> 'sudo bash /tmp/juicefs-poc/join.sh \
+  --meta-host 10.9.100.160 \
+  --mount /mnt/jfs/alphalib \
+  --cache /mnt/jfs/cache'
 # 交互输密码;或非交互: echo $PASS | sudo bash ... --password-stdin
+
+# 后续重跑 (复用 /etc/juicefs-poc.env 里的路径)
+ssh <client> 'sudo bash /tmp/juicefs-poc/join.sh --meta-host 10.9.100.160'
 ```
 
 ## 验证
