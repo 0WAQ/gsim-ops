@@ -2,7 +2,7 @@
 
 验证 JuiceFS 作为 alphalib 共享文件系统是否满足 gsim + ops 的使用模式。详细动机和迁移路径见 `.claude/plans.md` 的 "Alphalib Storage Backend Migration"。
 
-**两轮 PoC 已通过 (2026-06-02)**,本机能验证的全部完成。剩余项需要第二/第三台机器,见底部"下一步"。
+**两轮 PoC 已通过 (2026-06-02)**。当前在做 **Step 1: 挂载布局 + 权限模型**(进行中,见下方同名章节),完成后进入 Step 2 持久化。跨节点 / Redis HA / 全量迁入需要等第二/第三台机器,见底部"下一步"。
 
 ## 拓扑(PoC 阶段)
 
@@ -63,6 +63,8 @@ export MINIO_ROOT_PASSWORD=<root-sk>
 | `05-verify-memmap.sh` | alpha_feature 模式仿真 | `bash 05-verify-memmap.sh` |
 | `06-verify-git.sh` | Git on JuiceFS 500 提交基线 + ZFS 对照 | `bash 06-verify-git.sh` |
 | `07-verify-redis-failure.sh` | Redis 故障注入(stop/start,观察 IO 行为) | `sudo -E bash 07-verify-redis-failure.sh` |
+| `08-relocate-local-dirs.sh` | `alpha_dump / staging / recycle` 搬出 JuiceFS,改 symlink → 本地 sidecar (`$JFS_LOCAL_DIR`) | `sudo -E bash 08-relocate-local-dirs.sh` |
+| `09-setup-perms.sh` | 两层组权限模型 (`alpha-core` / `alpha-data`) | `sudo -E bash 09-setup-perms.sh` |
 | `99-teardown.sh` | 卸载;`--purge` 才删数据 | `sudo -E bash 99-teardown.sh [--purge]` |
 
 挂载后 `/tank/vault/alphalib/` 是 root 拥有但 mode 777,wbai 用户可直接读写,不需要再 sudo。
@@ -84,22 +86,128 @@ export MINIO_ROOT_PASSWORD=<root-sk>
 
 | 验证项 | 结论 |
 |---|---|
-| **完整 `ops check` 跑真实因子** | ✅ `OPS_CONFIG=config.juicefs.yaml ops check` 全流水线通过(AlphaWbaiReversal),耗时 ~3.5min 持平本地。**暴露 bug**:state store 忽略 `-c` 参数,已记 `CLAUDE.md` tech debt |
+| **完整 `ops check` 跑真实因子** | ✅ `OPS_CONFIG=config.juicefs.yaml ops check` 全流水线通过(AlphaWbaiReversal),耗时 ~3.5min 持平本地。曾暴露 state store 忽略 `-c` 的 bug,已于 045fcb1 修复 |
 | **Git on JuiceFS 性能** | ✅ 500 commit 基线:JuiceFS commit 75ms (vs 本地 ZFS 21ms,3.5x),`git log/blame/status/diff` 全部 <250ms。**Phase D 共享工作区模式可行,不需要降级到 bare repo + clone** |
 | **Redis 故障注入** | ✅ 结论非常明确:**JuiceFS 不 hang,Redis 一停立刻 EIO**。所有 syscall(读/写/stat/unlink)全部失败,整个挂载点瘫。**Phase C 上线前必须配 Redis Sentinel 主从**,详见 `.claude/plans.md` 的 "Redis HA 部署" |
 | ops pack 增量模式 | ⏸ 设计完成,实施暂缓 —— 见 `.claude/plans.md` 的 "ops pack Incremental Mode" |
 | 跨节点验证 | ⏸ 等第二台机器 |
 
+## Step 1: 挂载布局 + 权限模型 (进行中, 2026-06-03)
+
+把 PoC 验证完的挂载点收成可长期跑的形态:目录布局清理 + 两层组权限。
+
+### 布局
+
+```
+/tank/vault/alphalib/          ← JuiceFS 挂载点(共享,跨机)
+├── alpha_src/         root:alpha-core 2750     ← 只 alpha-core 读;零直接写,改写必须 sudo
+├── alpha_pnl/         root:alpha-data 2770+ACL ← 所有研究员读写
+├── alpha_feature/     root:alpha-data 2770+ACL ← 所有研究员读写
+├── alpha_dump   →     /tank/vault/alphalib.local/alpha_dump   (symlink)
+├── staging      →     /tank/vault/alphalib.local/staging      (symlink)
+└── recycle      →     /tank/vault/alphalib.local/recycle      (symlink)
+
+/tank/vault/alphalib.local/    ← 本地 sidecar (每机各自一份,不进 JuiceFS)
+├── alpha_dump/        root:alpha-data 2770+ACL
+├── staging/           root:alpha-data 2770+ACL
+└── recycle/           root:alpha-data 2770+ACL
+```
+
+`alpha_dump / staging / recycle` 是每机各自的中间产物,不应该走 JuiceFS。08 把它们替换成指向本地 sidecar 的 symlink,这样所有 ops 代码路径不用改 —— 看到的还是 `alphalib/alpha_dump/...`。
+
+### 权限模型(两组制)
+
+| 组 | gid | 成员 | 能做什么 |
+|---|---|---|---|
+| `alpha-core` | 59000 | wbai | 读所有 alpha_src 代码 |
+| `alpha-data` | 59001 | wbai | 读写 alpha_pnl / alpha_feature / alphalib.local/* |
+
+- gid 自管,选 59xxx 段(GID_MAX=60000 以下,远离常见 7/8/9000 段,避免和 LDAP/系统组冲突)
+- **owner 全部 root**,enforcement 100% 走 gid,不信任 uid
+- **零研究员直接写 alpha_src**:连作者改自己的代码也不行,只能走 ops 流(`ops submit/resubmit/recheck` 内部 sudo)
+- alpha-data 是普通研究员组(写数据产物),alpha-core 是受限读组(看代码)
+- ACL: alpha_pnl/feature/local 上有 default ACL `g:alpha-data:rwx`,保证新建文件自动可读写
+
+### 当前进度
+
+| 项 | 状态 |
+|---|---|
+| 08: alpha_dump/staging/recycle 改 symlink → alphalib.local | ✅ |
+| JuiceFS `--enable-acl` 已开 | ✅(需 remount 后 setfacl 才生效,已重挂) |
+| 09 [1/6] 创建组 alpha-core / alpha-data | ✅ |
+| 09 [2/6] usermod -aG | ✅ (NSS 层) |
+| 09 [3/6] 清理 A 模式 alpha-author-* 残留 | ✅ |
+| 09 [4/6] alpha_pnl / alpha_feature 权限 + 默认 ACL | ✅ |
+| 09 [5/6] alpha_src 整棵 root:alpha-core 2750 | ✅ |
+| 09 [6/6] alphalib.local 权限 + 默认 ACL | ❌ **default ACL 没打上**(原因见下) |
+
+### 卡点:ZFS pool 默认 `acltype=off`
+
+`/tank/vault/alphalib.local/` 在 ZFS 上,ZFS pool 默认 `acltype=off` 不支持 POSIX ACL。
+09 之前没探针,`setfacl -d -m` 静默返回 EOPNOTSUPP,结果 owner/group/mode 都对,但 default
+ACL 缺失。已在 09 顶部加 fail-fast 探针,下一个 session 跑到这里会立刻报错并打印修复指引。
+
+**立即下一步**(下个 session 第一件事):
+
+```bash
+# 1. 开 ZFS POSIX ACL(只对 tank/vault,不动 cc/rawdata/mdl 这些不相关 dataset)
+sudo zfs set acltype=posixacl tank/vault
+sudo zfs set xattr=sa tank/vault          # POSIX ACL 存到 SA,性能远好于 DIR xattr
+
+# 2. remount 让内核重读 mount option(JuiceFS 是独立 FUSE,不在 tank/vault dataset 上,不受影响)
+sudo mount -o remount /tank/vault
+mount | grep '^tank/vault '               # 应该看不到 noacl 了
+
+# 3. 重跑 09 把 default ACL 补上(顶部新加的探针会先验证 ACL 真的可用)
+sudo -E bash scripts/juicefs-poc/09-setup-perms.sh
+
+# 4. 验证 alphalib.local 的 default ACL 出现
+getfacl /tank/vault/alphalib.local
+# 期望末尾出现 default:group:alpha-data:rwx 等条目
+```
+
+### 已验证(基于现在的部分完成状态)
+
+用 `sg alpha-core / sg alpha-data` 子 shell 验证(避开 SSH session 组缓存):
+
+| 场景 | 结果 |
+|---|---|
+| `sg alpha-core` ls alpha_src | ✅ 看到 AlphaWbaiReversal |
+| `sg alpha-core` 写 alpha_src | ✅ Permission denied(零直接写,符合设计) |
+| `sg alpha-data` rw alpha_pnl / alpha_feature / alphalib.local | ✅ |
+| `sg alpha-data` ls alpha_src | ✅ Permission denied(数据组看不到代码) |
+
+注意:`id wbai` (NSS 视图) 已经显示新组,但**当前 SSH session 内的所有 shell 都拿不到**,
+因为 supplementary groups 是 login 时锁定的,`usermod -aG` 不会反推已有 session。需要:
+`exec su - $USER`,或者退出 SSH 重新连。`sg <group> -c <cmd>` 是临时验证的替代品。
+
+### Phase C 前置:ops 写 src 路径要套 sudo wrapper
+
+alpha_src 现在 root-owned,wbai 进程直接 `shutil.move/copy` 进去会 EACCES。
+扫到的待改路径:
+
+| 文件 | 行 | 操作 |
+|---|---|---|
+| `ops/services/check/check.py` | 134 | `shutil.move(staging → alpha_src)` |
+| `ops/services/check/check.py` | 155 | `shutil.copy(staging → alpha_src)` |
+| `ops/services/submit/*` | — | submit 写新因子到 alpha_src |
+| `ops/services/resubmit/*` | — | resubmit 覆写已有因子代码 |
+
+写 src 全部集中在 submit / resubmit / check 归档,三处。Phase C 全量迁入 JuiceFS 之前
+必须把这些包一层 sudo(或者用 setuid helper)。
+
 ## 下一步(交接给后续 session)
 
 按优先级:
 
-1. **修 `_default_state_path()` 接受 caller 的 config**(`ops/infra/store/__init__.py:11`,工程量小,独立可做,详见 `CLAUDE.md` Known Technical Debt)
+0. **收尾 Step 1**(见上面"卡点":开 ZFS acltype + remount + 重跑 09)
+1. **Step 2: 持久化**(systemd unit for redis-server + .mount unit for JuiceFS,处理重启自起,简化多机部署)
 2. **跨节点验证**(等第二台机器):
    - 把 Redis 改为监听 `0.0.0.0` + 设密码 + ACL,目前只绑 `127.0.0.1`
    - 第二台机 `juicefs mount` 同一卷,验证 A 写 B 立刻可见 + flock 跨节点真锁
 3. **Redis Sentinel 部署**(等第三台机器,Phase C 硬前置):见 `.claude/plans.md` 的 "Redis HA 部署"
 4. **Phase C 全量迁入**:`juicefs sync` 把现有 `/mnt/storage/alphalib/` 灌进新 bucket,切 config,`ops sync push/pull` 退役
+   - **前置**: Step 1 的 ops sudo wrapper 改造(见上面 Phase C 前置表)
 5. **Phase D/E/F**:Git 接入、`.state` 简化、checkpoint 落地
 
 ## 失败回退

@@ -255,7 +255,9 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | A | 修补 sync 短期可用 | 进行中,size-only bug 绕过,撑到长期方案落地 |
 | B | JuiceFS PoC | **第一轮完成 (2026-06-02)**,见下面"PoC 进展"。剩余项见 Phase B-2 |
 | B-2 | JuiceFS PoC 第二轮 | 真实 `ops check` 跑通、`ops pack` 增量模式 + chunk 增量量化、跨节点验证(等第二台)、Redis 故障注入、Git on JuiceFS 性能 |
-| C | 全量数据迁入 JuiceFS | **前置:Redis HA 必须先上(Sentinel 或 TiKV),详见下方"Redis HA 部署"**。`juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature / .state 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检) |
+| B-3 | Step 1: 挂载布局 + 权限模型 | **进行中 (2026-06-03)**。08 sidecar + 09 两层组(alpha-core/alpha-data)+ JuiceFS ACL 已完成;alphalib.local 的 default ACL 卡在 ZFS pool `acltype=off` 上,详见 `scripts/juicefs-poc/README.md` 的 "Step 1" 章节 |
+| B-4 | Step 2: 持久化 | systemd unit for redis-server + .mount unit for JuiceFS,处理重启自起,简化多机部署 |
+| C | 全量数据迁入 JuiceFS | **前置:Redis HA 必须先上(Sentinel 或 TiKV),详见下方"Redis HA 部署"**。`juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature / .state 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检)。**另一前置:ops submit/resubmit/check 写 alpha_src 的路径要套 sudo wrapper**(因为新模型下 alpha_src 是 root-owned,wbai 进程直接 shutil.move 会 EACCES) |
 | D | alpha_src 接入 Git | 在 `/tank/vault/alphalib/alpha_src/` 初始化 Git 仓库,改造 `ops submit/resubmit` 调 `git add + commit`(加 flock),新增 `ops diff/log/blame` 命令 |
 | E | `.state` merge 逻辑简化 | 删掉"tied updated_at 留本地"补丁,改成"mtime 比较 + per-factor 文件锁";批量修改加全局 flock |
 | F | checkpoint 落地 | 按设计原则实现,默认放 JuiceFS,可再生的版本放本地 SSD |
@@ -269,7 +271,7 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | metadata 性能(stat 1000 文件) | ✅ 15ms,Redis ping 34µs |
 | **memmap 日增写一行** | ✅ **35ms/因子**,折合 677 因子顺序 pack ≈ 24s |
 | 跨进程可见性 | ✅ 写者退出后,新进程立刻读到一致内容 |
-| 完整 `ops check` 跑真实因子 | ✅ AlphaWbaiReversal 全流水线通过 (2026-06-02 第二轮),总耗时 ~3.5min 持平本地。暴露 bug:state store 忽略 `-c`(已记 CLAUDE.md tech debt) |
+| 完整 `ops check` 跑真实因子 | ✅ AlphaWbaiReversal 全流水线通过 (2026-06-02 第二轮),总耗时 ~3.5min 持平本地。曾暴露 state store 忽略 `-c` 的 bug,已于 045fcb1 修复 |
 | `ops pack` 增量模式 + chunk 增量量化 | ⏸ 留给 B-2 |
 | 跨节点验证 | ⏸ 留给 B-2(等第二台机器) |
 | Redis 故障注入 | ✅ (2026-06-02 第二轮) 结论:**JuiceFS 不 hang,Redis 一停立刻 EIO**。所有 syscall(读/写/stat/unlink)全部失败,整个挂载点瘫。**Phase C 前置:必须上 Redis Sentinel 主从** |
