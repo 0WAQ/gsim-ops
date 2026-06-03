@@ -8,10 +8,19 @@
 
 set -euo pipefail
 cd "$(dirname "$0")"
+source ./_lib.sh
 source ./00-config.sh
 
-ENV_FILE="/etc/juicefs/alphalib.env"
+require_sudo
+require_systemd
+require_bin redis-cli   "apt install redis-tools"
+require_bin openssl     "apt install openssl"
+systemctl list-unit-files | grep -q '^redis-server\.service' \
+  || err "找不到 redis-server.service。先跑 01-install.sh"
+
+ENV_FILE="/etc/juicefs/${JFS_NAME}.env"
 REDIS_CONF="/etc/redis/redis.conf"
+[[ -f "$REDIS_CONF" ]] || err "找不到 $REDIS_CONF。先 apt install redis-server"
 MARK_BEGIN="# BEGIN juicefs-poc managed"
 MARK_END="# END juicefs-poc managed"
 

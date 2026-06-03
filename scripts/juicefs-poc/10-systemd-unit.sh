@@ -11,10 +11,14 @@
 
 set -euo pipefail
 cd "$(dirname "$0")"
+source ./_lib.sh
 source ./00-config.sh
 
+require_sudo
+require_systemd
+require_bin juicefs "curl -sSL https://d.juicefs.com/install | sudo sh -"
+
 JUICEFS_BIN="$(command -v juicefs)"
-[[ -x "$JUICEFS_BIN" ]] || { echo "ERROR: juicefs binary not found in PATH" >&2; exit 1; }
 
 UNIT_NAME="juicefs-${JFS_NAME}.service"
 UNIT_PATH="/etc/systemd/system/$UNIT_NAME"

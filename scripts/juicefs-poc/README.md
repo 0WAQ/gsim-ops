@@ -56,8 +56,36 @@ export MINIO_ROOT_PASSWORD=<root-sk>
 | `07-verify-redis-failure.sh` | Redis 故障注入 |
 | `08-relocate-local-dirs.sh` | `alpha_dump / staging / recycle` 改 symlink → 本地 sidecar |
 | `09-setup-perms.sh` | 应用权限模型(见下) |
-| `10-systemd-unit.sh` | 写 `juicefs-alphalib.service`,开机自挂(依赖 redis-server) |
+| `10-systemd-unit.sh` | 写 `juicefs-<name>.service`,开机自挂 |
+| `11-redis-network.sh` | Redis 听 0.0.0.0 + requirepass + 写 `/etc/juicefs/<name>.env` |
+| `12-join-cluster.sh` | **Client 节点一键加入**(装 juicefs + 拿密码 + 测连通 + 起 service) |
 | `99-teardown.sh` | 卸载(`--purge` 删数据) |
+
+所有脚本顶部都自检 sudo / 二进制 / systemd / 网络可达,缺啥说啥。
+
+## 多节点部署
+
+**主节点(160)** —— 一次性:
+
+```bash
+sudo -E bash 01-install.sh                # redis + juicefs
+sudo -E bash 02-prepare.sh                # MinIO bucket
+sudo -E bash 03-format-mount.sh           # juicefs format + mount
+sudo -E bash 08-relocate-local-dirs.sh    # sidecar
+sudo -E bash 09-setup-perms.sh            # 权限
+sudo -E bash 11-redis-network.sh          # redis 网络化 + 加密码
+sudo -E bash 10-systemd-unit.sh           # systemd 接管
+sudo systemctl start juicefs-alphalib.service
+```
+
+**Client 节点(150 等)** —— 一行:
+
+```bash
+# 主节点取密码: sudo grep -oP 'META_PASSWORD=\K.*' /etc/juicefs/alphalib.env
+scp -r scripts/juicefs-poc <client>:/tmp/
+ssh <client> 'sudo bash /tmp/juicefs-poc/12-join-cluster.sh --meta-host 10.9.100.160'
+# 会交互提示输密码;或 echo $PASS | sudo bash ... --password-stdin
+```
 
 ## 验证结果 (2026-06-02)
 
@@ -110,9 +138,11 @@ JFS  /tank/vault/alphalib/        root:alpha-data 2755
 - [x] 08 sidecar 改 symlink
 - [x] 09 权限模型(setgid + umask,无 ACL)
 - [x] 装 `/etc/profile.d/ops-umask.sh`
-- [ ] 10 systemd unit(脚本写好,待 install + 重启验证)
-- [ ] 跨节点验证(等第二台机器)
-- [ ] Redis Sentinel(等第三台机器)
+- [x] 10 systemd unit 接管主节点挂载
+- [x] 11 Redis 网络化 + AUTH
+- [ ] 12 第二台 client 节点接入(待测)
+- [ ] 跨节点一致性 + flock 真锁验证
+- [ ] Redis Sentinel(需要第三台 sudo 节点)
 - [ ] 全量数据迁入
 
 ## 失败回退
