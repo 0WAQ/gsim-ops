@@ -255,8 +255,8 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | A | 修补 sync 短期可用 | 进行中,size-only bug 绕过,撑到长期方案落地 |
 | B | JuiceFS PoC | **第一轮完成 (2026-06-02)**,见下面"PoC 进展"。剩余项见 Phase B-2 |
 | B-2 | JuiceFS PoC 第二轮 | 真实 `ops check` 跑通、`ops pack` 增量模式 + chunk 增量量化、跨节点验证(等第二台)、Redis 故障注入、Git on JuiceFS 性能 |
-| B-3 | Step 1: 挂载布局 + 权限模型 | **进行中 (2026-06-03)**。08 sidecar + 09 两层组(alpha-core/alpha-data)+ JuiceFS ACL 已完成;alphalib.local 的 default ACL 卡在 ZFS pool `acltype=off` 上,详见 `scripts/juicefs-poc/README.md` 的 "Step 1" 章节 |
-| B-4 | Step 2: 持久化 | systemd unit for redis-server + .mount unit for JuiceFS,处理重启自起,简化多机部署 |
+| B-3 | Step 1: 挂载布局 + 权限模型 | **完成 (2026-06-03)**。sidecar symlink (alpha_dump/staging/recycle) + 两层组(alpha-core/alpha-data)+ setgid + umask 0002。**放弃 POSIX ACL**(ZFS pool `acltype=off`,改 pool 风险大),改用 setgid 继承组 + `/etc/profile.d/ops-umask.sh` 强制 002,效果等价。详见 `scripts/juicefs-poc/README.md` |
+| B-4 | Step 2: 持久化 + 跨节点 | **主节点完成 (2026-06-03)**。`03-redis.sh` 把 redis 听 0.0.0.0 + requirepass + 密码进 `/etc/juicefs/<name>.env`(0600 root)由 systemd `EnvironmentFile=` 注入,避免 ps cmdline 泄露;`04-systemd.sh` 渲染 `juicefs-<name>.service`,开机自挂。`join.sh` 实现 client 节点一键接入(待 150 实测)。**Sentinel 留到 C 前置** |
 | C | 全量数据迁入 JuiceFS | **前置:Redis HA 必须先上(Sentinel 或 TiKV),详见下方"Redis HA 部署"**。`juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature / .state 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检)。**另一前置:ops submit/resubmit/check 写 alpha_src 的路径要套 sudo wrapper**(因为新模型下 alpha_src 是 root-owned,wbai 进程直接 shutil.move 会 EACCES) |
 | D | alpha_src 接入 Git | 在 `/tank/vault/alphalib/alpha_src/` 初始化 Git 仓库,改造 `ops submit/resubmit` 调 `git add + commit`(加 flock),新增 `ops diff/log/blame` 命令 |
 | E | `.state` merge 逻辑简化 | 删掉"tied updated_at 留本地"补丁,改成"mtime 比较 + per-factor 文件锁";批量修改加全局 flock |
@@ -273,18 +273,18 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | 跨进程可见性 | ✅ 写者退出后,新进程立刻读到一致内容 |
 | 完整 `ops check` 跑真实因子 | ✅ AlphaWbaiReversal 全流水线通过 (2026-06-02 第二轮),总耗时 ~3.5min 持平本地。曾暴露 state store 忽略 `-c` 的 bug,已于 045fcb1 修复 |
 | `ops pack` 增量模式 + chunk 增量量化 | ⏸ 留给 B-2 |
-| 跨节点验证 | ⏸ 留给 B-2(等第二台机器) |
+| 跨节点验证 | ⏸ 留给 B-2(`join.sh` 已就绪,等 150 实测) |
 | Redis 故障注入 | ✅ (2026-06-02 第二轮) 结论:**JuiceFS 不 hang,Redis 一停立刻 EIO**。所有 syscall(读/写/stat/unlink)全部失败,整个挂载点瘫。**Phase C 前置:必须上 Redis Sentinel 主从** |
 | Git on JuiceFS 性能 | ✅ 500 提交基线 (2026-06-02 第二轮): commit 75ms (vs ZFS 21ms),`git log/blame/status` 全部 <250ms。**Phase D Model A(共享工作区)可行,不需要降级到 Model B** |
 
-**PoC 拓扑**(本机单点):
+**PoC 拓扑**(主节点 + client 多节点):
 
-- 挂载点 `/tank/vault/alphalib/`(和现有 `/tank/vault/storage/` = `/mnt/storage/` 软链同级,不冲突)
-- 本地 Redis (`127.0.0.1:6379`,PoC 期单实例,生产化挪到 MinIO 那台)
-- 本地 cache `/tank/vault/juicefs-cache/`,500 GB 上限
+- 挂载点 `/tank/vault/alphalib/` **是 160-specific**(ZFS pool 在那)。其他节点通过 `/etc/juicefs-poc.env` 覆盖 `JFS_MOUNT/JFS_CACHE_DIR/JFS_LOCAL_DIR`,`join.sh --mount/--cache` 自动写
+- Redis 在 160:`bind 0.0.0.0` + `requirepass`,密码存 `/etc/juicefs/<name>.env` (0600 root) 由 systemd `EnvironmentFile=` 注入。**单点,Phase C 前必须上 Sentinel**
+- 本地 cache `/tank/vault/juicefs-cache/`(160),500 GB 上限;client 节点路径由 `/etc/juicefs-poc.env` 决定
 - MinIO 新 bucket `alphalib-juicefs`(独立于现有 bucket,失败回退零成本)
-- 凭证: 用 MinIO root key,通过环境变量 `MINIO_ROOT_USER/MINIO_ROOT_PASSWORD` 注入(rclone.conf 里的 `external-client` 是受限只读凭证,不够用)
-- 脚本: `scripts/juicefs-poc/`
+- 凭证: 用 MinIO root key,通过 `MINIO_ROOT_USER/MINIO_ROOT_PASSWORD` 或 rclone.conf 注入,**只 `01-provision.sh` 用**
+- 脚本: `scripts/juicefs-poc/`(`00-install.sh` → `04-systemd.sh` 主节点 5 步;`join.sh` client 一键)
 
 **关联 TODO**:
 - `ops pack` 增量模式见下面独立章节"ops pack Incremental Mode";在 Phase C 之前完成更好,但 JuiceFS chunk diff 不强依赖它
