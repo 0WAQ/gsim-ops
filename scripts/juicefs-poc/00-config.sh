@@ -45,6 +45,7 @@ export JFS_NAME="${JFS_NAME:-alphalib}"
 export JFS_BUCKET="${JFS_BUCKET:-alphalib-juicefs}"
 export JFS_META_URL="${JFS_META_URL:-redis://127.0.0.1:6379/0}"
 export JFS_MOUNT="${JFS_MOUNT:-/tank/vault/alphalib}"
+export JFS_LOCAL_DIR="${JFS_LOCAL_DIR:-${JFS_MOUNT}.local}"
 export JFS_CACHE_DIR="${JFS_CACHE_DIR:-/tank/vault/juicefs-cache}"
 export JFS_CACHE_SIZE_MB="${JFS_CACHE_SIZE_MB:-512000}"   # 500 GB
 
@@ -56,6 +57,7 @@ MinIO endpoint : $MINIO_ENDPOINT
 MinIO bucket   : $JFS_BUCKET
 JuiceFS name   : $JFS_NAME
 Mount point    : $JFS_MOUNT
+Local sidecar  : $JFS_LOCAL_DIR
 Cache dir      : $JFS_CACHE_DIR (${JFS_CACHE_SIZE_MB} MB)
 Meta engine    : $JFS_META_URL
 ==========================
