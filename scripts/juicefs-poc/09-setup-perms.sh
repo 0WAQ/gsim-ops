@@ -106,7 +106,10 @@ else
   done
 fi
 
-echo "[4/5] JFS (alpha_src / alpha_pnl / alpha_feature):"
+echo "[4/5] JFS ($JFS_MOUNT):"
+sudo chown "root:$GRP_DATA" "$JFS_MOUNT"
+sudo chmod 2755 "$JFS_MOUNT"
+echo "  $JFS_MOUNT  (root:$GRP_DATA 2755)"
 apply_dir "$SRC"  "root:$GRP_CORE" "u=rwX,g=rX,o="
 apply_dir "$PNL"  "root:$GRP_DATA" "u=rwX,g=rwX,o=rX"
 apply_dir "$FEAT" "root:$GRP_DATA" "u=rwX,g=rwX,o=rX"

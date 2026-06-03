@@ -83,7 +83,7 @@ export MINIO_ROOT_PASSWORD=<root-sk>
 布局:
 
 ```
-JFS  /tank/vault/alphalib/
+JFS  /tank/vault/alphalib/        root:alpha-data 2755
 ├── alpha_src/       root:alpha-core 2750     core 读
 ├── alpha_pnl/       root:alpha-data 2775     data 读写, others 读
 ├── alpha_feature/   root:alpha-data 2775     data 读写, others 读
