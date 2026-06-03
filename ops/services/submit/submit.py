@@ -64,12 +64,6 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
                store: StateStore) -> bool:
     submitted_at = datetime.now().isoformat(timespec="seconds")
 
-    existing = store.get(staging_dir.name)
-    if existing is not None:
-        error(f"  ✘  {staging_dir.name} 已存在于 state 中"
-              f"(status={existing.status.value}),请用 ops resubmit 提交新代码")
-        return False
-
     py_files = sorted(staging_dir.glob("*.py"))
     xml_files = sorted(staging_dir.glob("*.xml"))
     if len(py_files) != 1 or len(xml_files) != 1:
@@ -127,10 +121,28 @@ def run_submit(args):
 
     user_of = {d: user for user, d in found}
     src_dirs = [d for _, d in found]
-    staging_dirs = copy_to_staging(config, src_dirs)
+
+    # 先过滤已入库的因子,避免 copytree 后才发现重复,留下无 meta.json 的 staging 残骸
+    to_process: list[Path] = []
+    skipped = 0
+    for src in src_dirs:
+        existing = store.get(src.name)
+        if existing is not None:
+            error(f"  ✘  {src.name} 已存在于 state 中"
+                  f"(status={existing.status.value}),请用 ops resubmit 提交新代码")
+            skipped += 1
+            continue
+        to_process.append(src)
+
+    if not to_process:
+        warn("没有可提交的因子")
+        bottom()
+        return
+
+    staging_dirs = copy_to_staging(config, to_process)
 
     passed = failed = 0
-    for src, staged in zip(src_dirs, staging_dirs):
+    for src, staged in zip(to_process, staging_dirs):
         submitted_by = user_of[src]
         print("submitting ", end=""); highlight(f"{staged.name}")
         try:
@@ -148,4 +160,6 @@ def run_submit(args):
     info(f"✔ 成功 : {passed:>4}")
     if failed > 0:
         error(f"✘ 失败 : {failed:>4}")
+    if skipped > 0:
+        warn(f"⤼ 跳过 : {skipped:>4}  (已入库,请用 ops resubmit)")
     bottom()
