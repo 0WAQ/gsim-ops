@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Client 节点(不跑 Redis,只挂 JuiceFS)加入集群,一键完成:
+# Client 节点(不跑 Redis,只挂 JuiceFS)一键加入集群:
 #
 #   1. 自检 sudo / 网络 / 缺失二进制
 #   2. 装 juicefs client(如果还没装)
@@ -10,19 +10,19 @@
 #      写到 /etc/juicefs/<name>.env (0600 root:root)
 #   4. 测试到 meta-host 的 redis AUTH
 #   5. 渲染 + 启动 juicefs-<name>.service(JFS_REDIS_LOCAL=0)
-#   6. ls 挂载点确认看到主节点写入的数据
+#   6. ls 挂载点确认看到主节点数据
 #
 # 用法:
-#   sudo -E bash 12-join-cluster.sh --meta-host 10.9.100.160
-#   echo "$PASS" | sudo -E bash 12-join-cluster.sh --meta-host 10.9.100.160 --password-stdin
-#   META_PASSWORD=xxx sudo -E bash 12-join-cluster.sh --meta-host 10.9.100.160
+#   sudo -E bash join.sh --meta-host 10.9.100.160
+#   echo "$PASS" | sudo -E bash join.sh --meta-host 10.9.100.160 --password-stdin
+#   META_PASSWORD=xxx sudo -E bash join.sh --meta-host 10.9.100.160
 #
 # 幂等。
 
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./_lib.sh
-source ./00-config.sh
+source ./config.sh
 
 META_HOST=""
 META_PORT="6379"
@@ -33,8 +33,7 @@ while (( $# )); do
     --meta-host)      META_HOST=$2; shift 2;;
     --meta-port)      META_PORT=$2; shift 2;;
     --password-stdin) PASSWORD_STDIN=1; shift;;
-    -h|--help)
-      sed -n '2,/^$/p' "$0"; exit 0;;
+    -h|--help) sed -n '2,/^$/p' "$0"; exit 0;;
     *) err "未知参数: $1";;
   esac
 done
@@ -56,8 +55,7 @@ info "==> [1/5] juicefs client"
 if command -v juicefs >/dev/null; then
   info "  已装: $(juicefs version | head -1)"
 else
-  curl -sSL https://d.juicefs.com/install | sudo sh -
-  juicefs version | head -1
+  JFS_CLIENT_ONLY=1 bash ./bootstrap.sh install
 fi
 
 info "==> [2/5] 密码 -> $ENV_FILE"
@@ -88,8 +86,8 @@ sudo bash -c ". $ENV_FILE && redis-cli -h $META_HOST -p $META_PORT -a \"\$META_P
   | grep -q PONG || err "AUTH 失败,密码不对或网络问题"
 info "  PONG"
 
-info "==> [4/5] 渲染 systemd unit + start"
-JFS_META_URL="$META_URL" JFS_REDIS_LOCAL=0 bash ./10-systemd-unit.sh >/dev/null
+info "==> [4/5] 渲染 unit + start"
+JFS_META_URL="$META_URL" JFS_REDIS_LOCAL=0 sudo -E bash ./bootstrap.sh systemd >/dev/null
 if systemctl is-active --quiet "$SVC"; then
   info "  $SVC 已 running"
 else

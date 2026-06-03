@@ -3,39 +3,44 @@
 
 set -euo pipefail
 cd "$(dirname "$0")"
-source ./00-config.sh
+source ./_lib.sh
+source ./config.sh
 
 PURGE=false
 [[ "${1:-}" == "--purge" ]] && PURGE=true
 
-echo "[1/2] unmounting $JFS_MOUNT..."
+info "[1/2] umount $JFS_MOUNT"
+SVC="juicefs-${JFS_NAME}.service"
+if systemctl list-unit-files 2>/dev/null | grep -q "^${SVC}"; then
+  sudo systemctl stop "$SVC" 2>/dev/null || true
+fi
 if mountpoint -q "$JFS_MOUNT"; then
   juicefs umount "$JFS_MOUNT" || sudo umount "$JFS_MOUNT"
-  echo "  unmounted"
+  info "  unmounted"
 else
-  echo "  not mounted, skip"
+  info "  not mounted, skip"
 fi
 
 if ! $PURGE; then
-  echo "[2/2] PRESERVE 模式: 卷 + bucket + cache 都保留"
-  echo "  (重新挂载: 直接跑 ./03-format-mount.sh)"
-  echo "  (彻底销毁: 重跑本脚本加 --purge)"
+  info "[2/2] PRESERVE: 卷 + bucket + cache 都保留"
+  echo "  重新挂载: sudo systemctl start $SVC  (或 bootstrap.sh provision)"
+  echo "  彻底销毁: 重跑加 --purge"
   exit 0
 fi
 
-echo "[2/2] PURGE 模式: 会销毁 JuiceFS 卷 + 删 MinIO bucket + 删 cache"
-echo "  meta : $JFS_META_URL"
-echo "  name : $JFS_NAME"
+info "[2/2] PURGE: 销毁卷 + 删 bucket + 删 cache"
+echo "  meta  : $JFS_META_URL"
+echo "  name  : $JFS_NAME"
 echo "  bucket: ${RCLONE_PROFILE}:${JFS_BUCKET}"
 echo "  cache : $JFS_CACHE_DIR"
 read -rp "  type 'yes' to confirm: " confirm
 [[ "$confirm" == "yes" ]] || { echo "aborted"; exit 1; }
 
-echo "  destroying JuiceFS volume..."
+info "  juicefs destroy"
 juicefs destroy --yes "$JFS_META_URL" "$(juicefs status "$JFS_META_URL" | awk -F\" '/UUID/{print $4; exit}')" \
-  || echo "  warn: destroy failed (maybe already gone)"
+  || warn "  destroy failed (可能已没了)"
 
-echo "  purging MinIO bucket..."
+info "  purge MinIO bucket"
 TMP_CONF="$(mktemp -t juicefs-poc-rclone-XXXXXX.conf)"
 trap 'rm -f "$TMP_CONF"' EXIT
 cat > "$TMP_CONF" <<EOF
@@ -49,7 +54,7 @@ EOF
 chmod 600 "$TMP_CONF"
 rclone --config "$TMP_CONF" purge "poc:${JFS_BUCKET}" || true
 
-echo "  removing local cache..."
+info "  remove local cache"
 sudo rm -rf "$JFS_CACHE_DIR"
 
-echo "DONE."
+info "DONE."
