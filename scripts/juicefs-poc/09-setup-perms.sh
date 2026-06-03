@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# 给 alphalib 应用两层组权限模型(终态):
-#   - alpha-core (gid 59000) 核心组,直接读所有 alpha_src
-#   - alpha-data (gid 59001) 数据池,直接读写 alpha_pnl/feature
+# 两层组权限模型。owner 一律 root(recycle 子目录除外),enforcement 走 gid。
+# 不用 POSIX ACL,只靠 setgid + umask 0002(umask 由 /etc/profile.d/ops-umask.sh 统一设)。
 #
-# 写 alpha_src 必须以 root 身份(ops 通过 sudo 跑)。研究员零直接写权限;
-# 研究员看自己代码也走 ops 接口,不依赖文件系统读权限。
+# 组:
+#   alpha-core (59000)  核心组,读 alpha_src 和 staging
+#   alpha-data (59001)  数据组,读写 alpha_pnl/feature/dump
 #
-# owner 一律 root,不依赖任何 uid。所有 enforcement 走 gid,gid 由本脚本固定。
-# 幂等:可重复跑。会自动清理早期 per-author 实验的 alpha-author-* 组和 ACL。
+# 布局:
+#   JFS  alpha_src       root:alpha-core 2750   core 读
+#        alpha_pnl       root:alpha-data 2775   data 读写,others 读
+#        alpha_feature   root:alpha-data 2775   data 读写,others 读
+#   本地 staging         root:alpha-core 2770   core 读写
+#        alpha_dump      root:alpha-data 2775   data 读写,others 读
+#        recycle         root:root       1755   sticky,可穿越
+#        recycle/<uid>   <uid>:<primary> 0700   只用户自己
 #
-# 设计前提:JuiceFS 卷已开 EnableACL,挂载后 setfacl 能用。
+# 幂等,可重复跑。
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -20,52 +26,24 @@ GID_DATA=59001
 GRP_CORE="alpha-core"
 GRP_DATA="alpha-data"
 
-# core 组成员(超级读者)
 CORE_MEMBERS=(wbai)
-# alpha-data 成员(所有研究员)
 DATA_MEMBERS=(wbai)
 
-SRC_ROOT="$JFS_MOUNT/alpha_src"
-PNL_ROOT="$JFS_MOUNT/alpha_pnl"
-FEAT_ROOT="$JFS_MOUNT/alpha_feature"
+SRC="$JFS_MOUNT/alpha_src"
+PNL="$JFS_MOUNT/alpha_pnl"
+FEAT="$JFS_MOUNT/alpha_feature"
 
-# ---- 探针 1:JuiceFS 挂载点必须支持 ACL ----
+LOCAL="$JFS_LOCAL_DIR"
+STAGING="$LOCAL/staging"
+DUMP="$LOCAL/alpha_dump"
+RECYCLE="$LOCAL/recycle"
+
 if ! mountpoint -q "$JFS_MOUNT"; then
   echo "ERROR: $JFS_MOUNT 未挂载" >&2; exit 1
 fi
-probe="$JFS_MOUNT/.aclprobe.$$"
-mkdir "$probe"
-if ! setfacl -m u:nobody:r-x "$probe" 2>/dev/null; then
-  rmdir "$probe"
-  echo "ERROR: setfacl 在 $JFS_MOUNT 不支持(Operation not supported)" >&2
-  echo "       需要 juicefs config --enable-acl 后 umount+remount" >&2
-  exit 1
-fi
-rmdir "$probe"
 
-# ---- 探针 2:alphalib.local 所在文件系统必须支持 ACL ----
-# 早期版本曾在 ZFS pool 默认 acltype=off 时静默吃掉 setfacl 失败,留下"目录在/owner对/
-# 但 default ACL 没打上"的隐性损坏。这里 fail-fast。
-if [[ -d "$JFS_LOCAL_DIR" ]]; then
-  probe_local="$JFS_LOCAL_DIR/.aclprobe.$$"
-  mkdir "$probe_local"
-  if ! setfacl -m u:nobody:r-x "$probe_local" 2>/dev/null; then
-    rmdir "$probe_local"
-    echo "ERROR: setfacl 在 $JFS_LOCAL_DIR 不支持(Operation not supported)" >&2
-    echo "       若 $JFS_LOCAL_DIR 在 ZFS 上:" >&2
-    echo "         sudo zfs set acltype=posixacl <dataset>" >&2
-    echo "         sudo zfs set xattr=sa <dataset>" >&2
-    echo "         sudo mount -o remount <mountpoint>" >&2
-    echo "       然后重跑本脚本" >&2
-    exit 1
-  fi
-  rmdir "$probe_local"
-fi
-
-# ---- helpers ----
 ensure_group() {
-  local gid=$1 name=$2
-  local entry="" owner_by_gid=""
+  local gid=$1 name=$2 entry owner_by_gid="" cur_gid
   if entry=$(getent group "$gid" 2>/dev/null); then
     owner_by_gid=$(printf '%s\n' "$entry" | cut -d: -f1)
   fi
@@ -73,12 +51,11 @@ ensure_group() {
     echo "  ERROR: gid $gid 已被 '$owner_by_gid' 占用" >&2; exit 1
   fi
   if entry=$(getent group "$name" 2>/dev/null); then
-    local cur_gid
     cur_gid=$(printf '%s\n' "$entry" | cut -d: -f3)
     if [[ "$cur_gid" != "$gid" ]]; then
-      echo "  ERROR: 组 $name 已存在但 gid=$cur_gid != 期望 $gid" >&2; exit 1
+      echo "  ERROR: 组 $name 已存在但 gid=$cur_gid != $gid" >&2; exit 1
     fi
-    echo "  $name (gid=$gid) exists, skip"
+    echo "  $name (gid=$gid) exists"
   else
     sudo groupadd -g "$gid" "$name"
     echo "  + $name (gid=$gid)"
@@ -88,89 +65,93 @@ ensure_group() {
 ensure_member() {
   local user=$1 grp=$2
   if id -nG "$user" | tr ' ' '\n' | grep -qx "$grp"; then
-    echo "  $user already in $grp, skip"
+    echo "  $user already in $grp"
   else
     sudo usermod -aG "$grp" "$user"
     echo "  + $user -> $grp"
   fi
 }
 
-echo "[1/6] 创建组(幂等):"
+apply_dir() {
+  local d=$1 owner=$2 mode=$3
+  [[ -d "$d" ]] || { echo "  skip $d (不存在)"; return; }
+  sudo setfacl -R -b "$d" 2>/dev/null || true
+  sudo setfacl -R -k "$d" 2>/dev/null || true
+  sudo chown -R "$owner" "$d"
+  sudo chmod -R "$mode" "$d"
+  # setgid 只打在目录上;文件 mode 已经被上面 -R 设过
+  sudo find "$d" -type d -exec chmod g+s {} +
+  echo "  $d  ($owner $mode + setgid)"
+}
+
+echo "[1/5] 组:"
 ensure_group "$GID_CORE" "$GRP_CORE"
 ensure_group "$GID_DATA" "$GRP_DATA"
 
-echo "[2/6] 用户加组(幂等):"
-echo "  $GRP_CORE:"
+echo "[2/5] 成员:"
 for u in "${CORE_MEMBERS[@]}"; do ensure_member "$u" "$GRP_CORE"; done
-echo "  $GRP_DATA:"
 for u in "${DATA_MEMBERS[@]}"; do ensure_member "$u" "$GRP_DATA"; done
 
-echo "[3/6] 清理 per-author 残留(早期 A 模式的 alpha-author-*):"
-stale_groups=()
-while IFS= read -r line; do
-  [[ -n "$line" ]] && stale_groups+=("$line")
-done < <(getent group | awk -F: '$1 ~ /^alpha-author-/ {print $1}')
-
-if (( ${#stale_groups[@]} == 0 )); then
-  echo "  无残留"
+echo "[3/5] 清理 alpha-author-* 残留:"
+mapfile -t stale < <(getent group | awk -F: '$1 ~ /^alpha-author-/ {print $1}')
+if (( ${#stale[@]} == 0 )); then
+  echo "  无"
 else
-  for grp in "${stale_groups[@]}"; do
-    members=$(getent group "$grp" | awk -F: '{print $4}')
-    if [[ -n "$members" ]]; then
-      IFS=',' read -ra arr <<< "$members"
-      for m in "${arr[@]}"; do
-        [[ -z "$m" ]] && continue
-        sudo gpasswd -d "$m" "$grp" >/dev/null
-        echo "  - $m from $grp"
-      done
-    fi
-    sudo groupdel "$grp"
-    echo "  groupdel $grp"
+  for g in "${stale[@]}"; do
+    members=$(getent group "$g" | awk -F: '{print $4}')
+    IFS=',' read -ra arr <<< "$members"
+    for m in "${arr[@]}"; do [[ -n "$m" ]] && sudo gpasswd -d "$m" "$g" >/dev/null && echo "  - $m from $g"; done
+    sudo groupdel "$g"
+    echo "  groupdel $g"
   done
 fi
 
-echo "[4/6] 设置 alpha_pnl / alpha_feature (root:$GRP_DATA 2770,全员读写):"
-for d in "$PNL_ROOT" "$FEAT_ROOT"; do
-  [[ -d "$d" ]] || { echo "  skip $d (不存在)"; continue; }
-  sudo setfacl -R -b "$d" 2>/dev/null || true
-  sudo setfacl -R -k "$d" 2>/dev/null || true
-  sudo chown -R "root:$GRP_DATA" "$d"
-  sudo chmod -R u=rwX,g=rwX,o= "$d"
-  sudo find "$d" -type d -exec chmod g+s {} +
-  sudo setfacl -R -d -m "g:$GRP_DATA:rwx" "$d"
-  echo "  $d set"
-done
+echo "[4/5] JFS (alpha_src / alpha_pnl / alpha_feature):"
+apply_dir "$SRC"  "root:$GRP_CORE" "u=rwX,g=rX,o="
+apply_dir "$PNL"  "root:$GRP_DATA" "u=rwX,g=rwX,o=rX"
+apply_dir "$FEAT" "root:$GRP_DATA" "u=rwX,g=rwX,o=rX"
 
-echo "[5/6] 设置 alpha_src 整棵 (root:$GRP_CORE 2750,研究员零直接写):"
-if [[ -d "$SRC_ROOT" ]]; then
-  # 清旧 ACL(A 模式给过 alpha-data / alpha-core 之类的 named entries)
-  sudo setfacl -R -b "$SRC_ROOT" 2>/dev/null || true
-  sudo setfacl -R -k "$SRC_ROOT" 2>/dev/null || true
-  sudo chown -R "root:$GRP_CORE" "$SRC_ROOT"
-  # 目录 2750 = setgid + g rx,文件 640
-  sudo chmod -R u=rwX,g=rX,o= "$SRC_ROOT"
-  sudo find "$SRC_ROOT" -type d -exec chmod g+s {} +
-  echo "  $SRC_ROOT  (root:$GRP_CORE 2750)"
-else
-  echo "  $SRC_ROOT 不存在,跳过"
+echo "[5/5] 本地 sidecar ($LOCAL):"
+if [[ ! -d "$LOCAL" ]]; then
+  echo "  $LOCAL 不存在,先跑 08-relocate-local-dirs.sh"; exit 1
 fi
 
-echo "[6/6] 设置本地 sidecar $JFS_LOCAL_DIR (root:$GRP_DATA 2770,所有研究员读写):"
-if [[ -d "$JFS_LOCAL_DIR" ]]; then
-  sudo setfacl -R -b "$JFS_LOCAL_DIR" 2>/dev/null || true
-  sudo setfacl -R -k "$JFS_LOCAL_DIR" 2>/dev/null || true
-  sudo chown -R "root:$GRP_DATA" "$JFS_LOCAL_DIR"
-  sudo chmod -R u=rwX,g=rwX,o= "$JFS_LOCAL_DIR"
-  sudo find "$JFS_LOCAL_DIR" -type d -exec chmod g+s {} +
-  sudo setfacl -R -d -m "g:$GRP_DATA:rwx" "$JFS_LOCAL_DIR"
-  echo "  $JFS_LOCAL_DIR set"
+# 顶层:可穿越
+sudo chown "root:$GRP_DATA" "$LOCAL"
+sudo chmod 2755 "$LOCAL"
+echo "  $LOCAL  (root:$GRP_DATA 2755)"
+
+apply_dir "$STAGING" "root:$GRP_CORE" "u=rwX,g=rwX,o="
+apply_dir "$DUMP"    "root:$GRP_DATA" "u=rwX,g=rwX,o=rX"
+
+# recycle: sticky 顶层,子目录(已嵌套一层 unixId)按用户单独 chown
+if [[ -d "$RECYCLE" ]]; then
+  sudo chown root:root "$RECYCLE"
+  sudo chmod 1755 "$RECYCLE"
+  sudo chmod g-s "$RECYCLE"   # 清掉早期 09 留下的 setgid
+  echo "  $RECYCLE  (root:root 1755 sticky)"
+  for sub in "$RECYCLE"/*/; do
+    [[ -d "$sub" ]] || continue
+    uid=$(basename "$sub")
+    if ! getent passwd "$uid" >/dev/null; then
+      echo "  WARN: recycle/$uid 没对应系统用户,跳过"; continue
+    fi
+    pgrp=$(id -gn "$uid")
+    sudo chown -R "$uid:$pgrp" "$sub"
+    sudo chmod -R u=rwX,g=,o= "$sub"
+    sudo find "$sub" -type d -exec chmod g-s {} +  # 清掉早期 setgid
+    echo "  $sub  ($uid:$pgrp 0700)"
+  done
 else
-  echo "  $JFS_LOCAL_DIR 不存在,跳过(先跑 08-relocate-local-dirs.sh)"
+  echo "  $RECYCLE 不存在,跳过"
 fi
 
 echo
 echo "DONE."
 echo
-echo "wbai 当前 shell 没获得新组身份。临时切换验证:"
-echo "  exec sg $GRP_CORE -c bash"
-echo "  id   # 应看到 $GRP_CORE / $GRP_DATA;不应再看到 alpha-author-wbai"
+echo "前置:研究员 shell 必须 umask 0002,否则新文件 g-w 组写失效。"
+echo "  echo 'umask 0002' | sudo tee /etc/profile.d/ops-umask.sh && sudo chmod 644 /etc/profile.d/ops-umask.sh"
+echo
+echo "组身份在当前 SSH session 没生效,验证用:"
+echo "  sg $GRP_CORE -c 'id; ls $SRC'"
+echo "  sg $GRP_DATA -c 'id; ls $PNL'"
