@@ -11,7 +11,8 @@
 #      写到 /etc/juicefs/<name>.env (0600 root:root)
 #   4. 测试到 meta-host 的 redis AUTH
 #   5. 渲染 + 启动 juicefs-<name>.service(JFS_REDIS_LOCAL=0)
-#   6. ls 挂载点确认看到主节点数据
+#   6. 本机 groups (alpha-core 59000 / alpha-data 59001) + umask 0002 + 本地 sidecar
+#   7. ls 挂载点确认看到主节点数据
 #
 # 用法:
 #   sudo -E bash join.sh \
@@ -58,14 +59,14 @@ done
 require_sudo
 
 # ============================================================
-# [0/5] per-host 路径覆盖 -> /etc/juicefs-poc.env
+# [0/6] per-host 路径覆盖 -> /etc/juicefs-poc.env
 # ============================================================
 HOST_ENV="/etc/juicefs-poc.env"
 HOST_ENV_EXISTS=0
 sudo test -f "$HOST_ENV" && HOST_ENV_EXISTS=1
 
 if [[ -n "$ARG_MOUNT$ARG_CACHE$ARG_LOCAL" || $HOST_ENV_EXISTS -eq 0 ]]; then
-  info "==> [0/5] 路径覆盖 -> $HOST_ENV"
+  info "==> [0/6] 路径覆盖 -> $HOST_ENV"
   # 读旧值(如果有),命令行参数覆盖之
   OLD_MOUNT="" OLD_CACHE="" OLD_LOCAL=""
   if (( HOST_ENV_EXISTS )); then
@@ -107,14 +108,14 @@ require_bin curl
 require_bin redis-cli "apt install redis-tools"
 require_tcp "$META_HOST" "$META_PORT" 5
 
-info "==> [1/5] juicefs client"
+info "==> [1/6] juicefs client"
 if command -v juicefs >/dev/null; then
   info "  已装: $(juicefs version | head -1)"
 else
   JFS_CLIENT_ONLY=1 sudo -E bash ./00-install.sh
 fi
 
-info "==> [2/5] 密码 -> $ENV_FILE"
+info "==> [2/6] 密码 -> $ENV_FILE"
 sudo install -d -m 0700 -o root -g root /etc/juicefs
 
 if sudo test -f "$ENV_FILE"; then
@@ -137,12 +138,12 @@ else
   info "  写入完成 (0600 root:root)"
 fi
 
-info "==> [3/5] 测试 redis AUTH ($META_HOST:$META_PORT)"
+info "==> [3/6] 测试 redis AUTH ($META_HOST:$META_PORT)"
 sudo bash -c ". $ENV_FILE && redis-cli -h $META_HOST -p $META_PORT -a \"\$META_PASSWORD\" ping" 2>/dev/null \
   | grep -q PONG || err "AUTH 失败,密码不对或网络问题"
 info "  PONG"
 
-info "==> [4/5] 渲染 unit + start"
+info "==> [4/6] 渲染 unit + start"
 # 注意:JFS_META_URL 在这里通过 env 传给 04-systemd.sh,
 # 04-systemd.sh 会 source 它自己的 config.sh(也会 pick up /etc/juicefs-poc.env)
 JFS_META_URL="$META_URL" JFS_REDIS_LOCAL=0 sudo -E bash ./04-systemd.sh >/dev/null
@@ -155,7 +156,53 @@ else
   info "  $SVC started"
 fi
 
-info "==> [5/5] 验证挂载点"
+info "==> [5/6] 本机 groups + umask + sidecar"
+# JFS 里文件 gid 是数字 (59000/59001),本机要有同 gid 的组名才解析得了,
+# 组成员才能跑 chmod g+w 之类。client 侧只 inline 这几行,不绕 02-layout。
+GID_CORE=59000
+GID_DATA=59001
+GRP_CORE=alpha-core
+GRP_DATA=alpha-data
+for pair in "$GID_CORE:$GRP_CORE" "$GID_DATA:$GRP_DATA"; do
+  gid=${pair%:*}; name=${pair#*:}
+  if getent group "$name" >/dev/null; then
+    cur=$(getent group "$name" | cut -d: -f3)
+    [[ "$cur" == "$gid" ]] || err "组 $name 已存在但 gid=$cur != $gid"
+    info "  $name (gid=$gid) 已存在"
+  elif getent group "$gid" >/dev/null; then
+    err "gid $gid 已被 '$(getent group "$gid" | cut -d: -f1)' 占用"
+  else
+    sudo groupadd -g "$gid" "$name"
+    info "  + $name (gid=$gid)"
+  fi
+done
+TARGET_USER="${SUDO_USER:-$USER}"
+for grp in "$GRP_CORE" "$GRP_DATA"; do
+  if id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx "$grp"; then
+    info "  $TARGET_USER 已在 $grp"
+  else
+    sudo usermod -aG "$grp" "$TARGET_USER"
+    info "  + $TARGET_USER -> $grp"
+  fi
+done
+UMASK_FILE=/etc/profile.d/ops-umask.sh
+if [[ -f "$UMASK_FILE" ]] && grep -q 'umask 0002' "$UMASK_FILE"; then
+  info "  $UMASK_FILE 已就绪"
+else
+  echo 'umask 0002' | sudo tee "$UMASK_FILE" >/dev/null
+  sudo chmod 644 "$UMASK_FILE"
+  info "  + $UMASK_FILE"
+fi
+# 本地 sidecar:JFS 里 alpha_dump/staging/recycle 是 symlink -> $JFS_LOCAL_DIR/*,
+# symlink target 是绝对路径,所以本机这些目录必须存在(且 JFS_LOCAL_DIR 必须和主节点一致)。
+sudo mkdir -p "$JFS_LOCAL_DIR"/{alpha_dump,staging,recycle}
+sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR";              sudo chmod 2755 "$JFS_LOCAL_DIR"
+sudo chown "root:$GRP_CORE" "$JFS_LOCAL_DIR/staging";      sudo chmod 2770 "$JFS_LOCAL_DIR/staging"
+sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR/alpha_dump";   sudo chmod 2775 "$JFS_LOCAL_DIR/alpha_dump"
+sudo chown root:root        "$JFS_LOCAL_DIR/recycle";      sudo chmod 1755 "$JFS_LOCAL_DIR/recycle"
+info "  $JFS_LOCAL_DIR/{alpha_dump,staging,recycle} 就绪"
+
+info "==> [6/6] 验证挂载点"
 require_mountpoint "$JFS_MOUNT"
 info "  $JFS_MOUNT mounted"
 ls "$JFS_MOUNT" | sed 's/^/    /'
@@ -163,3 +210,4 @@ ls "$JFS_MOUNT" | sed 's/^/    /'
 echo
 info "DONE. 跨节点挂载就绪。"
 info "  systemctl status $SVC"
+info "  组身份在已开的 SSH session 没生效,验证用 'sg $GRP_CORE -c id' 或重连"
