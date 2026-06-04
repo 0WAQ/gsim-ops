@@ -219,8 +219,8 @@ fi
 # symlink target 是绝对路径,所以本机这些目录必须存在(且 JFS_LOCAL_DIR 必须和主节点一致)。
 sudo mkdir -p "$JFS_LOCAL_DIR"/{alpha_dump,staging,recycle}
 sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR";              sudo chmod 2755 "$JFS_LOCAL_DIR"
-sudo chown "root:$GRP_CORE" "$JFS_LOCAL_DIR/staging";      sudo chmod 2770 "$JFS_LOCAL_DIR/staging"
-sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR/alpha_dump";   sudo chmod 2775 "$JFS_LOCAL_DIR/alpha_dump"
+sudo chown "root:$GRP_CORE" "$JFS_LOCAL_DIR/staging";      sudo chmod 2750 "$JFS_LOCAL_DIR/staging"
+sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR/alpha_dump";   sudo chmod 2755 "$JFS_LOCAL_DIR/alpha_dump"
 sudo chown root:root        "$JFS_LOCAL_DIR/recycle";      sudo chmod 1755 "$JFS_LOCAL_DIR/recycle"
 info "  $JFS_LOCAL_DIR/{alpha_dump,staging,recycle} 就绪"
 

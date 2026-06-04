@@ -6,10 +6,10 @@
 #   [1/5] pre-flight (mount / 源存在 / writeback 当前队列 / cache 空间)
 #   [2/5] rsync -a (增量,可重跑)
 #   [3/5] 等 writeback 队列清零 (juicefs_staging_blocks=0),保证 chunk 都到 S3
-#   [4/5] 修正 ownership 到权限模型:
-#         alpha_src:  chown -R :alpha-core   (保留作者 user)
+#   [4/5] 修正 ownership 到权限模型 (集中运维, 仅 sudo 写):
+#         alpha_src:                 chown -R root:alpha-core
 #         alpha_pnl / alpha_feature: chown -R root:alpha-data
-#         模式按目录类型套 (dir 含 setgid;文件 644/640)
+#         模式按目录类型套 (dir 含 setgid;文件 0640/0644)
 #   [5/5] 对账 (文件数 + du -sb + 抽样 md5)
 #
 # 用法:
@@ -154,16 +154,16 @@ for d in "${DIRS[@]}"; do
   T="$JFS_MOUNT/$d"
   case "$d" in
     alpha_src)
-      info "  $d: chown -R :$GRP_CORE (保留 author user)"
-      sudo chown -R ":$GRP_CORE" "$T"
+      info "  $d: chown -R root:$GRP_CORE"
+      sudo chown -R "root:$GRP_CORE" "$T"
       sudo find "$T" -type d -exec chmod 2750 {} +    # rwxr-s---
       sudo find "$T" -type f -exec chmod 0640 {} +    # rw-r-----
       ;;
     alpha_pnl|alpha_feature)
       info "  $d: chown -R root:$GRP_DATA"
       sudo chown -R "root:$GRP_DATA" "$T"
-      sudo find "$T" -type d -exec chmod 2775 {} +    # rwxrwsr-x
-      sudo find "$T" -type f -exec chmod 0664 {} +    # rw-rw-r--
+      sudo find "$T" -type d -exec chmod 2755 {} +    # rwxr-sr-x
+      sudo find "$T" -type f -exec chmod 0644 {} +    # rw-r--r--
       ;;
   esac
 done

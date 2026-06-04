@@ -229,7 +229,7 @@ tail -f /tmp/jfs-migrate.log
 1. **pre-flight** — mount 可达 / 源存在 / writeback 当前队列空 / cache 空间
 2. **rsync -a** — 增量同步,中断重跑续传
 3. **等 writeback drain** — `juicefs_staging_blocks=0` 才进下一步,防 cache 里有未上传 chunk = 关机丢
-4. **修正 ownership** — `alpha_src: chown -R :alpha-core` 保留作者 user;`alpha_pnl/feature: chown -R root:alpha-data`;dir 加 setgid
+4. **修正 ownership** — `alpha_src: chown -R root:alpha-core`;`alpha_pnl/feature: chown -R root:alpha-data`;dir 加 setgid。集中运维,所有写都走 sudo
 5. **对账** — 文件数 / 字节数 / 抽样 N 个 md5 (默认 10,环境变量 `SAMPLE_N=50` 可调)
 
 ## 健康检查
@@ -254,33 +254,33 @@ sudo -E bash verify.sh redis-fail   # Redis kill 注入(需 sudo)
 
 ## 权限模型
 
-两组,owner 一律 root(recycle 子目录除外),enforcement 走 gid。**不用 POSIX ACL**,靠 setgid + umask 0002。
+**集中运维**:owner 一律 root(recycle 子目录除外),所有写都通过 sudo。group 仅作跨机一致性 label,不授予写权限。**不用 POSIX ACL**,只靠 setgid 继承组。
 
 | 组 | gid | 成员 | 作用 |
 |---|---|---|---|
 | `alpha-core` | 59000 | wbai | 读 alpha_src / staging |
-| `alpha-data` | 59001 | wbai | 读写 alpha_pnl / alpha_feature / alpha_dump |
+| `alpha-data` | 59001 | wbai | 读 alpha_pnl / alpha_feature / alpha_dump |
 
 ```
 JFS  /tank/vault/alphalib/        root:alpha-data 2755
-├── alpha_src/       root:alpha-core 2750     core 读
-├── alpha_pnl/       root:alpha-data 2775     data 读写, others 读
-├── alpha_feature/   root:alpha-data 2775     data 读写, others 读
+├── alpha_src/       root:alpha-core 2750     core 读, 仅 sudo 写
+├── alpha_pnl/       root:alpha-data 2755     data 读, 仅 sudo 写
+├── alpha_feature/   root:alpha-data 2755     data 读, 仅 sudo 写
 ├── alpha_dump  →    /tank/vault/alphalib.local/alpha_dump   (symlink)
 ├── staging     →    /tank/vault/alphalib.local/staging      (symlink)
 └── recycle     →    /tank/vault/alphalib.local/recycle      (symlink)
 
 本地 /tank/vault/alphalib.local/   root:alpha-data 2755
-├── staging/         root:alpha-core 2770     core 读写
-├── alpha_dump/      root:alpha-data 2775     data 读写, others 读
+├── staging/         root:alpha-core 2750     core 读, 仅 sudo 写
+├── alpha_dump/      root:alpha-data 2755     data 读, 仅 sudo 写
 └── recycle/         root:root       1755     sticky
     └── <unixId>/    <unixId>:<grp>  0700     只用户自己
 ```
 
 - gid 选 59xxx(GID_MAX=60000 以下,避开 7/8/9000 常见段)
-- `alpha_src / staging` 没有 others 位:研究员看自己代码走外部入口,不直接读 FS
-- `recycle` 嵌套一层 unixId,`02-layout.sh` 按现有子目录名 `chown <unixId>:<primary>`
-- umask 0002 必须在 `/etc/profile.d/ops-umask.sh` 装好
+- 所有 ops 写路径(`submit / resubmit / recheck / check / pack / rm` 等)必须 sudo 跑;Phase C 之前需要补 sudo wrapper 让 `uv run ops ...` 自动 elevate
+- `recycle` 是研究员私有,嵌套一层 unixId 由用户自己写;sticky bit 防互删
+- `alpha-core/alpha-data` 组 membership 主要用途:跨机器统一 group label(NFS / FUSE 上 gid 数字必须各机一致),并保证未来若放开 group write 位时不需要重 chown
 
 ## 验证结果
 

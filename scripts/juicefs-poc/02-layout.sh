@@ -47,9 +47,8 @@ ensure_member() {
 }
 
 # 只设顶层目录的 owner/mode/setgid。内层文件 ownership 交给具体业务流程:
-#   新建因子 = ops/submit
-#   数据迁移 = 05-migrate.sh (保留作者 uid, 只标 group)
-# 这里 recursive chown 会把作者强制变 root,毁掉 alpha_src 权限模型。
+#   新建因子 = ops/submit (集中运维, 只 sudo 写)
+#   数据迁移 = 05-migrate.sh (递归 chown root 到位)
 apply_top_dir() {
   local d=$1 owner=$2 mode=$3
   [[ -d "$d" ]] || { info "  skip $d (不存在)"; return; }
@@ -109,14 +108,14 @@ info "[4/4] 应用权限"
 sudo chown "root:$GRP_DATA" "$JFS_MOUNT"; sudo chmod 2755 "$JFS_MOUNT"
 info "  $JFS_MOUNT  (root:$GRP_DATA 2755)"
 apply_top_dir "$JFS_MOUNT/alpha_src"     "root:$GRP_CORE" 2750
-apply_top_dir "$JFS_MOUNT/alpha_pnl"     "root:$GRP_DATA" 2775
-apply_top_dir "$JFS_MOUNT/alpha_feature" "root:$GRP_DATA" 2775
+apply_top_dir "$JFS_MOUNT/alpha_pnl"     "root:$GRP_DATA" 2755
+apply_top_dir "$JFS_MOUNT/alpha_feature" "root:$GRP_DATA" 2755
 
 # 本地 sidecar 顶层
 sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR"; sudo chmod 2755 "$JFS_LOCAL_DIR"
 info "  $JFS_LOCAL_DIR  (root:$GRP_DATA 2755)"
-apply_top_dir "$JFS_LOCAL_DIR/staging"    "root:$GRP_CORE" 2770
-apply_top_dir "$JFS_LOCAL_DIR/alpha_dump" "root:$GRP_DATA" 2775
+apply_top_dir "$JFS_LOCAL_DIR/staging"    "root:$GRP_CORE" 2750
+apply_top_dir "$JFS_LOCAL_DIR/alpha_dump" "root:$GRP_DATA" 2755
 
 # recycle: sticky 顶层, 子目录(嵌套一层 unixId)按用户单独 chown
 RECYCLE="$JFS_LOCAL_DIR/recycle"
