@@ -169,12 +169,20 @@ def _recheck_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
         removed = _purge_artifacts(name, config)
         for r in removed:
             info(f"    ✔ 已删除 {r}")
-        # REJECTED 额外清 pnl(alpha_pnl/<name> 是单文件,不是目录)
+        # REJECTED 额外清 pnl + recycle 归档
+        # alpha_pnl/<name> 是单文件,不是目录
         if rec.status == FactorStatus.REJECTED:
             pnl = config.alpha_pnl / name
             if pnl.exists():
                 pnl.unlink()
                 info(f"    ✔ 已删除 alpha_pnl/{name}")
+            # recycle/{author}/{stage}/<name>/ 归档目录:离开 REJECTED 后已无意义,
+            # 不清会留死目录(参见 approve.py 同名清理逻辑)
+            if rec.last_fail_stage:
+                recycle_dir = config.recycle / rec.author / rec.last_fail_stage / name
+                if recycle_dir.exists():
+                    shutil.rmtree(recycle_dir)
+                    info(f"    ✔ 已删除 recycle/{rec.author}/{rec.last_fail_stage}/{name}")
 
     store.transition(name, FactorStatus.SUBMITTED)
     info(f"  ✔ {name} {prev_status} → submitted")

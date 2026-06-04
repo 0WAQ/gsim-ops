@@ -25,6 +25,7 @@
 - 默认仅搬源 + 翻状态；dump / feature / pnl 保留
 - `--purge`: 清除 dump + feature（pnl 始终保留）
 - purge 复用 `rm.py` 的 `_purge_artifacts`
+- REJECTED recheck 额外清 `alpha_pnl/<name>` 单文件 + `recycle/{author}/{stage}/<name>/` 归档目录（与 `approve.py` 对齐，避免离开 REJECTED 后留死目录）
 
 ## 并发安全
 
