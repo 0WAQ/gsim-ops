@@ -72,16 +72,28 @@ def _hash_to_record(h: dict[str, str], checks: list[CheckRecord]) -> FactorRecor
 
 class RedisStateStore(StateStore):
     def __init__(self, url: str, library_id: str, password: str | None = None):
-        # redis.from_url honors redis://<user>:<pass>@host:port/db; we also
-        # accept password as a separate kwarg so callers can keep the URL
-        # password-free (matches the EnvironmentFile pattern in the juicefs unit).
+        # Parse url ourselves and pass discrete kwargs to redis.Redis() instead
+        # of from_url(). redis-py 8.x defaults to RESP3 / HELLO handshake; on a
+        # requirepass-only server (no ACL user) HELLO fails with
+        #   "HELLO must be called with the client already authenticated"
+        # protocol=2 forces classic AUTH-then-commands. from_url() in 8.x has
+        # been observed to ignore/override `protocol` -- direct construction is
+        # the reliable knob.
         parsed = urlparse(url)
-        if parsed.password is None and password:
-            netloc = parsed.hostname or "127.0.0.1"
-            if parsed.port:
-                netloc = f"{netloc}:{parsed.port}"
-            url = f"{parsed.scheme}://:{password}@{netloc}{parsed.path or ''}"
-        self.r = redis.Redis.from_url(url, decode_responses=True, socket_timeout=5)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 6379
+        db_str = (parsed.path or "/0").lstrip("/")
+        db = int(db_str) if db_str else 0
+        pwd = password or parsed.password
+        self.r = redis.Redis(
+            host=host,
+            port=port,
+            db=db,
+            password=pwd,
+            decode_responses=True,
+            socket_timeout=5,
+            protocol=2,
+        )
         self.lib = library_id
         self._meta_key = f"state-meta:{self.lib}"
         self._index_key = f"state-index:{self.lib}"
