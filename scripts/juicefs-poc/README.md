@@ -169,7 +169,18 @@ ssh <client> 'sudo bash /tmp/juicefs-poc/join.sh --meta-host 10.9.100.160 --meta
 
 ### Client 节点跑 ops 命令
 
-client 上跑 `ops list -c config.juicefs.yaml` 之类,需要两个 env(state 走 redis + 磁盘布局可能不同):
+**推荐:用 `ops-jfs` wrapper**(放在 `~/.local/bin/ops-jfs`):
+
+```bash
+ops-jfs list   # 自动 sudo 读 /etc/juicefs/*.env 取密码, 注入 OPS_STATE_REDIS_PASSWORD,
+               # 自动按 hostname 设 OPS_ALPHALIB_ROOT (目前 144 special-case),
+               # 自动找 config.juicefs.yaml 并加 -c。
+               # 第一次跑会 sudo 提示输密码; 之后 ~15min sudo timestamp 内不再问。
+```
+
+需要先把 wrapper 拷到每个节点:`scp ~/.local/bin/ops-jfs <node>:.local/bin/`,确认 `~/.local/bin` 在 `$PATH`。
+
+**手动方式**(原理):
 
 ```bash
 # JFS 元数据 redis 密码 (从 join.sh 写的 env 文件取, 144 上也是 alphalib.env)
@@ -311,6 +322,12 @@ PoC 完全独立,不动 `/mnt/storage/alphalib/`,不动现有任何路径。
 Client 节点单独退出:`sudo systemctl disable --now juicefs-alphalib.service`。
 
 ## 故障排除
+
+### 已知约束:`redis-server.service:6379` 还在跑但 PoC 不动它
+
+server-160 有两个 redis 实例:`redis-server.service:6379`(alphalib biz 业务,**non-PoC**)和 `redis-jfs.service:6380`(本 PoC 的 JuiceFS metadata + ops state)。06-meta-migrate.sh 之后,JuiceFS 跟 ops 全部连 6380,6379 上没有本 PoC 的 key,但**仍然属于 alphalib biz**,不能随便停或 disable。
+
+确认方式:`ss -tn '( sport = :6379 or dport = :6379 )'`,看到 biz 节点的连接就说明有人用。
 
 ### 卷已 format 还想重 format
 
@@ -544,3 +561,5 @@ sudo systemctl restart juicefs-alphalib.service
 - **redis-py 8.x 默认 HELLO 跟 requirepass-only server 不兼容**:8.x 默认发 RESP3 + HELLO 握手,如果 redis server 只配了 `requirepass`(没用 ACL `default` user),HELLO 会被拒绝(`HELLO must be called with the client already authenticated`)。修法:绕开 `from_url`,直接 `redis.Redis(host=..., port=..., password=..., protocol=2)`,protocol=2 强制走经典 AUTH-then-commands。`from_url` 在 8.x 上对 `protocol` kwarg 的处理被观察到会丢。代码见 `ops/infra/store/redis_store.py` 的 `__init__`
 - **`OPS_<VAR>` env 在 ssh 子进程要重 export**:`Config._resolve_vars` 支持任何 `vars:` 块 key 的 `OPS_` 前缀环境变量覆盖。客户端节点(磁盘布局跟主节点不同)必须先 `export OPS_ALPHALIB_ROOT=/storage/vault/alphalib`(或对应路径)再跑 `ops *`,否则 alpha_src 解析成主节点的 `/tank/vault/...`,本机不存在 = `No factors found`。永久化方案:写 ~/.bashrc 或 wrapper 脚本
 - **per-machine cache 跟 cross-node state 的混合**:state 进 redis 之后,跨节点强一致;但 `~/.cache/ops/lib/<library_id>/{index,metrics,bcorr}.json` 还是 per-machine(因为 LibraryScanner 还没改)。client 节点首次 `--refresh` 慢(3000+ stat 跨网络),要么等要么 scp 主节点的 cache 过来。长期方向:LibraryScanner cache 也搬 redis
+- **`index.json` 里 `src_path` 是主节点绝对路径**:144 mount 在 `/storage/vault/alphalib/` 而非 `/tank/vault/alphalib/`,但 LibraryScanner 序列化的 `src_path` 是 cache 写入时那台机器的视角。从主节点 scp 来的 cache,在 144 上 `ops info` 会打印 `/tank/vault/...`,`ops list --refresh-datasources` 会 silently 解析失败。cache key 是 `md5(config_path)` 不含 `alphalib_root`,所以 `--refresh` 也不会重建出本机视角的路径。修法目前是让每个节点本地 `--refresh`(就接受首次慢);根治需要把 `src_path` 改成相对 `alphalib_root` 存,运行时拼起来
+- **`usermod -aG` 不影响已开的 SSH session 的 supplementary groups**:把 wbai 加到 alpha-core / alpha-data 之后,**当前已经登录的 SSH session 看不到新组**,所有走 group 权限的访问都 EACCES(典型现象:`ls /tank/vault/alphalib/staging` 报 Permission denied,但其他登录方式 / `sudo -u wbai ls ...` 能看到)。`id wbai` 显示对了但 `id -nG`(当前 process supplementary groups)还是旧的。修法:**退出当前 SSH 重连**,或 `exec sg alpha-core bash`,或 `newgrp alpha-core`(单 shell 临时)。`02-layout.sh` / `join.sh` 跑完都应该提示重连

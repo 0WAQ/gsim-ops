@@ -107,6 +107,13 @@ else
     echo "JFS_META_URL=$NEW_META_URL" | sudo tee -a "$HOST_ENV" >/dev/null
     echo 'JFS_REDIS_LOCAL=0' | sudo tee -a "$HOST_ENV" >/dev/null
     info "==> [0/6] 补写 JFS_META_URL=$NEW_META_URL -> $HOST_ENV"
+  else
+    # 已有 JFS_META_URL 但可能不规范 (老版本可能缺 /0 db 后缀)
+    CUR_URL=$(sudo grep -E '^JFS_META_URL=' "$HOST_ENV" | head -1 | cut -d= -f2-)
+    if [[ "$CUR_URL" != "$NEW_META_URL" ]]; then
+      sudo sed -i "s|^JFS_META_URL=.*|JFS_META_URL=$NEW_META_URL|" "$HOST_ENV"
+      info "==> [0/6] normalize JFS_META_URL: $CUR_URL -> $NEW_META_URL"
+    fi
   fi
 fi
 

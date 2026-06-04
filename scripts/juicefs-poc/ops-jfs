@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# ops-jfs: wrapper that runs `ops` against config.juicefs.yaml with the
+# two env vars it needs (state redis password + per-host alphalib path).
+#
+# Setup expectations:
+#   - /etc/juicefs/alphalib-jfs.env (master node, root:root 600) OR
+#     /etc/juicefs/alphalib.env     (client node, root:root 600)
+#     contains META_PASSWORD=<48-hex-chars>
+#   - This wrapper needs to run `sudo grep` to read it. sudo password will
+#     prompt once per session (sudo timestamp caches ~15 min).
+#
+# Optional override (skip the sudo dance):
+#   - Set OPS_STATE_REDIS_PASSWORD in your shell yourself, then this script
+#     uses your value and never calls sudo.
+#
+# Per-host alphalib mount root override -- only needed when the local
+# JuiceFS mount root differs from config.juicefs.yaml's default
+# (/tank/vault/alphalib). Set OPS_ALPHALIB_ROOT in your environment, or
+# add a host-specific block below.
+
+set -euo pipefail
+
+# --- pick the env file ---
+ENV_FILE_CANDIDATES=(
+  /etc/juicefs/alphalib-jfs.env   # master / 06-redis-jfs.sh provisioned
+  /etc/juicefs/alphalib.env       # client / join.sh provisioned
+)
+
+# --- per-host alphalib root override (extend as needed) ---
+if [[ -z "${OPS_ALPHALIB_ROOT:-}" ]]; then
+  case "$(hostname -s 2>/dev/null || hostname)" in
+    intel-workstation-144) export OPS_ALPHALIB_ROOT=/storage/vault/alphalib ;;
+    # 160 / 150 use the config default, no override
+  esac
+fi
+
+if [[ -z "${OPS_STATE_REDIS_PASSWORD:-}" ]]; then
+  PWD_FILE=""
+  for f in "${ENV_FILE_CANDIDATES[@]}"; do
+    if sudo test -r "$f" 2>/dev/null; then
+      PWD_FILE=$f
+      break
+    fi
+  done
+  if [[ -z "$PWD_FILE" ]]; then
+    echo "ops-jfs: no readable /etc/juicefs/*.env found, set OPS_STATE_REDIS_PASSWORD by hand" >&2
+    exit 1
+  fi
+  PWD_VAL=$(sudo grep -oP 'META_PASSWORD=\K.*' "$PWD_FILE")
+  if [[ -z "$PWD_VAL" ]]; then
+    echo "ops-jfs: META_PASSWORD not found in $PWD_FILE" >&2
+    exit 1
+  fi
+  export OPS_STATE_REDIS_PASSWORD=$PWD_VAL
+fi
+
+# --- find config.juicefs.yaml ---
+if [[ -n "${OPS_JFS_CONFIG:-}" ]]; then
+  CFG=$OPS_JFS_CONFIG
+elif [[ -f "$PWD/config.juicefs.yaml" ]]; then
+  CFG=$PWD/config.juicefs.yaml
+elif [[ -f "$HOME/gsim-ops/config.juicefs.yaml" ]]; then
+  CFG=$HOME/gsim-ops/config.juicefs.yaml
+else
+  echo "ops-jfs: cannot find config.juicefs.yaml -- cd into the ops repo or set OPS_JFS_CONFIG" >&2
+  exit 1
+fi
+
+# --- exec ops with -c injected before remaining args ---
+exec uv run --project "$(dirname "$CFG")" ops -c "$CFG" "$@"
