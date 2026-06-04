@@ -108,3 +108,12 @@ mode:
 # 防止和生产 alphalib(同名 parent.name=alphalib)共用 factor_state.json
 sync:
   library_id: alphalib-juicefs
+
+# 多节点 state 走独立 redis 实例 (6380),跟 JuiceFS metadata 共生
+# 密码不在这里 —— 由 OPS_STATE_REDIS_PASSWORD 环境变量注入
+# (在 160 上: export OPS_STATE_REDIS_PASSWORD=$(sudo grep -oP 'META_PASSWORD=\K.*' /etc/juicefs/alphalib-jfs.env))
+state:
+  backend: redis
+  redis:
+    url: redis://10.9.100.160:6380/0
+    # password: 见上面环境变量

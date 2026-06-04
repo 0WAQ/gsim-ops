@@ -256,17 +256,17 @@ def run_pack(args):
 
     # 按 user/status 过滤
     if user or status:
-        from ops.infra.store import JsonStateStore
-        store = JsonStateStore(config.state_file)
+        from ops.infra.store import default_store
+        store = default_store(config)
         records = store.list()
 
         filtered = set()
         for r in records:
-            if user and r.get("author") != user:
+            if user and r.author != user:
                 continue
-            if status and r.get("status") != status:
+            if status and r.status.value != status:
                 continue
-            filtered.add(r["name"])
+            filtered.add(r.name)
 
         before = len(candidates)
         candidates = [n for n in candidates if n in filtered]

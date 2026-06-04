@@ -102,6 +102,20 @@ class Config:
         self.s3_secret_access_key: str | None = s3_cfg.get("secret_access_key")
         self.s3_bucket: str | None = s3_cfg.get("bucket")
 
+        # state backend (optional, default JSON file in ~/.cache/ops/lib/<library_id>/)
+        # set state.backend: redis + state.redis.{url, password_env|password} to use the
+        # multi-node redis store. PoC -- see scripts/juicefs-poc/06-redis-jfs.sh
+        state_cfg: Dict[str, Any] = config.get("state") or {}
+        self.state_backend: str = state_cfg.get("backend") or "json"
+        redis_cfg: Dict[str, Any] = state_cfg.get("redis") or {}
+        self.state_redis_url: str | None = redis_cfg.get("url")
+        # password resolution order: password (literal) > password_env > $OPS_STATE_REDIS_PASSWORD
+        pwd: str | None = redis_cfg.get("password")
+        if pwd is None:
+            env_var = redis_cfg.get("password_env") or "OPS_STATE_REDIS_PASSWORD"
+            pwd = os.environ.get(env_var)
+        self.state_redis_password: str | None = pwd
+
     @staticmethod
     def _resolve_vars(raw: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve ${var_name} references in config values.
