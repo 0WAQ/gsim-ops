@@ -224,6 +224,7 @@ JFS  /tank/vault/alphalib/        root:alpha-data 2755
 - [x] 数据迁移流程脚本化(`05-migrate.sh`)
 - [x] 健康检查(`status.sh`)
 - [x] 服务器异常重启场景验证(2026-06-03,writeback drain 中重启,数据完整)
+- [x] Redis metadata 灾备路径验证(2026-06-04,空 AOF 误覆盖事故,从 dump.rdb 备份完整恢复 69111 keys)
 - [ ] Redis Sentinel(需要第三台 sudo 节点)
 - [ ] 全量数据迁入(进行中)
 
@@ -316,6 +317,44 @@ cp ~/.cache/ops/lib/alphalib/factor_state.json \
 
 注意之后两份 state **独立不互通**。任何 `-c config.juicefs.yaml` 的写操作(submit/check/approve/rm 等)只动 juicefs 副本,prod 那边不会跟。PoC 期就是要这个隔离;长期切 JuiceFS 之前需要决定 state 走 sync 还是搬进 JFS 共享。
 
+### Redis 数据丢失 / `database is not formatted` 错误
+
+现象:`juicefs-alphalib.service` 反复 restart,journal 里 `<FATAL>: database is not formatted`,但 redis 还能 ping。`redis-cli dbsize` 跟期望差很多。
+
+根因可能:
+
+1. **空 AOF 优先于 RDB**:Redis 7 在 `appendonly` 从 no 切 yes 时如果 conf 直接改 + restart,会优先空 AOF 加载,RDB 被绕过(详见踩过的坑)
+2. **SHUTDOWN SAVE 写脏 dump.rdb**:`systemctl stop redis` 时如果内存不全,save 出来的 dump.rdb 会覆盖原本完好的(详见踩过的坑)
+
+恢复(参考 `/var/backups/redis-recover-*` 路径,假设 dump.rdb 备份还在):
+
+```bash
+# 1. stop redis 务必用 SHUTDOWN NOSAVE,不要 systemctl stop
+sudo bash -c '. /etc/juicefs/alphalib.env && redis-cli -a "$META_PASSWORD" config set save ""'
+sudo bash -c '. /etc/juicefs/alphalib.env && redis-cli -a "$META_PASSWORD" shutdown nosave'
+
+# 2. 临时 systemd override 防 auto-restart
+sudo mkdir -p /run/systemd/system/redis-server.service.d
+echo -e '[Service]\nRestart=no' | sudo tee /run/systemd/system/redis-server.service.d/recover.conf
+sudo systemctl daemon-reload
+
+# 3. 把好的 dump.rdb 搬回去, appendonlydir 里的 .aof 文件全清掉
+sudo cp /var/backups/redis-recover-<TS>/dump.rdb /var/lib/redis/dump.rdb
+sudo chown redis:redis /var/lib/redis/dump.rdb
+sudo rm -f /var/lib/redis/appendonlydir/*
+
+# 4. 启动 + 验证 dbsize, 然后运行时开 AOF + config rewrite (不要改 conf 重启)
+sudo systemctl start redis-server.service
+# 验证 dbsize 后 跑 03-redis.sh 自动开 AOF
+sudo -E bash scripts/juicefs-poc/03-redis.sh
+
+# 5. 清理 override
+sudo rm /run/systemd/system/redis-server.service.d/recover.conf
+sudo systemctl daemon-reload
+```
+
+实测 2026-06-04 在 160 上触发过一次,69111 个 JFS keys 全恢复。
+
 ## 踩过的坑
 
 - `rclone.conf` 的 `no_check_bucket = true` 让 `rclone mkdir` 假成功;`01-provision.sh` 加真 PutObject 兜底
@@ -331,3 +370,6 @@ cp ~/.cache/ops/lib/alphalib/factor_state.json \
 - 服务器异常重启数据没丢 = 三件事一起救:(a) systemd 走 ExecStop 三级链干净 unmount (b) JFS cache 在持久 FS (ZFS) 而不是 tmpfs (c) redis AOF on。任一缺一就有窗口风险。实测 2026-06-03 服务器重启时 staging=92912 (362G) 还在 cache,重启后从 cache 续传成功,数据完整;但 AOF 当时还是 off,RDB 周期救了一把,纯运气
 - `juicefs_object_request_errors` 是累积重试计数,不是丢数据指标。看比例:`errors / object_request_durations_*_total`,2-3% 在 MinIO 偶发限流/抖动是正常水位。真正的丢数据指标是 `juicefs_staging_block_errors`,必须为 0
 - `ops` 的 state (`factor_state.json`) 在 per-machine `~/.cache/ops/lib/<library_id>/`,不在 JFS 里也不被 rsync 带过来。换 config(改了 library_id)之后 list 看到的因子没 status,是这个原因。长期方案待定(state 进 JFS / 沿用 sync)
+- **Redis 7 切 AOF 雷**:在 `appendonly no` 状态下跑着的 redis,如果改 conf 加 `appendonly yes` + restart,redis 会 **创建空 AOF base + 优先于 RDB 加载**,数据归零(redis-cli 还能 ping、persistence info 显示 aof_enabled=1,但 dbsize=0)。dump.rdb 还在但被绕过。修法:不用重启,运行时 `config set appendonly yes` + 等 BGREWRITEAOF + `config rewrite` 写回 conf。03-redis.sh 已改成这个流程。实测 2026-06-04 在 server-160 触发过一次,69111 个 JFS keys 走运因为 dump.rdb 完好可恢复(`/var/backups/redis-recover-*`)
+- **多产品共用 redis db 的风险**:server-160 上 redis 6379/db0 同时被 alphalib 业务(session 数据)和 JuiceFS PoC 共用。代价:(a) 任何重启都得跨产品协调(如这次 AOF 切换误伤),(b) `redis-cli flushdb` 类操作影响面是产品集合并集 (c) `systemctl stop redis` 会触发 SHUTDOWN SAVE,如果当时 redis 内存不全(比如启动失败的退化状态),会用脏内存覆盖 dump.rdb。下次维护用 `redis-cli MIGRATE` 把 JFS 那批 keys 整体搬到独立实例 (6380) 或 db1
+- **`systemctl stop redis` 默认触发 SHUTDOWN SAVE**:redis-server.service 退出时 redis 会做一次 RDB save。如果当时内存里数据不完整(刚 boot 失败、还没 load 完、被人 flushdb 一半),这次 save 会写脏 dump.rdb,后续启动数据全废。安全停 redis 用 `redis-cli SHUTDOWN NOSAVE`,或者先 `config set save ''` 关 RDB 触发器再 stop
