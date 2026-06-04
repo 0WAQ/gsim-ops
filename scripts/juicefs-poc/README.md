@@ -19,6 +19,11 @@ Client 节点 150 / ...
 ├── JuiceFS client (FUSE)
 ├── /etc/juicefs/alphalib-jfs.env  (0600 root, META_PASSWORD)
 └── meta URL → redis://10.9.100.160:6380/0
+
+Client 节点 144 (磁盘布局不同, /storage/vault/ 而非 /tank/vault/)
+├── JuiceFS client (FUSE) -> /storage/vault/alphalib/
+├── /tank/vault/alphalib.local -> /storage/vault/alphalib.local  (软链, 让 JFS sidecar 绝对路径解析得到)
+└── 详见故障排除 "sidecar symlink 不一致" 情况 B
 ```
 
 挂载点 `/tank/vault/alphalib/`,和现有 `/mnt/storage/alphalib/` 并列,不冲突。
@@ -258,6 +263,7 @@ JFS  /tank/vault/alphalib/        root:alpha-data 2755
 - [x] 服务器异常重启场景验证(2026-06-03,writeback drain 中重启,数据完整)
 - [x] Redis metadata 灾备路径验证(2026-06-04,空 AOF 误覆盖事故,从 dump.rdb 备份完整恢复 69111 keys)
 - [x] 独立 redis 实例 6380(`06-redis-jfs.sh` / `06-meta-migrate.sh`,与 alphalib biz 进程级隔离)
+- [x] 第三节点 144 接入(2026-06-04,磁盘布局不同 `/storage/vault/`,通过软链对齐 sidecar 绝对路径)
 - [ ] Redis Sentinel(需要第三台 sudo 节点)
 - [ ] 全量数据迁入(160 已完成,后续节点按需迁)
 - [ ] state (`~/.cache/ops/lib/`) 进 JFS 或走 sync,长期方向待定
@@ -310,10 +316,36 @@ sudo bash /tmp/juicefs-poc/join.sh --meta-host <主节点 IP> --meta-port 6380  
 ### sidecar symlink 不一致
 
 `status.sh` / `join.sh` 末尾会报 `JFS 里 symlink target != 本机 JFS_LOCAL_DIR`。
-修法:让本机 `JFS_LOCAL_DIR` 跟主节点完全一致,改 `/etc/juicefs-poc.env` 重跑 `join.sh`。
-若主节点路径写错了,只能在主节点改路径 + 重做 sidecar(影响所有 client)。
 
-特殊情形:`readlink` 多了个尾斜杠(`alpha_dump/` vs `alpha_dump`)— 之前 `ln -sf <target>/` 留下的。修法:`sudo rm <link> && sudo ln -sn <target_no_slash> <link>`。
+JFS 里 alpha_dump / staging / recycle 是 symlink,target 是**绝对路径**(02-layout.sh 在主节点写死,例如 `/tank/vault/alphalib.local/alpha_dump`)。这个 target 跨节点共享,所有 client 必须有这个绝对路径才能解析。
+
+**情况 A:本机 `JFS_LOCAL_DIR` 跟主节点不一致(同一个 mount root)**
+
+改 `/etc/juicefs-poc.env` 让 `JFS_LOCAL_DIR` 跟主节点完全一致,重跑 `join.sh`。
+
+**情况 B:本机磁盘布局完全不同(例如 144:`/storage/vault/`,主节点:`/tank/vault/`)**
+
+不能改 mount root(本机就没那个路径),做软链让 JFS 的绝对路径在本机能解析:
+
+```bash
+# 1. 软链 /tank/vault/alphalib.local -> 本机实际位置
+sudo mkdir -p /tank/vault
+sudo ln -sn /storage/vault/alphalib.local /tank/vault/alphalib.local
+
+# 2. host env JFS_LOCAL_DIR 改成跟 JFS symlink target 一致 (status.sh check 用)
+sudo sed -i 's|^JFS_LOCAL_DIR=.*|JFS_LOCAL_DIR=/tank/vault/alphalib.local|' /etc/juicefs-poc.env
+
+# 3. 验
+readlink -f /storage/vault/alphalib/alpha_dump   # -> /storage/vault/alphalib.local/alpha_dump
+```
+
+JFS_MOUNT 留在 `/storage/vault/alphalib` 没问题(mount 点跟 sidecar target 路径独立)。**实测 2026-06-04 在 144(`/storage/vault/`)上跑通过这个流程**。
+
+**情况 C:`readlink` 多了个尾斜杠(`alpha_dump/` vs `alpha_dump`)**
+
+之前 `ln -sf <target>/ <link>` 留下的。修法:`sudo rm <link> && sudo ln -sn <target_no_slash> <link>`。
+
+> **长期 TODO**:02-layout.sh 应该改用相对路径 symlink(`alpha_dump → ../alphalib.local/alpha_dump`),消除"每加一个磁盘布局不同的节点就要做绝对路径软链"的负担。改动要 stop 所有节点的 unit + 删旧 symlink + 用相对路径重建,留下次维护窗口做。
 
 ### 重跑 02-layout.sh 后某因子作者权限丢了
 
@@ -443,3 +475,4 @@ sudo systemctl restart juicefs-alphalib.service
 - **不能在 fuse mount 的子目录里重启 fuse unit**:`cd /tank/vault/alphalib/...` 然后 `systemctl restart juicefs-alphalib.service`,unit 重启过程中你 shell 的 cwd 在 fuse 上变 stale,fork/exec 拿到 ESTALE,shell 看起来"卡住"或"突然退出"。修法:操作 fuse unit 前先 `cd ~`
 - **join.sh 老版本不写 `JFS_META_URL` 进 `/etc/juicefs-poc.env`**:导致 client 上 status.sh 走 config.sh 默认值 `127.0.0.1:6379`,但 mount 实际连的是远端 6380(因为 join.sh 调 04-systemd 时通过 env 传过去了)。修法:c70908c 之后 join.sh 把 `JFS_META_URL` + `JFS_REDIS_LOCAL=0` 都写进 host env,单一真值
 - **Redis 7 conf 不支持行尾注释**:`appendonly yes  # 注释` 会被 parser 当成 `appendonly yes "#" "注释"` 报 wrong number of arguments,redis 起不来。注释只能独占一行
+- **`ls -alF` 在 mount 根上报 `.stats/.accesslog/.config/.trash: No data available`**:这是 JuiceFS 的 4 个内部 pseudo-files,只支持 `cat`(`.stats` / `.config` / `.accesslog`)或 `ls .trash/`(已删文件),对它们调 `stat()` 返回 ENODATA。`ls` 默认对每条目 stat 取大小所以报错。不是数据问题,不影响业务。绕开:`ls -l --hide='.[a-z]*'` 或干脆不带 -F
