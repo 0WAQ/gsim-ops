@@ -259,7 +259,8 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | B-4 | Step 2: 持久化 + 跨节点 | **完成 (2026-06-04)**。主节点 redis 网络化 + AUTH(密码进 `/etc/juicefs/<name>-jfs.env` 0600 root,由 systemd `EnvironmentFile=` 注入,不进 ps cmdline)+ AOF (`appendfsync everysec`);`04-systemd.sh` 渲染 unit 接管挂载 + ExecStop 三级 fallback。`join.sh` 实测 150 一键接入 + sidecar 一致性校验。跨节点 visibility + flock 实测通过 |
 | B-5 | Step 3: 独立 redis 实例(分进程隔离) | **完成 (2026-06-04)**。`06-redis-jfs.sh` 起 `redis-jfs.service`:6380 专给 JuiceFS;`06-meta-migrate.sh` MIGRATE 69080 keys 6379→6380(反向白名单 + 分批 + 灾备 dump)。原因:server-160 上 6379 跟 alphalib biz 共用,任何 `systemctl stop redis` / OOM / FLUSHDB 会跨产品爆。**实测过一次事故**:改 conf 加 AOF 后 redis 7 用空 AOF 优先于 RDB,dbsize 归零;靠 `/var/backups/redis-recover-*` 完整恢复 69111 keys。03-redis.sh 已改成运行时 `config set` 不重启避雷 |
 | B-6 | 灾备路径验证 | **完成 (2026-06-04)**。服务器异常重启(writeback drain 中,staging=92912 / 362G)→ ExecStop 链 sync + ZFS cache 持久 → 重启后 unit 自动起 + 从 cache 续传 → 数据 0 丢失。Redis dump.rdb 恢复实测通过 |
-| C | 全量数据迁入 JuiceFS | **前置:Redis HA 必须先上(Sentinel 或 TiKV),详见下方"Redis HA 部署"**。`juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature / .state 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检)。**另一前置:ops submit/resubmit/check 写 alpha_src 的路径要套 sudo wrapper**(因为新模型下 alpha_src 是 root-owned,wbai 进程直接 shutil.move 会 EACCES) |
+| B-7 | ops state 进 redis | **完成 (2026-06-04)**。新增 `ops/infra/store/redis_store.py` 实现 `StateStore` 接口,schema 跟 JsonStateStore 1:1 映射(`state:<lib>:<name>` hash + `state-index:<lib>` set + `state-checks:<lib>:<name>` list),WATCH/MULTI/EXEC 做 read-modify-write。`Config` 加 `state.backend: redis | json` 切换,`config.juicefs.yaml` 切到 redis 指向 6380。`ops/tools/state_migrate.py` 一次性 JSON→redis 迁移(3224 records 已迁完)。`ops list` 在 160 上跟 prod 路径输出 bit-for-bit 一致。**修了 redis-py 8.x `from_url` 不honor `protocol=2` 导致 requirepass-only server HELLO 失败的雷**(commit fc4d8f8)。**Phase C 的 state 同步前置已解决** |
+| C | 全量数据迁入 JuiceFS | **前置:Redis HA 必须先上(Sentinel 或 TiKV),详见下方"Redis HA 部署"**。`juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检)。state 已经在 6380 上(B-7),不需要再迁。**另一前置:ops submit/resubmit/check 写 alpha_src 的路径要套 sudo wrapper**(因为新模型下 alpha_src 是 root-owned,wbai 进程直接 shutil.move 会 EACCES) |
 | D | alpha_src 接入 Git | 在 `/tank/vault/alphalib/alpha_src/` 初始化 Git 仓库,改造 `ops submit/resubmit` 调 `git add + commit`(加 flock),新增 `ops diff/log/blame` 命令 |
 | E | `.state` merge 逻辑简化 | 删掉"tied updated_at 留本地"补丁,改成"mtime 比较 + per-factor 文件锁";批量修改加全局 flock |
 | F | checkpoint 落地 | 按设计原则实现,默认放 JuiceFS,可再生的版本放本地 SSD |
@@ -281,6 +282,8 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | Redis dump.rdb 灾备路径 | ✅ (2026-06-04) Redis 7 切 AOF 雷踩过一次,从 dump.rdb 完整恢复 69111 keys。recovery 流程已写进 README 故障排除 |
 | 服务器异常重启 | ✅ (2026-06-03) writeback drain 中重启 (staging=92912/362G),ExecStop 链 sync + ZFS cache 持久 → 重启后续传 → 数据 0 丢失 |
 | 独立 redis 实例 vs 共用 | ✅ (2026-06-04) `redis-jfs.service`:6380 与 alphalib biz 6379 进程级隔离,任一重启不影响另一边 |
+| 第三节点 144 接入(不同磁盘布局) | ✅ (2026-06-04) `/storage/vault/` 而非 `/tank/vault/`,通过 `/tank/vault/alphalib.local -> /storage/vault/alphalib.local` 软链让 JFS sidecar 绝对路径解析正常 |
+| ops state 进独立 redis 实例 | ✅ (2026-06-04) `RedisStateStore` 跟 `JsonStateStore` 同接口,1:1 schema 映射,3224 records 迁完,跨节点强一致。修了 redis-py 8.x 的 HELLO 雷(`from_url` 不 honor `protocol=2`,改用直接 `Redis()` ctor)|
 | Git on JuiceFS 性能 | ✅ 500 提交基线 (2026-06-02 第二轮): commit 75ms (vs ZFS 21ms),`git log/blame/status` 全部 <250ms。**Phase D Model A(共享工作区)可行,不需要降级到 Model B** |
 
 **PoC 拓扑**(主节点 + client 多节点,2026-06-04 起):
@@ -288,7 +291,8 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 - 挂载点 `/tank/vault/alphalib/` **是 160-specific**(ZFS pool 在那)。其他节点通过 `/etc/juicefs-poc.env` 覆盖 `JFS_MOUNT/JFS_CACHE_DIR/JFS_LOCAL_DIR/JFS_META_URL`,`join.sh --mount/--cache/--meta-port` 自动写
 - Redis **分两个进程实例**(B-5 之后):
   - `redis-server.service:6379` — alphalib biz 业务用,**JuiceFS 完全不动**
-  - `redis-jfs.service:6380` — JuiceFS metadata 专用,AOF on (`appendfsync everysec`),独立 conf/data dir,密码存 `/etc/juicefs/<name>-jfs.env` (0600 root) 由 systemd `EnvironmentFile=` 注入。**单点,Phase C 前必须上 Sentinel**
+  - `redis-jfs.service:6380` — JuiceFS metadata + **ops state**(B-7 后)专用,AOF on (`appendfsync everysec`),独立 conf/data dir,密码存 `/etc/juicefs/<name>-jfs.env` (0600 root) 由 systemd `EnvironmentFile=` 注入。**单点,Phase C 前必须上 Sentinel**
+- ops state 走 6380(`config.juicefs.yaml` 的 `state.backend: redis`),所有节点强一致。client 上跑 ops 需要 `export OPS_STATE_REDIS_PASSWORD=...`
 - 本地 cache `/tank/vault/juicefs-cache/`(160),500 GB 上限;client 节点路径由 `/etc/juicefs-poc.env` 决定
 - MinIO 新 bucket `alphalib-juicefs`(独立于现有 bucket,失败回退零成本)
 - 凭证: 用 MinIO root key,通过 `MINIO_ROOT_USER/MINIO_ROOT_PASSWORD` 或 rclone.conf 注入,**只 `01-provision.sh` 用**
