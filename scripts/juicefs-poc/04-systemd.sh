@@ -21,15 +21,21 @@ require_bin juicefs "curl -sSL https://d.juicefs.com/install | sudo sh -"
 JUICEFS_BIN="$(command -v juicefs)"
 UNIT_NAME="juicefs-${JFS_NAME}.service"
 UNIT_PATH="/etc/systemd/system/$UNIT_NAME"
-ENV_FILE="/etc/juicefs/${JFS_NAME}.env"
+# JFS_ENV_FILE 覆盖默认 (06-meta-migrate.sh 切到独立 redis 实例后, 密码在
+# /etc/juicefs/<name>-jfs.env)
+ENV_FILE="${JFS_ENV_FILE:-/etc/juicefs/${JFS_NAME}.env}"
 
-# 跨节点:JFS_REDIS_LOCAL=0 让 client 不依赖本地 redis-server
+# 跨节点:JFS_REDIS_LOCAL=0 让 client 不依赖本地 redis
+# JFS_REDIS_UNIT 决定依赖哪个本地 redis unit:
+#   未设 (默认) -> redis-server.service (业务侧 6379)
+#   redis-jfs   -> redis-jfs.service (06-meta-migrate 之后的独立实例 6380)
 JFS_REDIS_LOCAL="${JFS_REDIS_LOCAL:-1}"
+JFS_REDIS_UNIT="${JFS_REDIS_UNIT:-redis-server.service}"
 REQ_LINE=""
 AFTER_LINE="After=network-online.target"
 if [[ "$JFS_REDIS_LOCAL" == "1" ]]; then
-  REQ_LINE="Requires=redis-server.service"
-  AFTER_LINE="After=network-online.target redis-server.service"
+  REQ_LINE="Requires=$JFS_REDIS_UNIT"
+  AFTER_LINE="After=network-online.target $JFS_REDIS_UNIT"
 fi
 
 ENV_LINE=""

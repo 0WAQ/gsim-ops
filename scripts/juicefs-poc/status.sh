@@ -18,7 +18,9 @@ fail() { CHECKS=$((CHECKS+1)); FAILS=$((FAILS+1)); _red "  ✗ $*"; }
 note() { printf '    %s\n' "$*"; }
 
 SVC="juicefs-${JFS_NAME}.service"
-ENV_FILE="/etc/juicefs/${JFS_NAME}.env"
+# 06-meta-migrate.sh 切到独立 redis 实例后, env 文件名变成 <name>-jfs.env
+# config.sh 会从 /etc/juicefs-poc.env source JFS_ENV_FILE 覆盖
+ENV_FILE="${JFS_ENV_FILE:-/etc/juicefs/${JFS_NAME}.env}"
 HAS_SUDO=0
 sudo -n true 2>/dev/null && HAS_SUDO=1
 
