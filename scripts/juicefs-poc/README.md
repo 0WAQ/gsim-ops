@@ -203,6 +203,8 @@ scp ~/.cache/ops/lib/alphalib-juicefs/{index,metrics,bcorr}.json \
     wbai@<client>:.cache/ops/lib/alphalib-juicefs/
 ```
 
+> **2026-06-04 之后**:`index.json` 已经不再序列化 src_path/dump_path/pnl_path(`INDEX_VERSION=6`,只存 name/author/has_pnl 等业务字段),路径在 `from_dict` 时按本机 `Config` 现场拼。所以从主节点 scp 过来的 cache 在 144(磁盘布局不同)上**直接可用**,`ops info` 会显示本机视角的路径(`/storage/vault/alphalib/...`),`ops list --refresh-datasources` 也能正确读 .py。
+
 ## 数据迁移
 
 ```bash
@@ -561,5 +563,5 @@ sudo systemctl restart juicefs-alphalib.service
 - **redis-py 8.x 默认 HELLO 跟 requirepass-only server 不兼容**:8.x 默认发 RESP3 + HELLO 握手,如果 redis server 只配了 `requirepass`(没用 ACL `default` user),HELLO 会被拒绝(`HELLO must be called with the client already authenticated`)。修法:绕开 `from_url`,直接 `redis.Redis(host=..., port=..., password=..., protocol=2)`,protocol=2 强制走经典 AUTH-then-commands。`from_url` 在 8.x 上对 `protocol` kwarg 的处理被观察到会丢。代码见 `ops/infra/store/redis_store.py` 的 `__init__`
 - **`OPS_<VAR>` env 在 ssh 子进程要重 export**:`Config._resolve_vars` 支持任何 `vars:` 块 key 的 `OPS_` 前缀环境变量覆盖。客户端节点(磁盘布局跟主节点不同)必须先 `export OPS_ALPHALIB_ROOT=/storage/vault/alphalib`(或对应路径)再跑 `ops *`,否则 alpha_src 解析成主节点的 `/tank/vault/...`,本机不存在 = `No factors found`。永久化方案:写 ~/.bashrc 或 wrapper 脚本
 - **per-machine cache 跟 cross-node state 的混合**:state 进 redis 之后,跨节点强一致;但 `~/.cache/ops/lib/<library_id>/{index,metrics,bcorr}.json` 还是 per-machine(因为 LibraryScanner 还没改)。client 节点首次 `--refresh` 慢(3000+ stat 跨网络),要么等要么 scp 主节点的 cache 过来。长期方向:LibraryScanner cache 也搬 redis
-- **`index.json` 里 `src_path` 是主节点绝对路径**:144 mount 在 `/storage/vault/alphalib/` 而非 `/tank/vault/alphalib/`,但 LibraryScanner 序列化的 `src_path` 是 cache 写入时那台机器的视角。从主节点 scp 来的 cache,在 144 上 `ops info` 会打印 `/tank/vault/...`,`ops list --refresh-datasources` 会 silently 解析失败。cache key 是 `md5(config_path)` 不含 `alphalib_root`,所以 `--refresh` 也不会重建出本机视角的路径。修法目前是让每个节点本地 `--refresh`(就接受首次慢);根治需要把 `src_path` 改成相对 `alphalib_root` 存,运行时拼起来
+- **`index.json` 曾经序列化主节点绝对路径(已修复)**:`INDEX_VERSION<=5` 把 `src_path/dump_path/pnl_path` 当字符串存进 cache,从主节点 scp 过来的 cache 在 144 上指向不存在的 `/tank/vault/...`,导致 `ops info` 打印 stale 路径,`ops list --refresh-datasources` silently 解析失败。**v6(2026-06-04 后)** 路径不再进 cache,`from_dict(data, config)` 拿当前节点的 `Config.alpha_src/alpha_dump/alpha_pnl` 现场拼,跨节点 cache scp 直接可用。旧 v5 cache 加载时被自动拒绝并重建
 - **`usermod -aG` 不影响已开的 SSH session 的 supplementary groups**:把 wbai 加到 alpha-core / alpha-data 之后,**当前已经登录的 SSH session 看不到新组**,所有走 group 权限的访问都 EACCES(典型现象:`ls /tank/vault/alphalib/staging` 报 Permission denied,但其他登录方式 / `sudo -u wbai ls ...` 能看到)。`id wbai` 显示对了但 `id -nG`(当前 process supplementary groups)还是旧的。修法:**退出当前 SSH 重连**,或 `exec sg alpha-core bash`,或 `newgrp alpha-core`(单 shell 临时)。`02-layout.sh` / `join.sh` 跑完都应该提示重连

@@ -13,7 +13,7 @@ from ops.infra.cache import cache_path
 from ops.core.metrics import Metrics
 
 
-INDEX_VERSION = 5
+INDEX_VERSION = 6   # bumped when src_path/dump_path/pnl_path moved out of cache (relative to config now)
 INDEX_MAX_AGE_SECONDS = 3600  # 1 hour
 
 
@@ -37,12 +37,14 @@ class FactorInfo:
     bcorr: dict | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        # Path fields are intentionally NOT serialized -- they're absolute paths
+        # that depend on the current node's mount root. A cache built on the
+        # master (e.g. /tank/vault/alphalib/...) is wrong on a client node
+        # where the JuiceFS mount lives at /storage/vault/alphalib/...
+        # Reconstruct from the live Config at load time.
         return {
             "name": self.name,
             "author": self.author,
-            "src_path": str(self.src_path),
-            "dump_path": str(self.dump_path),
-            "pnl_path": str(self.pnl_path),
             "has_pnl": self.has_pnl,
             "dump_days": self.dump_days,
             "delay": self.delay,
@@ -52,14 +54,15 @@ class FactorInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "FactorInfo":
+    def from_dict(cls, data: dict[str, Any], config: Config) -> "FactorInfo":
         metrics_data = data.get("metrics")
+        name = data["name"]
         return cls(
-            name=data["name"],
+            name=name,
             author=data["author"],
-            src_path=Path(data["src_path"]),
-            dump_path=Path(data["dump_path"]),
-            pnl_path=Path(data["pnl_path"]),
+            src_path=config.alpha_src / name,
+            dump_path=config.alpha_dump / name,
+            pnl_path=config.alpha_pnl / name,
             has_pnl=data["has_pnl"],
             dump_days=data["dump_days"],
             delay=data.get("delay"),
@@ -153,7 +156,7 @@ class LibraryScanner:
             if time.time() - created_at > INDEX_MAX_AGE_SECONDS:
                 return None
 
-            return [FactorInfo.from_dict(f) for f in data.get("factors", [])]
+            return [FactorInfo.from_dict(f, self.config) for f in data.get("factors", [])]
         except Exception:
             return None
 
