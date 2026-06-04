@@ -65,6 +65,10 @@ HOST_ENV="/etc/juicefs-poc.env"
 HOST_ENV_EXISTS=0
 sudo test -f "$HOST_ENV" && HOST_ENV_EXISTS=1
 
+# client 节点的 META_URL 是必须的 (主节点 META_URL 默认 127.0.0.1, 不需要写)
+# 写到 HOST_ENV 让 config.sh / status.sh / 04-systemd 全都从这里读, 单一真值。
+NEW_META_URL="redis://${META_HOST}:${META_PORT}/0"
+
 if [[ -n "$ARG_MOUNT$ARG_CACHE$ARG_LOCAL" || $HOST_ENV_EXISTS -eq 0 ]]; then
   info "==> [0/6] 路径覆盖 -> $HOST_ENV"
   # 读旧值(如果有),命令行参数覆盖之
@@ -88,11 +92,22 @@ if [[ -n "$ARG_MOUNT$ARG_CACHE$ARG_LOCAL" || $HOST_ENV_EXISTS -eq 0 ]]; then
 JFS_MOUNT=$NEW_MOUNT
 JFS_CACHE_DIR=$NEW_CACHE
 JFS_LOCAL_DIR=$NEW_LOCAL
+JFS_META_URL=$NEW_META_URL
+JFS_REDIS_LOCAL=0
 EOF
   sudo chmod 644 "$HOST_ENV"
   info "  JFS_MOUNT=$NEW_MOUNT"
   info "  JFS_CACHE_DIR=$NEW_CACHE"
   info "  JFS_LOCAL_DIR=$NEW_LOCAL"
+  info "  JFS_META_URL=$NEW_META_URL"
+else
+  # 已有 HOST_ENV 但缺 JFS_META_URL (老版本 join.sh 留下的) - 补一行
+  if ! sudo grep -q '^JFS_META_URL=' "$HOST_ENV"; then
+    sudo sed -i '/^JFS_REDIS_LOCAL=/d' "$HOST_ENV"
+    echo "JFS_META_URL=$NEW_META_URL" | sudo tee -a "$HOST_ENV" >/dev/null
+    echo 'JFS_REDIS_LOCAL=0' | sudo tee -a "$HOST_ENV" >/dev/null
+    info "==> [0/6] 补写 JFS_META_URL=$NEW_META_URL -> $HOST_ENV"
+  fi
 fi
 
 # 现在才 source config.sh(会自动 pick up /etc/juicefs-poc.env)
