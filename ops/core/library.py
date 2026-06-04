@@ -14,7 +14,8 @@ from ops.core.metrics import Metrics
 
 
 INDEX_VERSION = 6   # bumped when src_path/dump_path/pnl_path moved out of cache (relative to config now)
-INDEX_MAX_AGE_SECONDS = 3600  # 1 hour
+INDEX_MAX_AGE_SECONDS = 7 * 24 * 3600  # 7 days -- belt-and-suspenders fallback;
+                                       # primary invalidation is alpha_src mtime (see _load_index)
 
 
 def _get_cache_path(config: Config, config_path: Path) -> Path:
@@ -153,6 +154,25 @@ class LibraryScanner:
                 return None
 
             created_at = data.get("created_at", 0)
+            # Cache is valid as long as alpha_src directory hasn't been touched
+            # since we built it. Adding or removing a factor (mkdir / rmdir at
+            # the top level) updates alpha_src's mtime, which invalidates the
+            # cache automatically. Edits inside an existing factor (changes
+            # to .py / Readme) do NOT bump alpha_src's mtime -- intentional,
+            # because the fields list/info display (name/author/has_pnl/
+            # dump_days/delay) don't depend on file contents.
+            #
+            # Falls back to a generous TTL so a fresh checkout / cold cache
+            # eventually rebuilds even if the directory is dormant.
+            try:
+                src_mtime = self.alpha_src.stat().st_mtime
+                if src_mtime > created_at:
+                    return None
+            except OSError:
+                # alpha_src missing -- let scan() handle it; trust the cache
+                # for now so list still works on a node where the mount
+                # is temporarily down.
+                pass
             if time.time() - created_at > INDEX_MAX_AGE_SECONDS:
                 return None
 

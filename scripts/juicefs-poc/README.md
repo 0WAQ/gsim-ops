@@ -205,6 +205,8 @@ scp ~/.cache/ops/lib/alphalib-juicefs/{index,metrics,bcorr}.json \
 
 > **2026-06-04 之后**:`index.json` 已经不再序列化 src_path/dump_path/pnl_path(`INDEX_VERSION=6`,只存 name/author/has_pnl 等业务字段),路径在 `from_dict` 时按本机 `Config` 现场拼。所以从主节点 scp 过来的 cache 在 144(磁盘布局不同)上**直接可用**,`ops info` 会显示本机视角的路径(`/storage/vault/alphalib/...`),`ops list --refresh-datasources` 也能正确读 .py。
 
+> **cache 失效策略 (2026-06-04 之后)**:`_load_index` 不再走粗暴 1h TTL,改成跟 `alpha_src` **目录 mtime** 比较 — 新增/删除因子(顶层 mkdir/rmdir)会更新 mtime → cache 自动失效;改某个因子内部的 .py/Readme 不动 mtime → cache 复用。7 天 TTL 仅作"目录长期不动也兜底刷新"的安全网。日常使用基本永不无故重 scan。
+
 ## 数据迁移
 
 ```bash
