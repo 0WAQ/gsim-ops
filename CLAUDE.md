@@ -6,6 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **ops** is a Python CLI for alpha factor validation, backtesting, and lifecycle management. It orchestrates a 7-stage validation pipeline for quantitative trading factors before they enter the production factor library.
 
+## Hosts / Network Topology
+
+| Host | IP | 位置 | 备注 |
+|---|---|---|---|
+| server-160 | 10.9.100.160 | 托管机房 (IDC) | JuiceFS PoC master,ZFS pool `/tank/vault/`,redis-jfs:6380,prod alphalib 真实归宿 |
+| server-150 | 10.9.100.150 | 托管机房 (IDC) | JuiceFS client,`/tank/vault/` |
+| server-145 | 10.9.100.145 | 托管机房 (IDC) | 数据节点 (`/datasvc/data/`) |
+| intel-workstation-144 | 10.6.100.144 | 本地办公网 | JuiceFS client,磁盘布局不同 (`/storage/vault/`),通过软链对齐 sidecar |
+
+**网络划分**: 144 在本地办公网 (10.6/16),其它三台 (160/150/145) 在托管机房 (10.9/16)。两网互通但 144 ↔ IDC 走跨段路由,带宽和延迟显著差于 IDC 内部。**写并发场景把生产留在 IDC 三台**,144 主要做研究 + 跨地域容灾验证。任何"机器间数据传输"的脚本要把 144 当 WAN 节点考虑(超时调宽、避免无理由的 chatty 协议)。
+
 ## Commands
 
 ```bash
