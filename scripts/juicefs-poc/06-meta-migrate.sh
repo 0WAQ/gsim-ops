@@ -74,28 +74,49 @@ RC_BIZ ping 2>/dev/null | grep -q PONG || err "6379 AUTH 失败"
 RC_JFS ping 2>/dev/null | grep -q PONG || err "6380 AUTH 失败"
 
 # ============================================================
-# JuiceFS Redis schema 白名单 (来自 juicefs/pkg/meta/redis.go)
-# 单 key (固定名) + 前缀模式
+# 分类:反向白名单
 # ============================================================
-JFS_FIXED_KEYS=(
-  setting
-  nextinode nextchunk nextsession nextcleanupSliceset nexttrash
-  totalInodes usedSpace
-  sliceRef delfiles delSlices
-  sessionHB sessions     # JuiceFS sessions zset (注意跟 biz 的 allSessions 不同 key)
-  lockedi
-  allSessions            # 历史/兼容
+# JuiceFS 在 redis 里的 schema 比 docs 多, 实测 (PoC 第一轮) 列出来的:
+#   setting                 卷标识 JSON
+#   nextinode/chunk/...     单调计数器
+#   totalInodes / usedSpace 全局计数
+#   sliceRef                slice 引用计数
+#   delfiles / delSlices    GC 队列
+#   sessionHB / sessions / allSessions    挂载 session 状态
+#   sessionInfos            ← 注意! 这名字 alphalib biz 也用, 是冲突点
+#   lockedi                 inode lock
+#   lastCleanup{Trash,Files,Sessions}  GC 进度
+#   nextCleanupSlices / nextTrash      GC 队列指针
+#   x{inode}                xattr 数据
+#   acl / aclMaxId          ACL
+#   dirUsedInodes / dirUsedSpace / dirDataLength   DirStats=true 的目录统计
+# 前缀:
+#   i{inode} d{inode} c{inode}_{idx}
+#   s{inode}                ← symlink target (容易跟 session 弄混)
+#   sustained{sid} session{sid}
+#   flock/plock{inode} symlink{inode} xattr{inode} clean{inode}
+#   trash{inode}
+#
+# 第一轮 PoC 严格白名单跑漏 12 个 keys (`s14365` 之类被当成 session 排除, 实际是
+# symlink target), 救火过一次。
+#
+# 改成反向白名单:声明已知的 *业务侧* keys, 其它视为 JFS。
+# 多迁了不影响 (juicefs 不认就当 stale key 留着), 漏迁会让 mount EIO。
+#
+# 新进来的业务侧 keys 必须加进 BIZ_KEYS / BIZ_PREFIXES, 否则会被误迁。
+# investigate 模式会列出所有不识别的 key, 方便发现新增。
+# ============================================================
+BIZ_KEYS=(
+  sessionInfos       # alphalib biz 的 session 元数据 (跟 JFS 的 session* 不同 key)
 )
-# 前缀:i{inode} d{inode} c{inode}_{index} sustained{sid} session{sid} flock{inode}
-#       plock{inode} symlink{inode} xattr{inode} clean{inode} acl
-JFS_PREFIXES='^(i[0-9]|d[0-9]|c[0-9]+_|sustained[0-9]|session[0-9]|flock[0-9]|plock[0-9]|symlink[0-9]|xattr[0-9]|clean[0-9]|acl|trash[0-9])'
+BIZ_PREFIXES='^()$'  # 暂时无业务前缀, 留 hook
 
-is_jfs_key() {
+is_biz_key() {
   local k=$1
-  for fixed in "${JFS_FIXED_KEYS[@]}"; do
-    [[ "$k" == "$fixed" ]] && return 0
+  for biz in "${BIZ_KEYS[@]}"; do
+    [[ "$k" == "$biz" ]] && return 0
   done
-  [[ "$k" =~ $JFS_PREFIXES ]] && return 0
+  [[ "$k" =~ $BIZ_PREFIXES ]] && return 0
   return 1
 }
 
@@ -118,10 +139,10 @@ info "  scan 出 $N_TOTAL keys -> $ALL_KEYS_FILE"
 > "$JFS_KEYS_FILE"
 > "$EXCLUDED_FILE"
 while IFS= read -r k; do
-  if is_jfs_key "$k"; then
-    echo "$k" >> "$JFS_KEYS_FILE"
-  else
+  if is_biz_key "$k"; then
     echo "$k" >> "$EXCLUDED_FILE"
+  else
+    echo "$k" >> "$JFS_KEYS_FILE"
   fi
 done < "$ALL_KEYS_FILE"
 
@@ -164,7 +185,7 @@ if [[ "$MODE" == "investigate" ]]; then
   echo
   info "investigate 完成。看一眼排除清单合理不:"
   info "  - 是 alphalib biz 的 session 数据? -> 合理"
-  info "  - 有看不懂的? -> 加到 06-meta-migrate.sh 的 JFS_FIXED_KEYS 或排除清单"
+  info "  - 有看不懂的? -> 改 06-meta-migrate.sh 的 BIZ_KEYS / BIZ_PREFIXES 把它加进排除"
   info "  apply 跑: sudo -E bash $0"
   exit 0
 fi
@@ -184,7 +205,9 @@ read -r -p "  Enter 继续 / Ctrl-C 取消: " _
 hr "[2/8] stop $JFS_SVC (避免 SCAN/MIGRATE 时数据在动)"
 # ============================================================
 WAS_ACTIVE=0
-if systemctl is-active --quiet "$JFS_SVC"; then
+if [[ "$MODE" == "dry-run" ]]; then
+  info "  dry-run: 不停 unit"
+elif systemctl is-active --quiet "$JFS_SVC"; then
   WAS_ACTIVE=1
   sudo systemctl stop "$JFS_SVC"
   info "  $JFS_SVC stopped"
@@ -197,10 +220,10 @@ RC_BIZ --scan > "$ALL_KEYS_FILE"
 > "$JFS_KEYS_FILE"
 > "$EXCLUDED_FILE"
 while IFS= read -r k; do
-  if is_jfs_key "$k"; then
-    echo "$k" >> "$JFS_KEYS_FILE"
-  else
+  if is_biz_key "$k"; then
     echo "$k" >> "$EXCLUDED_FILE"
+  else
+    echo "$k" >> "$JFS_KEYS_FILE"
   fi
 done < "$ALL_KEYS_FILE"
 N_JFS=$(wc -l < "$JFS_KEYS_FILE")
@@ -212,11 +235,15 @@ hr "[3/8] 备份 6380 dump.rdb (回滚锚点, 几 KB)"
 # ============================================================
 TS=$(date +%Y%m%d-%H%M%S)
 BAK=/var/backups/jfs-meta-migrate-$TS
-sudo install -d -m 0755 -o root -g root "$BAK"
-RC_JFS bgsave 2>&1 | head -3
-sleep 2
-sudo cp -av /var/lib/redis-jfs/dump.rdb "$BAK/dump.rdb.empty" 2>&1 | head -3 || true
-sudo cp -rv /var/lib/redis-jfs/appendonlydir "$BAK/appendonlydir.empty" 2>&1 | head -3 || true
+if [[ "$MODE" == "dry-run" ]]; then
+  info "  dry-run: 跳过备份"
+else
+  sudo install -d -m 0755 -o root -g root "$BAK"
+  RC_JFS bgsave 2>&1 | head -3
+  sleep 2
+  sudo cp -av /var/lib/redis-jfs/dump.rdb "$BAK/dump.rdb.empty" 2>&1 | head -3 || true
+  sudo cp -rv /var/lib/redis-jfs/appendonlydir "$BAK/appendonlydir.empty" 2>&1 | head -3 || true
+fi
 
 # ============================================================
 hr "[4/8] MIGRATE in batches"
@@ -332,7 +359,9 @@ fi
 echo
 info "DONE."
 echo
-info "备份: $BAK"
+if [[ "$MODE" != "dry-run" ]]; then
+  info "备份: $BAK"
+fi
 info "失败 keys (如有): $FAILED_LOG"
 info "JFS metadata 现在在 $PORT_JFS"
 info "alphalib biz 还在 $PORT_BIZ (没动)"
