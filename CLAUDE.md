@@ -63,6 +63,13 @@ uv run ops recheck -u wbai -y        # 批量,跳过确认
 uv run ops approve AlphaXxx          # 人工通过 correlation 失败因子 (REJECTED → ACTIVE)
 uv run ops approve -u wbai           # 批量:wbai 所有 correlation-rejected 因子
 uv run ops approve -u wbai -y        # 批量,跳过确认
+uv run ops cancel AlphaXxx           # 撤回未入库的 submitted 因子(删 staging + 硬删 state)
+uv run ops cancel AlphaXxx --force   # 同时允许 CHECKING(清崩溃 / 中断的 check 残留)
+uv run ops cancel -u wbai            # 批量:wbai 所有 submitted 因子
+uv run ops cancel -u wbai -y         # 批量,跳过确认
+uv run ops clear AlphaXxx            # 清 staging 孤儿(state 无 record 的目录)
+uv run ops clear                     # 扫全部孤儿
+uv run ops clear -u lhw -y           # 按 author 推断过滤,跳过确认
 ```
 
 No test suite exists. Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
@@ -85,6 +92,8 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `resubmit` | Existing factor with new code from dropbox, version += 1, mark SUBMITTED | `ops/services/resubmit/` |
 | `recheck` | Move ACTIVE/REJECTED/DELETED factor back to staging for re-check (code unchanged) | `ops/services/recheck/` |
 | `approve` | 人工审批 correlation 失败因子,REJECTED → ACTIVE(不重跑 check) | `ops/services/approve/` |
+| `cancel` | 撤回未入库的 SUBMITTED 因子(删 staging + 硬删 state record) | `ops/services/cancel/` |
+| `clear` | 清理 staging 孤儿(state 无 record 的目录,submit parse 失败留下) | `ops/services/clear/` |
 | `check` | 7-stage validation pipeline (runs in-place on staging) | `ops/services/check/` |
 | `run` | Run backtest on factors in library | `ops/services/run/` |
 | `status` | Query factor lifecycle state | `ops/services/status/` |
@@ -102,6 +111,8 @@ Removed subcommands: `cp`, `scp`, `compiler`.
 **Destructive operations are opt-in.** Default behavior never deletes user data. Every destructive path lives behind an explicit flag or a separate subcommand. Established patterns:
 
 - `ops rm` defaults to state-only soft-delete. `--force` removes local dump + feature only.
+- `ops cancel` hard-deletes staging dir + state record for SUBMITTED (`--force` extends to CHECKING). No tombstone — factor never went live.
+- `ops clear` deletes staging orphans (no state record), left by `ops submit` parse failures.
 - `ops resubmit` copies new code from dropbox to staging, version += 1.
 - `ops sync push` is additive, never deletes remote objects.
 - Bulk operations default to dry-run; require `--apply` (or equivalent) to execute.

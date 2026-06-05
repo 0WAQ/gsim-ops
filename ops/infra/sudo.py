@@ -31,6 +31,8 @@ WRITE_COMMANDS = {
     "check",
     "rm",
     "approve",
+    "cancel",
+    "clear",
     "pack",
     "backfill",
 }
