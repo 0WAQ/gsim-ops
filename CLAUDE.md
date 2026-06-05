@@ -29,8 +29,8 @@ uv run ops status AlphaXxx                       # Query factor lifecycle state
 uv run ops status -u wbai --status submitted     # Filter by author/state
 uv run ops backfill --dry-run                    # Preview backfill on alpha_src/
 uv run ops backfill                              # Generate meta.json + ACTIVE for legacy factors
-uv run ops list                      # List factors in library (staging)
-uv run ops list -c config.prod.yaml  # List factors in production library
+uv run ops list                      # List factors (default config.yaml → JFS)
+uv run ops list -c config.prod-legacy.yaml  # 紧急回退到旧 prod (S3 sync 模型)
 uv run ops list --author wbai        # Filter by author
 uv run ops list --refresh            # Force rebuild index cache
 uv run ops list --format json        # JSON output
@@ -107,9 +107,13 @@ Removed subcommands: `cp`, `scp`, `compiler`.
 
 When adding a new command that touches files, state, or remotes: default to the non-destructive path, surface the destructive variant behind a flag, and require explicit user authorization at the scope being acted on.
 
-### Dual Config Strategy
+### Default Config (2026-06-05 上线后)
 
-`config.yaml` points to staging paths for `ops check` output and review. `config.prod.yaml` points to production `/mnt/storage/alphalib/`. Pass `-c config.prod.yaml` to any command to target production.
+`config.yaml` (project root) 是当前 default,指向 JFS (`/tank/vault/alphalib/`) +
+redis sentinel-aware state backend。`ops xxx` 不带 `-c` 自动走它。
+
+旧的 `/mnt/storage/alphalib/` + S3 sync 模型保留为 `config.prod-legacy.yaml`,
+紧急回退用 `-c config.prod-legacy.yaml`。验稳一周后会删除 prod 数据。
 
 ## Key Concepts
 

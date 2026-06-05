@@ -18,8 +18,12 @@ def get_default_config_path() -> Path:
     """
     Get default config path with priority:
     1. Environment variable OPS_CONFIG
-    2. ./config.prod.yaml (current directory)
-    3. {project_root}/config.prod.yaml
+    2. ./config.yaml (current directory)
+    3. {project_root}/config.yaml
+
+    Phase C 上线 (2026-06-05) 之前默认是 config.prod.yaml; 现在 config.yaml
+    指向 JFS + sentinel-aware redis state. 旧的 prod 配置保留为
+    config.prod-legacy.yaml, 紧急回退用 `-c config.prod-legacy.yaml`.
     """
     # 1. Environment variable
     env_config = os.environ.get("OPS_CONFIG")
@@ -29,12 +33,12 @@ def get_default_config_path() -> Path:
             return env_path
 
     # 2. Current directory
-    cwd_config = Path.cwd() / "config.prod.yaml"
+    cwd_config = Path.cwd() / "config.yaml"
     if cwd_config.exists():
         return cwd_config
 
     # 3. Project root
-    project_config = get_project_root() / "config.prod.yaml"
+    project_config = get_project_root() / "config.yaml"
     if project_config.exists():
         return project_config
 

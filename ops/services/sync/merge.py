@@ -11,12 +11,13 @@ Files merged here:
 The factor_state.json case must be performed while holding the
 JsonStateStore lock — see `merge_factor_state`.
 
-NOTE on the redis state backend (2026-06-04):
-`config.juicefs.yaml` switched ops state to RedisStateStore. That config
-has no `sync.*` section, so `run_sync` exits at `_make_s3` and these
-mergers are never reached on the JuiceFS path. The JsonStateStore lock
-below therefore still serves its original purpose on JSON-backed configs
-(prod) and is dead code on redis-backed configs. We deliberately keep
+NOTE on the redis state backend (2026-06-04, default 2026-06-05):
+`config.yaml` (default since 2026-06-05) switched ops state to
+RedisStateStore. That config has no `sync.*` section, so `run_sync` exits
+at `_make_s3` and these mergers are never reached on the JuiceFS path.
+The JsonStateStore lock below therefore still serves its original purpose
+on JSON-backed configs (`config.prod-legacy.yaml`, legacy回退) and is
+dead code on redis-backed configs. We deliberately keep
 the implementation file-only: cross-node consistency on redis is
 maintained inside RedisStateStore itself (WATCH/MULTI/EXEC), not via
 this merger. If anyone ever wires up sync against a redis-backed

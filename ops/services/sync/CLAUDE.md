@@ -17,7 +17,9 @@ Cross-server factor library sync via S3. Ships **data + state together** so a ne
 
 **`library_id`** (`Config.library_id`): defaults to `alpha_src.parent.name` (e.g. `alphalib`), overridable via `sync.library_id`. Two machines pointing at the same logical library get the same id regardless of absolute paths — which is what lets state files travel.
 
-`config.yaml` 与 `config.prod.yaml` 默认共用 `library_id = alphalib` → 同一个 S3 prefix、同一份本地 cache。这是有意为之:staging 与 prod 共享因子库视图,只是 `alpha_src` 物理路径不同。SUBMITTED 状态因子在 staging 目录(非 `alpha_src`),sync 不会推它的数据;它的 state 条目会通过 merge 漂到远端,作为"in flight"元数据,远端 pull 端按 status 跳过,不污染数据。
+`config.yaml` 与 `config.prod-legacy.yaml` 默认共用 `library_id = alphalib` → 同一个 S3 prefix、同一份本地 cache。这是有意为之:JFS 与 legacy prod 共享因子库视图,只是 `alpha_src` 物理路径不同。SUBMITTED 状态因子在 staging 目录(非 `alpha_src`),sync 不会推它的数据;它的 state 条目会通过 merge 漂到远端,作为"in flight"元数据,远端 pull 端按 status 跳过,不污染数据。
+
+**(2026-06-05 上线后)** 默认 `config.yaml` = JFS,走 redis 状态后端,**不再走 S3 sync**。`ops sync` 子命令实际只对 `config.prod-legacy.yaml` 有意义,留作回退期使用,后续整体退役。
 
 ## Cache Layout (`ops/infra/cache.py`)
 

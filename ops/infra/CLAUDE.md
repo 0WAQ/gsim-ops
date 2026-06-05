@@ -4,7 +4,7 @@
 
 ## Config (`config.py`)
 
-`Config` class loads YAML. Resolution order: `OPS_CONFIG` env var → `./config.prod.yaml` → project root `config.prod.yaml`.
+`Config` class loads YAML. Resolution order: `OPS_CONFIG` env var → `./config.yaml` → project root `config.yaml`.
 
 Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables with `OPS_` prefix (e.g. `OPS_GSIM_HOME` → `gsim_home`).
 

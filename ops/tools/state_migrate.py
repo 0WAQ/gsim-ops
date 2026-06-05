@@ -26,7 +26,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", required=True, type=Path)
     ap.add_argument("--url",  required=True, help="redis://host:port/db (no password)")
-    ap.add_argument("--lib",  required=True, help="library_id (matches config.juicefs.yaml sync.library_id)")
+    ap.add_argument("--lib",  required=True, help="library_id (matches config.yaml sync.library_id)")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--pass",     dest="password", help="literal password (avoid; appears in ps)")
     g.add_argument("--pass-env", dest="password_env", help="env var holding the password")

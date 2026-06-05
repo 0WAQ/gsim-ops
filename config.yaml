@@ -1,33 +1,44 @@
+# JuiceFS PoC config.
+#
+# 把 alphalib 五条数据路径(alpha_src / alpha_dump / alpha_pnl / alpha_feature /
+# staging)指向 JuiceFS 挂载点 /tank/vault/alphalib,其它路径(dropbox / gsim /
+# /datasvc)保持本地。recycle 也放进 JuiceFS,保持入库链路全在同一卷上。
+#
+# 用法:uv run ops <cmd> -c config.juicefs.yaml ...
+# 不要拿来跑生产 —— sync 段被注释掉了,且仅供 JuiceFS PoC 第二轮使用。
+
 users:
   wbai: wenbo@graceim.ai
   chaoqun: chaoqun@graceim.ai
   mhe: muyang@graceim.ai
 
-# 基础路径变量 (可通过环境变量覆盖: OPS_GSIM_HOME, OPS_STORAGE, OPS_WORKSPACE)
+# 基础路径变量
 vars:
   gsim_home: /usr/local/gsim
   storage: /mnt/storage
   workspace: /home/wbai/alpha
+  alphalib_root: /tank/vault/alphalib   # JuiceFS 挂载点
 
 # 路径配置
 path:
   dropbox_path: ${storage}/dropbox/
   pnl_prod_path: ${gsim_home}/pnl_prod
   pnl_pool_path: ${gsim_home}/pnl_pool
-  pnl_alphalib: ${storage}/alphalib/alpha_pnl
+  pnl_alphalib: ${alphalib_root}/alpha_pnl
   python_path: ${gsim_home}/.venv/bin/python
 
   pnl_path: ${workspace}/dropbox/pnl
   alpha_path: ${workspace}/dropbox/alpha
   checkpoint_path: ${workspace}/dropbox/checkpoint
-  nio_data_path: /datasvc/data/cc
+  nio_data_path: /datasvc/data/cc_2025
 
-  alpha_src: ${workspace}/alphalib/alpha_src
-  alpha_dump: ${workspace}/alphalib/alpha_dump
-  alpha_pnl: ${workspace}/alphalib/alpha_pnl
-  alpha_feature: ${workspace}/alphalib/alpha_feature
-  staging: ${storage}/alphalib/staging
-  recycle: ${workspace}/recycle
+  # 以下五条 + recycle 全部指向 JuiceFS
+  alpha_src: ${alphalib_root}/alpha_src
+  alpha_dump: ${alphalib_root}/alpha_dump
+  alpha_pnl: ${alphalib_root}/alpha_pnl
+  alpha_feature: ${alphalib_root}/alpha_feature
+  staging: ${alphalib_root}/staging
+  recycle: ${alphalib_root}/recycle
 
 # 脚本
 script:
@@ -36,7 +47,6 @@ script:
   bcorr_script: ${gsim_home}/dataops/bcorr
   feishu_script: /home/wbai/gsim-ops/jiance/feishu_send.py
 
-# TODO:
 backtest:
   stats: StatsBench
   thres: 90
@@ -44,38 +54,27 @@ backtest:
 
 # checker
 checker:
-  # 合规性检测
   compliance:
     enabled: true
-    max_position_pct: 0.05  # 个股最大持仓比例 (5%)
-    min_total_stocks: 100   # 多空最小持股数量
-    min_long_stocks: 50     # 多头最小持股数量
-    min_short_stocks: 50    # 空头最小持股数量
-
-  # 断点检测
+    max_position_pct: 0.05
+    min_total_stocks: 100
+    min_long_stocks: 50
+    min_short_stocks: 50
   checkpoint:
     enabled: true
-
-  # 相关性检测
   correlation:
     enabled: true
     ret%: 10.0
     tvr%: 40.0
     shrp: 2.0
-    corr_threshold: 0.7     # 相关性阈值 (< 0.7 为低相关)
+    corr_threshold: 0.7
 
-
-# 邮件通知配置
+# 邮件通知 — PoC 不发邮件,避免误打扰
 notification:
-  # 汇总邮件收件人 (可多个)
-  summary_emails:
-   - wenbo@graceim.ai
-   # - yong@graceim.ai
-
-  # 是否发送个人邮件
+  summary_emails: []
   send_author_email: false
 
-# 作者邮箱映射
+# 作者邮箱
 authors:
   wbai:
     name: wbai
@@ -98,13 +97,26 @@ authors:
 
 # 运行模式
 mode:
-  max_workers: 16
-  dry_run: false       # 测试模式 (不发送邮件)
+  max_workers: 4              # PoC 期降低并发,方便观察 IO 行为
+  dry_run: false
   timeout: 1800
   dates:
     - '20251030'
 
-# 跨服务器同步 (rclone)
+# sync 段 PoC 期不启用 —— JuiceFS 直接接管了"多机共享"职责
+# 但保留 library_id 用来隔离 ~/.cache/ops/lib/ 下的 state 文件,
+# 防止和生产 alphalib(同名 parent.name=alphalib)共用 factor_state.json
 sync:
-  remote: 39000:external-sync
-  # library_id: alphalib      # 默认 = alpha_src.parent.name
+  library_id: alphalib-juicefs
+
+# 多节点 state 走独立 redis 实例 (6380),跟 JuiceFS metadata 共生
+# 密码 fallback 链: redis.password (yaml literal) > env OPS_STATE_REDIS_PASSWORD
+#                  > sudo grep password_file (key=META_PASSWORD)
+# 第三条让新 shell 跑 ops 时不需要手动 export, ops 进程自动一次 sudo grep
+# 把 password 灌进自身 env, 后续 self-elevate 透传到 root 进程.
+state:
+  backend: redis
+  redis:
+    url: redis-sentinel://10.9.100.160:26380,10.9.100.150:26380,10.6.100.144:26380/mymaster/0
+    password_file: /etc/juicefs/alphalib-jfs.env
+    password_key: META_PASSWORD
