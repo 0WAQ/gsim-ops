@@ -26,15 +26,22 @@ UNIT_PATH="/etc/systemd/system/$UNIT_NAME"
 ENV_FILE="${JFS_ENV_FILE:-/etc/juicefs/${JFS_NAME}.env}"
 
 # 跨节点:JFS_REDIS_LOCAL=0 让 client 不依赖本地 redis
-# JFS_REDIS_UNIT 决定依赖哪个本地 redis unit:
+# JFS_REDIS_UNIT 决定排序的本地 redis unit:
 #   未设 (默认) -> redis-server.service (业务侧 6379)
 #   redis-jfs   -> redis-jfs.service (06-meta-migrate 之后的独立实例 6380)
+#
+# 重要: Sentinel HA 部署 (B-8 之后) 下,JFS client 通过 sentinel 找远端 master,
+# 本机 redis-jfs 即便挂掉(降级 replica / OOM / 升级)也不应拖垮 JFS unit。
+# 因此用 Wants= 而非 Requires=:
+#   - Wants 保留启动顺序提示 (开机先起 redis 再起 JFS,减少首次连接重试)
+#   - 不级联 stop:本机 redis stop -> JFS unit 不被带停
+# 如果还是单 redis 时代 (无 sentinel),需要 hard dep,把 Wants 改回 Requires。
 JFS_REDIS_LOCAL="${JFS_REDIS_LOCAL:-1}"
 JFS_REDIS_UNIT="${JFS_REDIS_UNIT:-redis-server.service}"
 REQ_LINE=""
 AFTER_LINE="After=network-online.target"
 if [[ "$JFS_REDIS_LOCAL" == "1" ]]; then
-  REQ_LINE="Requires=$JFS_REDIS_UNIT"
+  REQ_LINE="Wants=$JFS_REDIS_UNIT"
   AFTER_LINE="After=network-online.target $JFS_REDIS_UNIT"
 fi
 
