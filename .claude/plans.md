@@ -293,27 +293,32 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 - 挂载点 `/tank/vault/alphalib/` **是 160-specific**(ZFS pool 在那)。其他节点通过 `/etc/juicefs-poc.env` 覆盖 `JFS_MOUNT/JFS_CACHE_DIR/JFS_LOCAL_DIR/JFS_META_URL`,`join.sh --mount/--cache/--meta-port` 自动写
 - Redis **分两个进程实例**(B-5 之后):
   - `redis-server.service:6379` — alphalib biz 业务用,**JuiceFS 完全不动**
-  - `redis-jfs.service:6380` — JuiceFS metadata + **ops state**(B-7 后)专用,AOF on (`appendfsync everysec`),独立 conf/data dir,密码存 `/etc/juicefs/<name>-jfs.env` (0600 root) 由 systemd `EnvironmentFile=` 注入。**单点,Phase C 前必须上 Sentinel**
-- ops state 走 6380(`config.juicefs.yaml` 的 `state.backend: redis`),所有节点强一致。client 上跑 ops 需要 `export OPS_STATE_REDIS_PASSWORD=...`
+  - `redis-jfs.service:6380` — JuiceFS metadata + **ops state**(B-7 后)专用,AOF on (`appendfsync everysec`),独立 conf/data dir,密码存 `/etc/juicefs/<name>-jfs.env` (0600 root) 由 systemd `EnvironmentFile=` 注入。**B-8 后是 Sentinel-managed master,160 master + 150 replica + 144 sentinel-only,quorum=2**
+- ops state 走 sentinel URL `redis-sentinel://160:26380,150:26380,144:26380/mymaster/0`(`config.yaml` 的 `state.redis.url`),所有节点强一致。**密码 auto-discovery** 通过 `state.redis.password_file: /etc/juicefs/alphalib-jfs.env`,client 上不需要手动 export(详见 `ops/infra/sudo.py:ensure_redis_password`)
 - 本地 cache `/tank/vault/juicefs-cache/`(160),500 GB 上限;client 节点路径由 `/etc/juicefs-poc.env` 决定
 - MinIO 新 bucket `alphalib-juicefs`(独立于现有 bucket,失败回退零成本)
 - 凭证: 用 MinIO root key,通过 `MINIO_ROOT_USER/MINIO_ROOT_PASSWORD` 或 rclone.conf 注入,**只 `01-provision.sh` 用**
-- 脚本: `scripts/juicefs-poc/`(主节点 `bootstrap-primary.sh` 一把梭 00→04,然后 `06-redis-jfs.sh` + `06-meta-migrate.sh` 拆分 redis;client `join.sh --meta-port 6380` 一键;`status.sh` 健康检查;`05-migrate.sh` 数据迁入)
+- 脚本: `scripts/juicefs-poc/` 主节点一把梭 `bootstrap-primary.sh` (00→04) + `06-redis-jfs.sh` + `06-meta-migrate.sh`;Sentinel HA `07-redis-replica.sh` + `08-sentinel.sh` + `09-switch-meta-url.sh`;client `join.sh` 一键;`status.sh` 健康检查;`05-migrate.sh` 数据迁入
 
 **关联 TODO**:
-- `ops pack` 增量模式见下面独立章节"ops pack Incremental Mode";在 Phase C 之前完成更好,但 JuiceFS chunk diff 不强依赖它
+- `ops pack` 增量模式见下面独立章节"ops pack Incremental Mode";JuiceFS chunk diff 不强依赖它
 - Phase D 可以和 Phase C 并行,因为 Git 改造不依赖 JuiceFS 是否切完;但放在 C 之后做,因为要先验证 FUSE 上 git 的性能可接受(B-2 包含此项)
 - ~~Phase C 完成后,`ops sync` 整个子命令可以删除或保留 `verify` 作为对账~~ **C 已完成 (2026-06-05), ops sync 暂未删, 留作 fallback;后续清理**
-- PoC 期间用了 MinIO root key(暴露在过日志里),进 Phase C 前要旋转一次,并申请专用受限 key
+- MinIO root key rotation:上线期间仍用 root key,稳定后旋转 + 申请专用受限 key
 
-**Phase C 上线后的剩余项**(已上线,但建议陆续做):
-1. **写入重试 wrapper** (failover 5-10s 窗口的 EIO 重试): redis-py 默认不重试, ops 命令在 master kill 那几秒会 fail。包 retry 3 次 backoff 2/5/10s
-2. **`LibraryScanner` per-machine cache 不一致**: 各机 `~/.cache/ops/lib/<lib>/index.json` 独立 scan, 三机数据本身一致但 UI 显示 file count 可能差 1-2 个。一次 `ops list --refresh` 对齐,长期搬 redis 解决
-3. **切默认 config**: 让 `ops xxx` 不带 `-c config.juicefs.yaml` 也走 JFS (改 `OPS_CONFIG` 默认 / pyproject entry point default)
-4. **`ops sync` 加 deprecation warning + 文档**: 标"上线后不再依赖,仅 `verify` 保留作巡检"
-5. **`ops sudo wrapper` 安全收尾**: 现在 `/home/wbai/.local/bin/ops` 是 user-writable, 加 `/etc/sudoers.d` NOPASSWD 不安全。要么 ops 装到 `/usr/local/bin` (root-owned), 要么接受现 prompt 5min 内 cached 体验
-6. **MinIO root key rotation**: PoC 期间用 root key, 旋转 + 申请专用受限 key
-7. **alpha_dump 退役**: 旧 gsim feature reader 已就绪, alpha_dump 应该不再共享, 只本机临时; ops sync verify alpha_dump 段可删
+**Phase C 上线后的剩余项**(2026-06-05 上线时已完成 #3 + #5 自身,剩 nice-to-have):
+
+| # | 项 | 状态 |
+|---|---|---|
+| 1 | 写入重试 wrapper:failover 5-10 s 窗口 redis EIO retry (3 次 backoff 2/5/10 s) | TODO |
+| 2 | `LibraryScanner` per-machine cache 不一致:各机 `~/.cache/ops/lib/<lib>/index.json` 独立。`ops list --refresh` 对齐,长期搬 redis | TODO |
+| ~~3~~ | ~~切默认 config~~ | ✅ done (commit 8749da7, config.yaml = JFS) |
+| 4 | `ops sync push/pull` 加 deprecation warning + 整体退役(留 `sync verify` 作巡检) | TODO |
+| ~~5~~ | ~~ops sudo wrapper~~ | ✅ done (commit 928ae6f + dedcd63); 安全收尾(ops binary 装 root-owned 路径 + NOPASSWD)未做 |
+| 5b | sudo NOPASSWD wrapper 安全收尾:ops 装 root-owned 路径(/usr/local/bin)+ `/etc/sudoers.d` 限定 NOPASSWD | TODO |
+| 6 | MinIO root key rotation:PoC 期间用 root key 暴露过日志 | TODO |
+| 7 | alpha_dump 退役:gsim feature reader 已就绪,alpha_dump 不再共享只本机临时;`ops sync verify alpha_dump` 段可删 | TODO |
+| 8 | 删 prod 数据 `/mnt/storage/alphalib/`:上线稳定一周后 | TODO |
 
 ## Redis HA 部署(已完成 2026-06-05)
 

@@ -8,14 +8,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Hosts / Network Topology
 
-| Host | IP | 位置 | 备注 |
+| Host | IP | 位置 | 角色 |
 |---|---|---|---|
-| server-160 | 10.9.100.160 | 托管机房 (IDC) | JuiceFS PoC master,ZFS pool `/tank/vault/`,redis-jfs:6380,prod alphalib 真实归宿 |
-| server-150 | 10.9.100.150 | 托管机房 (IDC) | JuiceFS client,`/tank/vault/` |
-| server-145 | 10.9.100.145 | 托管机房 (IDC) | 数据节点 (`/datasvc/data/`) |
-| intel-workstation-144 | 10.6.100.144 | 本地办公网 | JuiceFS client,磁盘布局不同 (`/storage/vault/`),通过软链对齐 sidecar |
+| server-160 | 10.9.100.160 | 托管机房 (IDC) | JFS master,ZFS pool `/tank/vault/`,redis-jfs:6380 master + sentinel:26380 |
+| server-150 | 10.9.100.150 | 托管机房 (IDC) | JFS client,redis-jfs:6380 replica + sentinel:26380 |
+| server-145 | 10.9.100.145 | 托管机房 (IDC) | 数据节点 (`/datasvc/data/`),不在 JFS 集群 |
+| intel-workstation-144 | 10.6.100.144 | 本地办公网 | JFS client (`/storage/vault/`,跨段 LAN→IDC) + sentinel:26380 (纯投票) |
 
 **网络划分**: 144 在本地办公网 (10.6/16),其它三台 (160/150/145) 在托管机房 (10.9/16)。两网互通但 144 ↔ IDC 走跨段路由,带宽和延迟显著差于 IDC 内部。**写并发场景把生产留在 IDC 三台**,144 主要做研究 + 跨地域容灾验证。任何"机器间数据传输"的脚本要把 144 当 WAN 节点考虑(超时调宽、避免无理由的 chatty 协议)。
+
+**JFS / Sentinel 拓扑**(2026-06-05 上线): JuiceFS 挂载点共享 `/tank/vault/alphalib`(144 上是 `/storage/vault/alphalib`),metadata 走 `redis-sentinel://160:26380,150:26380,144:26380/mymaster/0`。Redis Sentinel 实测 failover 9.12 s。详见 `scripts/juicefs-poc/README.md` + `.claude/plans.md` Phase B-8/C。
 
 ## Commands
 
@@ -135,15 +137,21 @@ Located at `/usr/local/gsim/`. The core backtesting engine that ops interacts wi
 
 ### Factor Library Structure
 
+**生产数据共享在 JuiceFS 挂载点上**(`/tank/vault/alphalib/`,144 上是 `/storage/vault/alphalib/`):
+
 ```
-/mnt/storage/alphalib/
+/tank/vault/alphalib/
 ├── alpha_src/      # Factor source code        — alpha_src/<name>/        目录
 ├── alpha_pnl/      # Backtest results (PNL)    — alpha_pnl/<name>         单文件 ⚠
-├── alpha_dump/     # Daily target positions    — alpha_dump/<name>/       目录(内含每日小文件)
+├── alpha_dump/     # Daily target positions    — alpha_dump/<name>/       目录(本地 sidecar, 不进 JFS)
 └── alpha_feature/  # Aggregated alpha_dump     — alpha_feature/<name>.{v}.npy  单文件
 ```
 
+`/mnt/storage/alphalib/` 是旧 prod 数据,保留作紧急回退,稳定 1 周后清理。
+
 **⚠ alpha_pnl/<name> 是单文件,不是目录**。删除用 `Path.unlink()`,不要用 `shutil.rmtree()`(`Errno 20: Not a directory`)。alpha_feature 同理是单文件。只有 alpha_src / alpha_dump 是目录。
+
+**权限模型(集中运维)**: 共享路径 owner 一律 root,group `alpha-core`(alpha_src)/`alpha-data`(其它)只读且仅作跨机 label。**所有写都走 root**;ops 通过 `ops/infra/sudo.py` self-elevate 自动 sudo 提权。详见 `scripts/juicefs-poc/README.md`。
 
 ### Factor Directory Structure
 
@@ -165,7 +173,8 @@ AlphaXxx/
 - **colorama** - Terminal colors
 - **tqdm** - Progress bars
 - **pyyaml** - Config parsing
-- **boto3** - S3-compatible object storage (sync)
+- **redis** - State backend (Sentinel-aware client, see `ops/infra/store/redis_store.py`)
+- **boto3** - S3 object storage (only used by legacy `ops sync`,JFS 上线后不再走主路径)
 
 ## Known Technical Debt (Deferred)
 
@@ -174,25 +183,20 @@ AlphaXxx/
 - **Debug residual**: `utils/func.py` has a `debug()` with infinite loop
 - **Feishu credentials hardcoded**: `infra/notify/feishu_send.py` — move to config/env later
 - **`core/alpha/metadata.py` has I/O**: `_modify_always()`, `save()`, `get_v2npy_files()` — extract to services/infra
+- **`ops sync` 在 JFS 上线后是 legacy fallback**: 仅对 `config.prod-legacy.yaml` 有意义,后续整体退役;`ops/services/sync/CLAUDE.md` 有 deprecation 标注
+- **`LibraryScanner` cache per-machine**: `~/.cache/ops/lib/<lib>/index.json` 各机独立,三机数据本身一致但 UI count 可能差 1-2 个。`ops list --refresh` 对齐,长期搬 redis
 
 ## Plans & Roadmap
 
-See `docs/factor-state-machine.md` for the factor lifecycle design (state definitions, transitions, data product rules, version control direction).
+完整路线图见 `.claude/plans.md`。
 
-### Factor State Machine Refactor (已修复)
+**已完成的大事件**:
+- 2026-06-04 ops state 进 Redis (`config.juicefs.yaml` 切 Redis backend)
+- 2026-06-05 Redis Sentinel HA (3-node sentinel, 9.12s failover)
+- 2026-06-05 JFS 上线 + 默认 config 切 JFS (`config.yaml` = JFS, `config.prod-legacy.yaml` 回退)
 
-以下问题已在 75ded5d 中修复:
-
-1. ~~submit 未拒绝已存在因子~~ → `submit_one` 开头检查 `store.get()`,存在则拒绝
-2. ~~submit 有 recycle fallback~~ → 已删除,已有因子走 resubmit/recheck
-3. ~~recheck REJECTED 代码来源错误~~ → `_locate_source` 对 REJECTED 统一从 alpha_src 拿
-4. ~~recheck REJECTED 产物未自动清理~~ → REJECTED recheck 自动清 pnl/dump/feature
-5. ~~to_recycle 未按失败阶段区分产物~~ → compliance/correlation 保留 dump+pnl 并生成 feature;checkbias/checkpoint 清掉
-
-### Sync Storage Optimization
-
-**Phase 2 — gsim FeatureReader + sync 瘦身（已完成）**: alpha_dump 降级为纯本地中间产物，sync 只传 alpha_src / alpha_pnl / alpha_feature / .state
-
-**Phase 3 — ops pack 增量模式（待实现）**: `ops pack --date YYYYMMDD`、PACK_L 动态化、并发安全
-
-**Phase 4 — Alphalib 存储后端打通(长期)**: 按数据类别分别用 Git / JuiceFS / DB 替代当前 sync 模型。详见 `.claude/plans.md` 的 "Alphalib Storage Backend Migration"。
+**仍在路上**:
+- Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/resubmit/recheck` 走 `git add/commit`
+- Phase E: `.state` merge 逻辑简化(其实在 Redis 后大部分逻辑已不需要)
+- Phase F: checkpoint 落地(按设计原则放 JFS / 本地 SSD)
+- Phase C 上线后剩余: 写入重试 wrapper / cache→redis / sync deprecation warning / sudo NOPASSWD wrapper / MinIO key rotation / alpha_dump 退役
