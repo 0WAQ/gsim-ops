@@ -60,7 +60,8 @@ checker:
   correlation:
     enabled: true
     ret%: 10.0
-    tvr%: 40.0
+    tvr_d0%: 60.0
+    tvr_d1%: 50.0
     shrp: 2.0
     corr_threshold: 0.7     # 相关性阈值 (< 0.7 为低相关)
 

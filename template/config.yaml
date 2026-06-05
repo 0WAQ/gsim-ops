@@ -49,6 +49,10 @@ checker:
   # 相关性检测
   correlation:
     enabled: true
+    ret%: 10.0              # 年化收益下限
+    tvr_d0%: 60.0           # delay=0 换手率上限
+    tvr_d1%: 50.0           # delay=1 换手率上限
+    shrp: 2.0               # 夏普下限
     corr_threshold: 0.7     # 相关性阈值 (< 0.7 为低相关)
 
 

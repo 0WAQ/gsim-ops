@@ -7,8 +7,19 @@
 2. **Checkpoint** - Breakpoint stability validation (5-day checkpoint)
 3. **Long Backtest** - Full historical backtest (20150101-20251231), pure run, no checks
 4. **Compliance** - Position limits (max 5% per stock), min stock counts (50 long, 50 short, 100 total)
-5. **Correlation** - Factor correlation < 0.7 threshold against existing library
+5. **Correlation** - 相关性 + 业绩门槛 (单一 stage,见下)
 6. **Archive** - Run simsummary, save metrics to index, move to library; Fail: move to recycle folder
+
+**Correlation stage 门槛** (`checker/correlation_checker.py`):
+
+| 项 | 门槛 | config key |
+|---|---|---|
+| ret% (年化) | ≥ 阈值 | `correlation.ret%` (默认 10.0) |
+| shrp | > 阈值 | `correlation.shrp` (默认 2.0) |
+| tvr% (换手) | ≤ 阈值,delay 分桶 | `correlation.tvr_d0%` (默认 60.0) / `tvr_d1%` (默认 50.0) |
+| bcorr | < 阈值 否则需打败竞品 | `correlation.corr_threshold` (默认 0.7) |
+
+`tvr` 上限按因子 `<Alpha @delay>` 选 d0/d1。任一项不达标 → `CorrelationFail` (REJECTED + recycle,日志含违反项,例 `tvr%=55.00 > 50.0 (delay=1)`)。
 
 **Failure semantics**:
 - validate / long_backtest fail → revert to SUBMITTED, factor stays in staging (environmental/config issue, retry via `ops check --retry`)

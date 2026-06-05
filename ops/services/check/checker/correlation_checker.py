@@ -17,18 +17,28 @@ class CorrelationFail(CheckFail):
 class CorrelationChecker(Checker):
     def __init__(self, config: Config):
         self.ret: float = config.correlation["ret%"]
-        self.tvr: float = config.correlation["tvr%"]
+        self.tvr_d0: float = config.correlation["tvr_d0%"]
+        self.tvr_d1: float = config.correlation["tvr_d1%"]
         self.shrp: float = config.correlation["shrp"]
         self.corr_threshold: float = config.correlation["corr_threshold"]
         self.config = config    # TODO:
 
         # 缓存因子库的指标
         self._prod_metrics_cache: dict[str, Metrics] = {}
- 
-    def passed(self, m: Metrics) -> bool:
-        if m.ret >= self.ret and m.shrp > self.shrp:
-            return True
-        return False
+
+    def _tvr_cap(self, delay: int) -> float:
+        return self.tvr_d0 if delay == 0 else self.tvr_d1
+
+    def _gate_violations(self, m: Metrics, delay: int) -> list[str]:
+        v: list[str] = []
+        if m.ret < self.ret:
+            v.append(f"ret%={m.ret:.2f} < {self.ret}")
+        if m.shrp <= self.shrp:
+            v.append(f"shrp={m.shrp:.2f} <= {self.shrp}")
+        cap = self._tvr_cap(delay)
+        if m.tvr > cap:
+            v.append(f"tvr%={m.tvr:.2f} > {cap} (delay={delay})")
+        return v
 
     def _get_prod_factor_metrics(self, factor_name: str) -> Metrics | None:
         """获取生产因子库指标 (带缓存)"""
@@ -70,8 +80,9 @@ class CorrelationChecker(Checker):
             raise CorrelationSkip("无法获取因子指标")
         
         # 3. 判断是否满足要求
-        if not self.passed(metrics):
-            raise CorrelationFail(CorrResult(metrics))
+        violations = self._gate_violations(metrics, factor.delay)
+        if violations:
+            raise CorrelationFail(f"{'; '.join(violations)} | {metrics}")
 
         # 4. 找出最大相关系数 (bcorr 输出已排序，取最后一行)
         max_corr_factor, max_corr = corrs[-1]
