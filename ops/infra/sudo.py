@@ -19,6 +19,7 @@ JFS 集中运维模型下 alpha_src / staging / alpha_pnl / recycle / alpha_feat
 """
 import os
 import shutil
+import subprocess
 import sys
 
 
@@ -66,6 +67,59 @@ def _get_subcommand(args) -> str | None:
     # argparse dest 用了带连字符的 "sub-command", attribute 名带连字符不可用,
     # 走 vars() 拿。
     return vars(args).get("sub-command")
+
+
+def ensure_redis_password(args) -> None:
+    """新 shell 启动时 OPS_STATE_REDIS_PASSWORD 没设的兜底:
+    sudo grep config.state.redis.password_file 一次拿密码塞进 env, 让后续
+    self-elevate 透传到 root 子进程。
+
+    跑了之后 sudo cache 命中, maybe_elevate 那次 exec sudo 就不再 prompt。
+
+    - 已是 root 时 noop (Config 自己能直接读 password_file)
+    - env 已有 password 时 noop
+    - 没配 state.backend=redis 或没有 password_file 时 noop
+    - sudo 失败 (用户取消 / 文件不存在) 静默退出, 后续步骤靠 Config / RedisStateStore
+      自己处理失败 (NOAUTH 会以正常异常 surface 出来)
+    """
+    if os.geteuid() == 0:
+        return
+    env_var = "OPS_STATE_REDIS_PASSWORD"
+    if os.environ.get(env_var):
+        return
+    config_path = getattr(args, "config_path", None)
+    if config_path is None:
+        return
+    try:
+        from ops.infra.config import Config
+        config = Config.load(config_path)
+    except Exception:
+        return
+    if getattr(config, "state_backend", "json") != "redis":
+        return
+    if getattr(config, "state_redis_password", None):
+        return  # already populated by yaml literal
+    pwd_file = getattr(config, "state_redis_password_file", None)
+    pwd_key = getattr(config, "state_redis_password_key", "META_PASSWORD")
+    env_name = getattr(config, "state_redis_password_env", env_var)
+    if not pwd_file:
+        return
+    # Do NOT os.path.exists(pwd_file) here -- /etc/juicefs/ is 0700 root:root,
+    # wbai can't stat its contents, so exists() returns False and we'd skip.
+    # Let sudo (running as root) decide whether the file is readable.
+    try:
+        result = subprocess.run(
+            ["sudo", "grep", "-oP", f"{pwd_key}=\\K.*", pwd_file],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except Exception:
+        return
+    pwd = result.stdout.strip()
+    if pwd:
+        os.environ[env_name] = pwd
 
 
 def maybe_elevate(args) -> None:

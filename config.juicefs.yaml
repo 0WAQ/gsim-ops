@@ -110,10 +110,13 @@ sync:
   library_id: alphalib-juicefs
 
 # 多节点 state 走独立 redis 实例 (6380),跟 JuiceFS metadata 共生
-# 密码不在这里 —— 由 OPS_STATE_REDIS_PASSWORD 环境变量注入
-# (在 160 上: export OPS_STATE_REDIS_PASSWORD=$(sudo grep -oP 'META_PASSWORD=\K.*' /etc/juicefs/alphalib-jfs.env))
+# 密码 fallback 链: redis.password (yaml literal) > env OPS_STATE_REDIS_PASSWORD
+#                  > sudo grep password_file (key=META_PASSWORD)
+# 第三条让新 shell 跑 ops 时不需要手动 export, ops 进程自动一次 sudo grep
+# 把 password 灌进自身 env, 后续 self-elevate 透传到 root 进程.
 state:
   backend: redis
   redis:
     url: redis-sentinel://10.9.100.160:26380,10.9.100.150:26380,10.6.100.144:26380/mymaster/0
-    # password: 见上面环境变量
+    password_file: /etc/juicefs/alphalib-jfs.env
+    password_key: META_PASSWORD
