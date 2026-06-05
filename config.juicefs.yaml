@@ -115,5 +115,5 @@ sync:
 state:
   backend: redis
   redis:
-    url: redis://10.9.100.160:6380/0
+    url: redis-sentinel://10.9.100.160:26380,10.9.100.150:26380,10.6.100.144:26380/mymaster/0
     # password: 见上面环境变量
