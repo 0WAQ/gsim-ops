@@ -62,7 +62,7 @@ def _save_metrics(config_path: Path, metrics: dict[str, Metrics]) -> None:
 def refresh_metrics(
     factors: list[FactorInfo], config: Config, config_path: Path
 ) -> dict[str, Metrics]:
-    metrics: dict[str, Metrics] = {}
+    metrics = load_metrics(config_path)
     for factor in factors:
         if not factor.has_pnl:
             continue

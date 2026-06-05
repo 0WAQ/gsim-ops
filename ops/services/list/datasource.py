@@ -108,7 +108,7 @@ def refresh_datasources(
     factors: list[FactorInfo], config: Config, config_path: Path
 ) -> dict[str, dict]:
     npy_index = _build_npy_index(config.nio_data_path)
-    datasources: dict[str, dict] = {}
+    datasources = load_datasources(config_path)
 
     for factor in factors:
         py_files = list(factor.src_path.glob("*.py"))
@@ -116,7 +116,7 @@ def refresh_datasources(
             continue
         fields = parse_datasources(py_files[0])
         tables = resolve_tables(fields, npy_index)
-        datasources[factor.name] = {"fields": fields, "tables": tables}
+        datasources[factor.name] = {"fields": fields, "tables": tables, "updated_at": _now_iso()}
 
     _save_datasources(config_path, datasources)
     return datasources

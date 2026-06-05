@@ -89,7 +89,7 @@ def refresh_bcorr(
     factors: list[FactorInfo], config: Config, config_path: Path,
     workers: int = DEFAULT_WORKERS,
 ) -> dict[str, dict]:
-    bcorr: dict[str, dict] = {}
+    bcorr = load_bcorr(config_path)
     targets = [f for f in factors if f.has_pnl]
     if not targets:
         _save_bcorr(config_path, bcorr)
