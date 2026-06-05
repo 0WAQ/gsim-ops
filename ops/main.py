@@ -14,6 +14,7 @@ from ops.cli.rm import add_rm_subparser
 from ops.cli.resubmit import add_resubmit_subparser
 from ops.cli.recheck import add_recheck_subparser
 from ops.cli.approve import add_approve_subparser
+from ops.infra.sudo import maybe_elevate
 
 
 def main():
@@ -43,6 +44,9 @@ def main():
     add_approve_subparser(subparsers)
 
     args = parser.parse_args()
+    # JFS 集中运维: write 命令 + alpha_src root-owned 时自动 sudo 提权,
+    # 否则 no-op (legacy prod 模式 / read-only 命令直通)。详见 ops/infra/sudo.py。
+    maybe_elevate(args)
     args.func(args)
 
 
