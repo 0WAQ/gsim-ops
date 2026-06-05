@@ -261,7 +261,7 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | B-6 | 灾备路径验证 | **完成 (2026-06-04)**。服务器异常重启(writeback drain 中,staging=92912 / 362G)→ ExecStop 链 sync + ZFS cache 持久 → 重启后 unit 自动起 + 从 cache 续传 → 数据 0 丢失。Redis dump.rdb 恢复实测通过 |
 | B-7 | ops state 进 redis | **完成 (2026-06-04)**。新增 `ops/infra/store/redis_store.py` 实现 `StateStore` 接口,schema 跟 JsonStateStore 1:1 映射(`state:<lib>:<name>` hash + `state-index:<lib>` set + `state-checks:<lib>:<name>` list),WATCH/MULTI/EXEC 做 read-modify-write。`Config` 加 `state.backend: redis | json` 切换,`config.juicefs.yaml` 切到 redis 指向 6380。`ops/tools/state_migrate.py` 一次性 JSON→redis 迁移(3224 records 已迁完)。`ops list` 在 160 上跟 prod 路径输出 bit-for-bit 一致。**修了 redis-py 8.x `from_url` 不honor `protocol=2` 导致 requirepass-only server HELLO 失败的雷**(commit fc4d8f8)。**Phase C 的 state 同步前置已解决** |
 | B-8 | Redis Sentinel HA | **完成 (2026-06-05)**。3-sentinel 集群:160 master+sentinel-① / 150 replica+sentinel-② / 144 sentinel-③(纯投票)。`07-redis-replica.sh` / `08-sentinel.sh` / `09-switch-meta-url.sh` 分别处理 replica / sentinel daemon / META_URL 切换。`ops/infra/store/redis_store.py` 加 `redis-sentinel://h:p,h:p/svc/db` URL scheme 支持,走 `redis.sentinel.Sentinel.master_for()` 自动 failover。**演练 9.12s failover**(down-after 5s + 投票),ops 透明重连,JFS 在三节点继续可用。**踩坑**:sentinel 写 `replicaof` 时不会补 `masterauth`,得在 conf 里预设(commit 39602aa fix);redis daemon 没 conf 写权所以 `CONFIG REWRITE` EACCES,持久化得 sudo sed |
-| C | 全量数据迁入 JuiceFS | ~~前置:Redis HA~~ **已解锁 (B-8)**。`juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检)。state 已经在 6380 上(B-7),不需要再迁。**前置:ops submit/resubmit/check 写 alpha_src 的路径要套 sudo wrapper**(因为新模型下 alpha_src 是 root-owned,wbai 进程直接 shutil.move 会 EACCES) |
+| C | 全量数据迁入 JuiceFS | **完成 (2026-06-05)**。数据三机对账 entry count + 字节 + md5 完全一致 (alpha_src 3217 / alpha_pnl 3153 / alpha_feature 5876,总 936 GB)。`config.juicefs.yaml` 切 sentinel-aware redis-sentinel URL。**ops sudo wrapper** 通过 `ops/infra/sudo.py:maybe_elevate` 在 write 命令 + alpha_src root-owned 时自动 exec sudo (commit 928ae6f);**password auto-discovery** 通过 `state.redis.password_file` 让 fresh shell 也能跑 (commit dedcd63)。`04-systemd.sh` 把本机 redis-jfs 从 `Requires` 降到 `Wants` 避免 failover 演练时把 JFS unit 也带停 (commit 8a2f597)。三机 fresh shell smoke `ops list` / `ops status` 输出一致,user 无需手动 export env. **`ops sync push/pull` 暂未删,留作 fallback / 巡检 (`sync verify`),后续 Phase 清理** |
 | D | alpha_src 接入 Git | 在 `/tank/vault/alphalib/alpha_src/` 初始化 Git 仓库,改造 `ops submit/resubmit` 调 `git add + commit`(加 flock),新增 `ops diff/log/blame` 命令 |
 | E | `.state` merge 逻辑简化 | 删掉"tied updated_at 留本地"补丁,改成"mtime 比较 + per-factor 文件锁";批量修改加全局 flock |
 | F | checkpoint 落地 | 按设计原则实现,默认放 JuiceFS,可再生的版本放本地 SSD |
@@ -303,8 +303,17 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 **关联 TODO**:
 - `ops pack` 增量模式见下面独立章节"ops pack Incremental Mode";在 Phase C 之前完成更好,但 JuiceFS chunk diff 不强依赖它
 - Phase D 可以和 Phase C 并行,因为 Git 改造不依赖 JuiceFS 是否切完;但放在 C 之后做,因为要先验证 FUSE 上 git 的性能可接受(B-2 包含此项)
-- Phase C 完成后,`ops sync` 整个子命令可以删除或保留 `verify` 作为对账
+- ~~Phase C 完成后,`ops sync` 整个子命令可以删除或保留 `verify` 作为对账~~ **C 已完成 (2026-06-05), ops sync 暂未删, 留作 fallback;后续清理**
 - PoC 期间用了 MinIO root key(暴露在过日志里),进 Phase C 前要旋转一次,并申请专用受限 key
+
+**Phase C 上线后的剩余项**(已上线,但建议陆续做):
+1. **写入重试 wrapper** (failover 5-10s 窗口的 EIO 重试): redis-py 默认不重试, ops 命令在 master kill 那几秒会 fail。包 retry 3 次 backoff 2/5/10s
+2. **`LibraryScanner` per-machine cache 不一致**: 各机 `~/.cache/ops/lib/<lib>/index.json` 独立 scan, 三机数据本身一致但 UI 显示 file count 可能差 1-2 个。一次 `ops list --refresh` 对齐,长期搬 redis 解决
+3. **切默认 config**: 让 `ops xxx` 不带 `-c config.juicefs.yaml` 也走 JFS (改 `OPS_CONFIG` 默认 / pyproject entry point default)
+4. **`ops sync` 加 deprecation warning + 文档**: 标"上线后不再依赖,仅 `verify` 保留作巡检"
+5. **`ops sudo wrapper` 安全收尾**: 现在 `/home/wbai/.local/bin/ops` 是 user-writable, 加 `/etc/sudoers.d` NOPASSWD 不安全。要么 ops 装到 `/usr/local/bin` (root-owned), 要么接受现 prompt 5min 内 cached 体验
+6. **MinIO root key rotation**: PoC 期间用 root key, 旋转 + 申请专用受限 key
+7. **alpha_dump 退役**: 旧 gsim feature reader 已就绪, alpha_dump 应该不再共享, 只本机临时; ops sync verify alpha_dump 段可删
 
 ## Redis HA 部署(已完成 2026-06-05)
 
