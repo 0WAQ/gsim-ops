@@ -179,13 +179,20 @@ info "=== 数据目录概览 ==="
 for d in alpha_src alpha_pnl alpha_feature; do
   T="$JFS_MOUNT/$d"
   if [[ -d "$T" ]]; then
-    n=$(find "$T" -mindepth 1 -type f 2>/dev/null | wc -l)
+    # 跨段 FUSE 节点 (e.g. 144 ↔ IDC) du/find 可能很慢,加 30s 超时,
+    # 命中超时输出 timeout 标记而不卡死整个 status.sh
+    n=$(timeout 30 find "$T" -mindepth 1 -type f 2>/dev/null | wc -l)
+    [[ -z "$n" || "$n" == "0" ]] && n="?(timeout)"
     if (( HAS_SUDO )); then
-      b=$(sudo du -sb "$T" 2>/dev/null | awk '{print $1}')
+      b=$(timeout 30 sudo du -sb "$T" 2>/dev/null | awk '{print $1}')
     else
-      b=$(du -sb "$T" 2>/dev/null | awk '{print $1}')
+      b=$(timeout 30 du -sb "$T" 2>/dev/null | awk '{print $1}')
     fi
-    note "$d: $n files, $(numfmt --to=iec ${b:-0})"
+    if [[ -z "$b" ]]; then
+      note "$d: $n files, ?(du timeout, 跨段 FUSE 慢)"
+    else
+      note "$d: $n files, $(numfmt --to=iec ${b:-0})"
+    fi
   else
     fail "$T 缺"
   fi
