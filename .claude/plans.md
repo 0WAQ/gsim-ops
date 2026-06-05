@@ -260,7 +260,8 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | B-5 | Step 3: 独立 redis 实例(分进程隔离) | **完成 (2026-06-04)**。`06-redis-jfs.sh` 起 `redis-jfs.service`:6380 专给 JuiceFS;`06-meta-migrate.sh` MIGRATE 69080 keys 6379→6380(反向白名单 + 分批 + 灾备 dump)。原因:server-160 上 6379 跟 alphalib biz 共用,任何 `systemctl stop redis` / OOM / FLUSHDB 会跨产品爆。**实测过一次事故**:改 conf 加 AOF 后 redis 7 用空 AOF 优先于 RDB,dbsize 归零;靠 `/var/backups/redis-recover-*` 完整恢复 69111 keys。03-redis.sh 已改成运行时 `config set` 不重启避雷 |
 | B-6 | 灾备路径验证 | **完成 (2026-06-04)**。服务器异常重启(writeback drain 中,staging=92912 / 362G)→ ExecStop 链 sync + ZFS cache 持久 → 重启后 unit 自动起 + 从 cache 续传 → 数据 0 丢失。Redis dump.rdb 恢复实测通过 |
 | B-7 | ops state 进 redis | **完成 (2026-06-04)**。新增 `ops/infra/store/redis_store.py` 实现 `StateStore` 接口,schema 跟 JsonStateStore 1:1 映射(`state:<lib>:<name>` hash + `state-index:<lib>` set + `state-checks:<lib>:<name>` list),WATCH/MULTI/EXEC 做 read-modify-write。`Config` 加 `state.backend: redis | json` 切换,`config.juicefs.yaml` 切到 redis 指向 6380。`ops/tools/state_migrate.py` 一次性 JSON→redis 迁移(3224 records 已迁完)。`ops list` 在 160 上跟 prod 路径输出 bit-for-bit 一致。**修了 redis-py 8.x `from_url` 不honor `protocol=2` 导致 requirepass-only server HELLO 失败的雷**(commit fc4d8f8)。**Phase C 的 state 同步前置已解决** |
-| C | 全量数据迁入 JuiceFS | **前置:Redis HA 必须先上(Sentinel 或 TiKV),详见下方"Redis HA 部署"**。`juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检)。state 已经在 6380 上(B-7),不需要再迁。**另一前置:ops submit/resubmit/check 写 alpha_src 的路径要套 sudo wrapper**(因为新模型下 alpha_src 是 root-owned,wbai 进程直接 shutil.move 会 EACCES) |
+| B-8 | Redis Sentinel HA | **完成 (2026-06-05)**。3-sentinel 集群:160 master+sentinel-① / 150 replica+sentinel-② / 144 sentinel-③(纯投票)。`07-redis-replica.sh` / `08-sentinel.sh` / `09-switch-meta-url.sh` 分别处理 replica / sentinel daemon / META_URL 切换。`ops/infra/store/redis_store.py` 加 `redis-sentinel://h:p,h:p/svc/db` URL scheme 支持,走 `redis.sentinel.Sentinel.master_for()` 自动 failover。**演练 9.12s failover**(down-after 5s + 投票),ops 透明重连,JFS 在三节点继续可用。**踩坑**:sentinel 写 `replicaof` 时不会补 `masterauth`,得在 conf 里预设(commit 39602aa fix);redis daemon 没 conf 写权所以 `CONFIG REWRITE` EACCES,持久化得 sudo sed |
+| C | 全量数据迁入 JuiceFS | ~~前置:Redis HA~~ **已解锁 (B-8)**。`juicefs sync` 把 alpha_src / alpha_pnl / alpha_feature 从现有 S3 导成 chunk 格式;切 config 指向 `/tank/vault/alphalib/`;`ops sync push/pull` 退役(`sync verify` 降级为巡检)。state 已经在 6380 上(B-7),不需要再迁。**前置:ops submit/resubmit/check 写 alpha_src 的路径要套 sudo wrapper**(因为新模型下 alpha_src 是 root-owned,wbai 进程直接 shutil.move 会 EACCES) |
 | D | alpha_src 接入 Git | 在 `/tank/vault/alphalib/alpha_src/` 初始化 Git 仓库,改造 `ops submit/resubmit` 调 `git add + commit`(加 flock),新增 `ops diff/log/blame` 命令 |
 | E | `.state` merge 逻辑简化 | 删掉"tied updated_at 留本地"补丁,改成"mtime 比较 + per-factor 文件锁";批量修改加全局 flock |
 | F | checkpoint 落地 | 按设计原则实现,默认放 JuiceFS,可再生的版本放本地 SSD |
@@ -278,7 +279,8 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 | `ops pack` 增量模式 + chunk 增量量化 | ⏸ 留给 B-2 |
 | 跨节点验证 | ⏸ 留给 B-2(`join.sh` 已就绪,等 150 实测) → **B-2 已完成** 见下面新条目 |
 | 跨节点验证 | ✅ (2026-06-04) 160 ↔ 150 visibility (bit-level OK) + flock 跨节点互斥 + 释放后另一端立即获得 |
-| Redis 故障注入 | ✅ (2026-06-02 第二轮) 结论:**JuiceFS 不 hang,Redis 一停立刻 EIO**。所有 syscall(读/写/stat/unlink)全部失败,整个挂载点瘫。**Phase C 前置:必须上 Redis Sentinel 主从** |
+| Redis 故障注入 | ✅ (2026-06-02 第二轮) 结论:**JuiceFS 不 hang,Redis 一停立刻 EIO**。所有 syscall(读/写/stat/unlink)全部失败,整个挂载点瘫。~~Phase C 前置:必须上 Redis Sentinel 主从~~ → **已部署 B-8 (2026-06-05)** |
+| Redis Sentinel failover 演练 | ✅ (2026-06-05) 160 master kill → sentinel 5s 共识 + 4s 投票/同步 = **9.12s failover** → 150 promoted → JFS 三节点 mount/rw OK → ops 透明重连。旧 160 重启自动降级 replica(预设 masterauth 后) |
 | Redis dump.rdb 灾备路径 | ✅ (2026-06-04) Redis 7 切 AOF 雷踩过一次,从 dump.rdb 完整恢复 69111 keys。recovery 流程已写进 README 故障排除 |
 | 服务器异常重启 | ✅ (2026-06-03) writeback drain 中重启 (staging=92912/362G),ExecStop 链 sync + ZFS cache 持久 → 重启后续传 → 数据 0 丢失 |
 | 独立 redis 实例 vs 共用 | ✅ (2026-06-04) `redis-jfs.service`:6380 与 alphalib biz 6379 进程级隔离,任一重启不影响另一边 |
@@ -304,47 +306,50 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 - Phase C 完成后,`ops sync` 整个子命令可以删除或保留 `verify` 作为对账
 - PoC 期间用了 MinIO root key(暴露在过日志里),进 Phase C 前要旋转一次,并申请专用受限 key
 
-## Redis HA 部署(Phase C 前置,Not Started)
+## Redis HA 部署(已完成 2026-06-05)
 
-PoC 第二轮 (2026-06-02) 的故障注入数据证明:**单 Redis 是 JuiceFS 集群的硬单点**。Redis 一停,所有节点的所有文件操作(读/写/stat/unlink)立刻 EIO,正在跑的 `ops check`/`pack`/用户脚本会直接崩。Phase C 上线前必须解决,否则一次 Redis 升级/OOM/systemd 重启就毁掉当天所有产出。
+**已落地拓扑**:
+- 160 (IDC, master ZFS pool): `redis-jfs.service:6380` master + `redis-sentinel-jfs.service:26380`
+- 150 (IDC, JFS client): `redis-jfs.service:6380` replica (`replicaof 160 6380`) + sentinel
+- 144 (LAN, JFS client, WAN to IDC): 只 sentinel,无 redis 数据
 
-**方案对比**:
+**实测数据**(2026-06-05):
+- failover 时间 9.12s(`down-after-milliseconds=5000` + 投票 + 同步)
+- ops list / JFS mount / rw 在 failover 后透明继续
+- 旧 master 重启自动降级 replica(sentinel 通过 `REPLICAOF` 命令 + 我们预设的 `masterauth`)
+
+**Sentinel quorum=2,3 个 sentinel 任意 1 个掉对 failover 无影响,任意 2 个掉则 quorum 不足无法 failover(但数据不丢)。**
+
+部署脚本:`scripts/juicefs-poc/07-redis-replica.sh` / `08-sentinel.sh` / `09-switch-meta-url.sh`(每脚本顶部有用法)。ops 客户端 sentinel 支持在 `ops/infra/store/redis_store.py`(`redis-sentinel://` URL scheme)。
+
+---
+
+### 历史方案对比(留作参考)
+
+最初的方案对比表:
 
 | 方案 | 故障切换时间 | 部署复杂度 | 资源占用 | 适合规模 |
 |---|---|---|---|---|
 | 单 Redis + RDB | 不可用(只能恢复数据,不恢复服务) | 极简 | 1 进程 | 仅 PoC |
-| **Redis Sentinel(主从 + 哨兵)** | ~10 秒自动 failover | 中等 | 2 Redis + 3 Sentinel,几百 MB 内存 | **3-10 台节点首选** |
+| **Redis Sentinel(主从 + 哨兵)** ✅ | ~10 秒自动 failover (实测 9.12s) | 中等 | 2 Redis + 3 Sentinel,几百 MB 内存 | **3-10 台节点首选** |
 | Redis Cluster | 同上,分片 | 高 | ≥ 6 节点 | 数据量超百 GB 才需要 |
 | TiKV | 秒级,自带 HA | 高,3 节点起 | 重 | JuiceFS 官方推荐企业级方案 |
 
-**选 Sentinel 的理由**:
-- 我们 metadata 体量(几十万因子文件 + 状态)永远到不了需要 Cluster 分片的规模
-- TiKV 部署运维成本明显高于 Sentinel,边际收益不值
-- 10 秒 failover 窗口可接受 —— 用户脚本如果在这窗口里写入会拿到瞬时 EIO,需要 ops 这层做一次重试包装(放到 Phase E 一起做)
+选 Sentinel 的理由:
+- metadata 体量(几十万因子)永远不需要 Cluster 分片
+- TiKV 运维成本明显高
+- 10s failover 可接受;ops 那层后续可以包写入重试(Phase E 一起做)
 
-**部署拓扑**(3 节点起,机器够就分散到不同物理机):
+### 部署期间踩到的坑
 
-```
-node1: redis-master  + sentinel
-node2: redis-replica + sentinel
-node3:                 sentinel    (轻量,可以是 ops 客户端机)
-```
+1. **conf 缺 `masterauth`**:sentinel 写 `replicaof <new>` 时**不会**补 masterauth;原 master 起来变 replica 时 AUTH 失败,`master_link_status=down`。修法:**所有 redis 节点都预设 `masterauth = requirepass`**(commit 39602aa 把这条加进 `06-redis-jfs.sh`)。
+2. **redis daemon 没 conf 写权**:`/etc/redis-jfs/redis.conf` 是 `0640 root:redis`,redis 用户只读。`CONFIG REWRITE` EACCES。所以 sentinel 触发的状态更新只在内存生效,机器重启就丢。修法:任何需要持久化的 conf 变更走 sudo sed 改文件,不靠 `CONFIG REWRITE`。
+3. **144 上 redis-sentinel 是 broken symlink**:Ubuntu 上 redis-sentinel 是 redis-server 同一 binary 通过 argv[0] 切模式。如果只装 `redis-sentinel` 包没装 `redis-server`,sentinel 的 symlink 指向 `redis-check-rdb`,启动 226/NAMESPACE 失败。修法:**保证 sentinel 节点都装 `redis-server`**(然后 disable 不需要的 redis-server.service)。
 
-- Sentinel 必须 ≥ 3 个且分散在不同机器,否则脑裂时无法达成 quorum
-- master 和 replica 不能放同一台机,否则机器挂 = 主从同挂 = HA 失效
-- JuiceFS 元信息 URL 从 `redis://127.0.0.1:6379/1` 改成 `redis-sentinel://127.0.0.1:26379,host2:26379,host3:26379/mymaster/1`,JuiceFS 客户端会自动跟随 master 切换
+### 待办
 
-**待做**:
-1. 决定 3 台机器分配(目前只有 2 台,等第三台 → 或者临时把第三个 sentinel 放在 MinIO 服务器上)
-2. 写 Ansible/Shell 部署脚本 + 配置模板(`sentinel.conf` 的 `quorum=2`、`down-after-milliseconds=5000`、`failover-timeout=10000`)
-3. 故障演练:一次完整的 master kill → sentinel 选举 → replica 晋升 → JuiceFS 客户端自动重连 → 业务恢复
-4. RDB + AOF 持久化策略(防止双主同时挂时数据丢失)
-5. 监控:Sentinel 状态 + master 切换告警(挂到 Feishu 或 Prometheus)
-
-**前置依赖**:
-- 第三台机器到位(或 MinIO 那台兼任 sentinel)
-- 内网时钟同步正常(NTP),否则 Sentinel 选举会抖
-- 防火墙开 6379 / 26379
+- **写入重试 wrapper**(放到 ops 那层):failover 5-10s 窗口内的写会拿到瞬时 EIO/connection refused。包 retry 3 次 backoff 2/5/10s。属 Phase E 收尾项。
+- **监控**:Sentinel 状态 + master 切换告警(挂到 Feishu 或 Prometheus),目前是 manual `redis-cli -p 26380 sentinel master mymaster`。
 
 ## ops pack Incremental Mode (Not Started)
 
