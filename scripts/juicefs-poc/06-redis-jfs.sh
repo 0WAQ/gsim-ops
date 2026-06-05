@@ -81,6 +81,10 @@ save 60 10000
 
 # AUTH (写在 conf 里, conf mode 0640 redis:redis 隔开非 redis 用户)
 requirepass ${PASS_VAL}
+# masterauth = requirepass: 此节点 failover 后变 replica 时需要它去连新 master。
+# Sentinel 会自动写 replicaof <new_master> + config rewrite,但不会补 masterauth,
+# 必须预先在 conf 里 (master_link_status=down 的典型坑)。
+masterauth ${PASS_VAL}
 
 # JuiceFS 元数据全都在 redis, 内存不能 evict
 maxmemory-policy noeviction
