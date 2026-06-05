@@ -42,8 +42,8 @@ class CheckpointChecker(Checker):
         new = self._get_v2md5(factor)
 
         if not old or not new:
-            raise CheckpointSkip()
-        
+            raise CheckpointSkip(f"old={'OK' if old else 'NONE'} new={'OK' if new else 'NONE'}")
+
         if old != new:
             raise CheckpointFail()
 
