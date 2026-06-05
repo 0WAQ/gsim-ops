@@ -6,12 +6,21 @@
 
 (DELETED 是 soft-delete 标记,由 `ops rm` 进入;DECAYING/RETIRED 暂未实现)
 
+`ops cancel` / `ops clear` 不是状态转移,而是把因子从生命周期里**完全移除**:
+- `ops cancel`: state 有 record (SUBMITTED / `--force` 含 CHECKING) → 删 staging + 硬删 state record(从未 ACTIVE,无 tombstone)
+- `ops clear`: state 无 record(`copy_to_staging` 后 `parse_factor` 抛错的孤儿)→ 仅删 staging 目录
+
 **Flow**:
 ```
 dropbox/{user}/{date}/AlphaXxx/      (QR-owned, read-only source)
     │  ops submit  → parse_factor() → write meta.json + state=SUBMITTED
+    │     │
+    │     └─ parse 失败:staging 目录留下,state 无 record(孤儿)
+    │           → ops clear 清理
     ▼
 staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
+    │  ops cancel  → 删 staging + 硬删 state record(撤回未入库因子)
+    │
     │  ops check   → reconcile → 7-stage pipeline run
     ├── pass ──► alpha_src/AlphaXxx/                  state=ACTIVE
     │                │  ops recheck   (原代码不变,重跑 check;--purge 顺带清 dump/feature)
@@ -44,6 +53,8 @@ The 2551 legacy entries have `submitted_at = null` and `submitted_by = null`. Th
 1. XML `<Description author="...">`
 2. If author is in `_GENERIC_AUTHORS = {"gsim_users", "unknown", ""}` — fall back to `_infer_author_from_dir()` which strips the `Alpha` prefix and lowercases the leading word (`AlphaFguo20260303LLM010` → `fguo`)
 3. Else `"unknown"`
+
+**Watch out**: `_infer_author_from_dir` is purely lexical, not identity-aware. `AlphaInterpFoo` → `interp`, even if submitted by lhw. `ops cancel -u <user>` and `ops clear -u <user>` filter on this inferred author (not `submitted_by`), so off-spec names land under unexpected buckets. When in doubt, use single-factor mode or `ops status -u <user>` to see what the inferred author actually is.
 
 ## XML Normalization (`normalize.py`)
 
