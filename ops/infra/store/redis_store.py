@@ -72,20 +72,36 @@ def _hash_to_record(h: dict[str, str], checks: list[CheckRecord]) -> FactorRecor
 
 class RedisStateStore(StateStore):
     def __init__(self, url: str, library_id: str, password: str | None = None):
-        # Parse url ourselves and pass discrete kwargs to redis.Redis() instead
-        # of from_url(). redis-py 8.x defaults to RESP3 / HELLO handshake; on a
-        # requirepass-only server (no ACL user) HELLO fails with
+        # Two URL shapes supported:
+        #   redis://host:port/db                 -- direct, single instance
+        #   redis-sentinel://h1:p1,h2:p2/svc/db  -- discover master via Sentinel
+        #
+        # Why parse ourselves instead of redis.from_url():
+        # redis-py 8.x defaults to RESP3 / HELLO handshake; on a requirepass-only
+        # server (no ACL user) HELLO fails with
         #   "HELLO must be called with the client already authenticated"
-        # protocol=2 forces classic AUTH-then-commands. from_url() in 8.x has
-        # been observed to ignore/override `protocol` -- direct construction is
-        # the reliable knob.
+        # protocol=2 forces classic AUTH-then-commands. from_url() in 8.x has been
+        # observed to ignore/override `protocol`. Direct construction is the
+        # reliable knob.
+        if url.startswith("redis-sentinel://"):
+            self.r = self._sentinel_client(url, password)
+        else:
+            self.r = self._direct_client(url, password)
+        self.lib = library_id
+        self._meta_key = f"state-meta:{self.lib}"
+        self._index_key = f"state-index:{self.lib}"
+        # connection check + schema sentinel
+        self.r.hsetnx(self._meta_key, "schema_version", SCHEMA_VERSION)
+
+    @staticmethod
+    def _direct_client(url: str, password: str | None) -> redis.Redis:
         parsed = urlparse(url)
         host = parsed.hostname or "127.0.0.1"
         port = parsed.port or 6379
         db_str = (parsed.path or "/0").lstrip("/")
         db = int(db_str) if db_str else 0
         pwd = password or parsed.password
-        self.r = redis.Redis(
+        return redis.Redis(
             host=host,
             port=port,
             db=db,
@@ -94,11 +110,51 @@ class RedisStateStore(StateStore):
             socket_timeout=5,
             protocol=2,
         )
-        self.lib = library_id
-        self._meta_key = f"state-meta:{self.lib}"
-        self._index_key = f"state-index:{self.lib}"
-        # connection check + schema sentinel
-        self.r.hsetnx(self._meta_key, "schema_version", SCHEMA_VERSION)
+
+    @staticmethod
+    def _sentinel_client(url: str, password: str | None) -> redis.Redis:
+        # redis-sentinel://h1:p1,h2:p2,h3:p3/master_name/db
+        # netloc is "h1:p1,h2:p2,h3:p3"; path is "/master_name/db"
+        from redis.sentinel import Sentinel
+
+        parsed = urlparse(url)
+        netloc = parsed.netloc
+        # strip password@ if present (we pass password explicitly below)
+        if "@" in netloc:
+            cred, _, netloc = netloc.partition("@")
+            if password is None and ":" in cred:
+                password = cred.split(":", 1)[1]
+            elif password is None:
+                password = cred
+        sentinels: list[tuple[str, int]] = []
+        for hp in netloc.split(","):
+            host, _, port_s = hp.strip().partition(":")
+            if not host:
+                continue
+            sentinels.append((host, int(port_s) if port_s else 26379))
+        if not sentinels:
+            raise ValueError(f"redis-sentinel URL 没有 sentinel 节点: {url}")
+        path_parts = [p for p in (parsed.path or "").split("/") if p]
+        if not path_parts:
+            raise ValueError(f"redis-sentinel URL 缺 master 名: {url}")
+        service_name = path_parts[0]
+        db = int(path_parts[1]) if len(path_parts) > 1 else 0
+
+        s = Sentinel(
+            sentinels,
+            sentinel_kwargs={"socket_timeout": 5},
+            socket_timeout=5,
+        )
+        # master_for returns a redis client that re-queries sentinels on each
+        # connection -- transparent failover. Pass auth + protocol=2 explicitly.
+        return s.master_for(
+            service_name,
+            db=db,
+            password=password,
+            decode_responses=True,
+            socket_timeout=5,
+            protocol=2,
+        )
 
     def _factor_key(self, name: str) -> str:
         return f"state:{self.lib}:{name}"
