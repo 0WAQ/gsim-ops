@@ -16,7 +16,7 @@ def prepare_for_initial(factor: AlphaMetadata, config: Config):
     factor.xml_config["gsim"]['Modules']['Alpha']['@module'] = factor.py_file
 
     # TODO:
-    factor.xml_config["gsim"]['Portfolio']['Stats']['@module'] = 'StatsSimpleV5'
+    factor.xml_config["gsim"]['Portfolio']['Stats']['@module'] = 'StatsSimpleV6'
     factor.xml_config["gsim"]['Portfolio']['Stats']['@mode'] = '0'
     factor.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaFile'] = 'true'
     factor.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaDir'] = str(config.alpha_path)
@@ -31,6 +31,7 @@ def prepare_for_validate(factor: AlphaMetadata):
         factor.xml_config["gsim"]['Universe']['@startdate'] = "20241201"
         factor.xml_config["gsim"]['Universe']['@enddate'] = "20241202"
         factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'false'
+        factor.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaFile'] = 'false'
         save_xml(factor)
     except Exception:
         ...
@@ -40,7 +41,8 @@ def prepare_for_checkbias(factor: AlphaMetadata):
     try:
         factor.xml_config["gsim"]['Universe']['@startdate'] = "20241201"
         factor.xml_config["gsim"]['Universe']['@enddate'] = "20241231"
-        factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'false'
+        factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'true'
+        factor.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaFile'] = 'true'
         save_xml(factor)
     except Exception:
         ...
@@ -57,7 +59,12 @@ def prepare_for_long_backtest(factor: AlphaMetadata):
 
 
 def prepare_for_checkpoint(factor: AlphaMetadata):
-    ...
+    try:
+        factor.xml_config["gsim"]['Portfolio']['Stats']['@dumpPnl'] = 'true'
+        factor.xml_config["gsim"]['Portfolio']['Alpha']['@dumpAlphaFile'] = 'true'
+        save_xml(factor)
+    except Exception:
+        ...
 
 
 def prepare_for_compliance(factor: AlphaMetadata):

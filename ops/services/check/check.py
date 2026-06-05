@@ -172,15 +172,15 @@ class CheckerPipeline:
             if factor.alpha_dir.exists() and not dump_src.exists():
                 shutil.move(str(factor.alpha_dir), str(dump_src))
             # 生成 feature
-            from ops.services.pack.pack import pack_one, load_universe, PACK_L
-            try:
-                nio = load_universe(self.config.nio_data_path)
-                _, instruments, date_to_idx = nio
-                shape = (PACK_L, len(instruments))
-                pack_one(factor.name, self.config.alpha_dump,
-                         self.config.alpha_feature, date_to_idx, shape)
-            except Exception:
-                pass
+            # from ops.services.pack.pack import pack_one, load_universe, PACK_L
+            # try:
+            #     nio = load_universe(self.config.nio_data_path)
+            #     _, instruments, date_to_idx = nio
+            #     shape = (PACK_L, len(instruments))
+            #     pack_one(factor.name, self.config.alpha_dump,
+            #              self.config.alpha_feature, date_to_idx, shape)
+            # except Exception:
+            #     pass
         else:
             # checkbias/checkpoint: 清掉 dump + feature(短期数据不完整)
             dump_dir = self.config.alpha_dump / factor.name
