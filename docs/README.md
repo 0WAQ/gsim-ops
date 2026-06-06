@@ -31,6 +31,8 @@
 | 淘汰回收站 | `/mnt/storage/recycle/{Unix ID}/` |
 | 生产 PNL 池 | `/usr/local/gsim/pnl_prod/` |
 
+> **路径说明 (2026-06-05 JFS 上线后)**: 生产因子库 canonical 路径已迁至 JuiceFS `/tank/vault/alphalib/`,**`/mnt/storage/alphalib` 是软链指向 JFS 挂载点**, 老脚本不需改路径仍能工作。`/mnt/storage/recycle/` 仍保留旧物理数据 (2026-06 之前), 新淘汰因子落到 `/tank/vault/alphalib/recycle/`。
+
 ### 核心命令速查
 
 ```bash
@@ -73,13 +75,13 @@ uv run ops list -u wbai                 # 列出因子
 
 ### 入库标准（速查）
 
-阈值由 `config.yaml` 统一控制（当前不区分 delay）：
+阈值由 `config.yaml` 统一控制(tvr 按 delay 区分):
 
 | 项目 | 标准 |
 |-----|------|
 | 年化收益率 (ret%) | ≥ 10% |
-| 换手率 (tvr%) | ≥ 40% |
-| 夏普比率 (shrp) | ≥ 2.00 |
+| 换手率 (tvr%) | ≤ 50 (delay=1) / ≤ 60 (delay=0) |
+| 夏普比率 (shrp) | > 2.00 |
 | 最大相关性 | < 0.7 |
 | 个股最大持仓 | ≤ 5% |
 | 多/空最小持股数 | ≥ 50 |

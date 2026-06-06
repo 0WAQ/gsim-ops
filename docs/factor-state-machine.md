@@ -20,6 +20,9 @@
 | `ops resubmit` | 已有因子提交新代码 | 因子名已存在于 state | dropbox | += 1 |
 | `ops recheck` | 原代码不变,重跑 check | ACTIVE 或 REJECTED | alpha_src | 不变 |
 | `ops approve` | 人工通过 correlation 失败因子 | REJECTED 且 last_fail_stage=correlation | — | 不变 |
+| `ops cancel` | 撤回未入库的 SUBMITTED 因子 (删 staging + 硬删 state record) | SUBMITTED (或 CHECKING + `--force`) | — | — |
+| `ops clear` | 清 staging 孤儿目录 (state 无 record) | — | — | — |
+| `ops rm` | 软删除 (打 DELETED 标), `--force` 同时删 dump/feature | 任意状态 | — | — |
 
 ## 状态转移图
 

@@ -9,9 +9,9 @@
 公司内部把数据按 build 来源分为四层,每一层基于"当前层或上一层"的数据生成:
 
 ```
-rawdata  ──→  cc (common cache)  ──→  dm (data manager)  ──→  alpha-feature
+rawdata  ──→  cc (common cache)  ──→  dm (data manager)  ──→  L2-feature
    ↓               ↓                       ↓                       ↓
-原始数据源        通用缓存                数据管理层               因子特征层
+原始数据源        通用缓存                数据管理层               L2 衍生特征层
 (wind/datayes/   /datasvc/data/cc_all   Dmgr_* (gsim 风格)       cn_equity_feature/*
  citics)         /datasvc/data/cc_*                              cn_equity_feature_5min/*
                                                                   realtime/* delta/*
@@ -22,9 +22,11 @@ rawdata  ──→  cc (common cache)  ──→  dm (data manager)  ──→  
 | `rawdata` | `/datasvc/rawdata/{rawdata_wind, rawdata_datayes, rawdata_citics, rawdata_datayes_unused}` | 外部数据商 / 落盘脚本 |
 | `cc` | `/datasvc/data/{cc, cc_2024, cc_2025, cc_all}` | rawdata 的标准化 cache |
 | `dm` | cc_all 下 `Dmgr*` 前缀目录 | gsim DataManager 模块,基于 cc 算出来的衍生(行业聚合、市场指标等) |
-| `alpha-feature` | cc_all 下 `cn_equity_feature*` / `realtime` / `delta` | 我们自己基于 L2 数据做的各频率特征 |
+| `L2-feature` | cc_all 下 `cn_equity_feature*` / `realtime` / `delta` | 我们自己基于 L2 数据做的各频率特征 |
 
-`cc_all` 是 cache 层的全集,既存了 rawdata 的镜像,也吸纳了 dm 层和 alpha-feature 层的产出 —— 所以它是个混合层,但对外用 memmap 读起来形态一致。
+> **命名注意**: 这里"L2-feature 层"指的是上游 L2 数据衍生的市场特征 (例如 `cn_equity_feature/fguo_max/*.npy`), **不要跟 `/tank/vault/alphalib/alpha_feature/`** (`ops pack` 输出的因子矩阵) 混淆 —— 后者是"alpha-feature", 词面相近但完全不同。
+
+`cc_all` 是 cache 层的全集,既存了 rawdata 的镜像,也吸纳了 dm 层和 L2-feature 层的产出 —— 所以它是个混合层,但对外用 memmap 读起来形态一致。
 
 ## 数据源映射(rawdata → cc)
 
@@ -180,7 +182,7 @@ L2-feature 使用 NioData memmap **预分配到 4636 行**,日增直接 in-place
 | `hf_daily_der_table_8` | 35 | 撤单 / 试单(AUCTION_CANCEL / BUY_T_OR_*) |
 | `hf_daily_der_table_9` | 35 | 大单买卖(AFH_* / BB_SB_* / BIG_BUY_RATIO) |
 
-### 6) 5min 高频特征(L2 衍生) — (T, 49, N) float64,alpha-feature 层
+### 6) 5min 高频特征(L2 衍生) — (T, 49, N) float64,L2-feature 层
 
 `cn_equity_feature_5min` 共 **917 个特征**,3 个子集,基于 L2 行情 build:
 
@@ -254,7 +256,7 @@ L2-feature 使用 NioData memmap **预分配到 4636 行**,日增直接 in-place
 | `income_statement_fore_quarter` | 12 | 32 |
 | `revenue_forecast_quarter` | 12 | 2 |
 
-### 11) L2 feature — (T=4636, N) float64,alpha-feature 层
+### 11) L2 feature — (T=4636, N) float64,L2-feature 层
 
 `cn_equity_feature/*` 共 **6315 个特征**,**我们自己基于 L2 行情(逐笔成交 + 五档盘口)build 出来的日级 / 多频率特征**。按作者 / 批次分桶:
 
@@ -296,7 +298,7 @@ L2-feature 使用 NioData memmap **预分配到 4636 行**,日增直接 in-place
 | 目录 | 形态 | 说明 |
 |---|---|---|
 | `delta/daily/YYYYMMDD/` | 每日一个目录 | 内含 `{date}.npy` (F, N)、`features.csv`(列出 feature_idx → name → memmap_dir → source_table)、`meta.json`(shape / dtype / date_idx) |
-| `realtime/feature_cuts_1430/` | (T_cap, N) | 32 个 14:30 时点切片字段(alpha-feature 层) |
+| `realtime/feature_cuts_1430/` | (T_cap, N) | 32 个 14:30 时点切片字段(L2-feature 层) |
 | `signal_rsh` | (T, N) | 之前外部研究员合作信号,**已弃用**,只是没删除 |
 
 `delta/daily` 是逐日 ETL 落盘的"特征日切片",特征数从 2024-12-02 的 2531 涨到 2026-05-29 的 3214。跟 cn_equity_feature 的 6315 维有交集(`features.csv` 里指明每个 feature 来源目录,可以追溯到 cn_equity / cn_equity_feature 下的某个表)。

@@ -7,15 +7,15 @@
 ## 数据分层
 
 ```
-rawdata  →  cc (common cache)  →  dm (data manager)  →  alpha-feature
+rawdata  →  cc (common cache)  →  dm (data manager)  →  L2-feature
    ↓             ↓                      ↓                      ↓
-原始数据源     /datasvc/data/cc_all   gsim Dmgr 模块         自建特征层
+原始数据源     /datasvc/data/cc_all   gsim Dmgr 模块         L2 衍生特征层
 ```
 
 - **rawdata**: `/datasvc/rawdata/{rawdata_wind, rawdata_datayes, rawdata_citics, rawdata_datayes_unused}`
 - **cc**: `/datasvc/data/{cc, cc_2024, cc_2025, cc_all}`,memmap 标准化 cache
 - **dm**: gsim DataManager 模块(本文档的主角),用 `<Data module="Dmgr*">` 注册,基于 cc / rawdata build
-- **alpha-feature**: 自建特征(`cn_equity_feature*` / `realtime` / `delta`),也可通过 Dmgr 注册供 gsim 使用
+- **L2-feature**: 自建 L2 特征(`cn_equity_feature*` / `realtime` / `delta`),也通过 Dmgr 注册供 gsim 使用。**不要跟 `/tank/vault/alphalib/alpha_feature/`** (`ops pack` 输出的因子矩阵) 混淆。
 
 gsim 的 XML `<Data>` 注册项实际上在加载某个 dm 模块,该模块再读 rawdata / cc 下的物理文件。
 
@@ -405,7 +405,7 @@ self.rev_fa = dr.getData('revenue_forecast_annual.revenue')
 
 ## L2 自建特征(cn_equity_feature 系列)
 
-我们自己基于 L2 行情(逐笔成交 + 五档盘口)build 的多频率特征,属于 alpha-feature 层。`/usr/local/gsim/dm_src/` 下提供对应 Dmgr,默认在 `config.read_cache.xml` 中被注释,**按需取消注释**。
+我们自己基于 L2 行情(逐笔成交 + 五档盘口)build 的多频率特征,属于 L2-feature 层。`/usr/local/gsim/dm_src/` 下提供对应 Dmgr,默认在 `config.read_cache.xml` 中被注释,**按需取消注释**。
 
 | ID | 说明 |
 |----|------|

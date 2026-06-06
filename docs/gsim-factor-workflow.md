@@ -348,13 +348,13 @@ uv run ops submit -u wbai -s 20260401 -f AlphaWbaiReversal
 
 ### 7.1 入库标准摘要
 
-阈值由 `config.yaml` 统一控制（当前不区分 delay）：
+阈值由 `config.yaml` 统一控制(tvr 按 delay 区分):
 
 | 项目 | 标准 |
 |-----|------|
 | 年化收益率 (ret%) | ≥ 10% |
-| 换手率 (tvr%) | ≥ 40% |
-| 夏普比率 (shrp) | ≥ 2.00 |
+| 换手率 (tvr%) | ≤ 50 (delay=1) / ≤ 60 (delay=0) |
+| 夏普比率 (shrp) | > 2.00 |
 | 最大相关性 | < 0.7 |
 
 仓位约束：

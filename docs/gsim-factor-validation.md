@@ -220,16 +220,16 @@ XML 中通过 `Constants` 控制：
 
 ## 入库标准
 
-入库阈值由 `config.yaml` 的 `correlation` 节统一控制（不区分 delay）：
+入库阈值由 `config.yaml` 的 `correlation` 节统一控制(按 delay 区分 tvr 上限):
 
 | 指标 | 标准 | config 字段 |
 |-----|------|-------------|
 | 年化收益率 (ret%) | ≥ 10% | `correlation.ret%` |
-| 换手率 (tvr%) | ≥ 40% | `correlation.tvr%` |
-| 夏普比率 (shrp) | ≥ 2.00 | `correlation.shrp` |
+| 换手率 (tvr%) | ≤ 50 (delay=1) / ≤ 60 (delay=0) | `correlation.tvr_d1%` / `tvr_d0%` |
+| 夏普比率 (shrp) | > 2.00 | `correlation.shrp` |
 | 最大相关性 | < 0.7 | `correlation.corr_threshold` |
 
-> 注：当前实现未对 `delay=0` 设置更高阈值。若希望对当日交易因子施加更严格标准，需在 `config.yaml` 中扩展或在评审环节人工把关。
+> 注:tvr 是上限,超过即拒(防止过度交易)。delay=0 因子由于次日开盘要落地,容忍更高换手。
 
 ### 仓位约束
 
