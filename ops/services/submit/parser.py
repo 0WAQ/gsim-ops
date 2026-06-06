@@ -142,9 +142,17 @@ def parse_factor(
     constants = xml.get("gsim", {}).get("Constants", {}) or {}
 
     name = alpha_node.get("@id") or desc.get("name") or factor_dir.name
-    author = desc.get("author", "unknown")
-    if author.lower() in _GENERIC_AUTHORS:
-        author = _infer_author_from_dir(factor_dir.name)
+    # 目录名是命名规范 Alpha{User}{Xxx} 的权威来源,优先以目录名推断 author;
+    # 推不出来(返回 unknown / 落入 _GENERIC_AUTHORS)再退回 XML Description.author
+    dir_author = _infer_author_from_dir(factor_dir.name)
+    if dir_author not in _GENERIC_AUTHORS:
+        author = dir_author
+    else:
+        xml_author = desc.get("author", "")
+        if xml_author and xml_author.lower() not in _GENERIC_AUTHORS:
+            author = xml_author
+        else:
+            author = "unknown"
     birthday = _to_int(desc.get("birthday"))
     universe = desc.get("universe", "")
     category = desc.get("category", "")

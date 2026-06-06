@@ -8,6 +8,7 @@ from ops.utils.logger.log import info, warn, error, highlight, banner, bottom
 from ops.infra.store import default_store, StateStore
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.core.state import FactorRecord, FactorStatus
+from ops.services.list.datasource import _build_npy_index
 from .parser import parse_factor
 from .normalize import normalize_factor_xml
 
@@ -43,25 +44,30 @@ def _iter_dropbox_dirs(config: Config, users: list[str], start: str, end: str,
     return out
 
 
-def copy_to_staging(config: Config, factor_dirs: list[Path]) -> list[Path]:
-    """Copy factor dirs into staging/AlphaXxx/ (flat).
+def _copy_one_to_staging(config: Config, src: Path) -> Path:
+    """Copy a single factor dir into staging/AlphaXxx/ (flat).
 
-    Existing staging dir for the same factor is overwritten.
-    Returns the new paths under staging.
+    If staging dir already exists, it's an orphan (state has no record — see
+    `ops clear`). We warn and overwrite rather than fail.
     """
     config.staging.mkdir(parents=True, exist_ok=True)
-    out: list[Path] = []
-    for src in factor_dirs:
-        dst = config.staging / src.name
-        if dst.exists():
-            shutil.rmtree(dst)
-        shutil.copytree(src, dst)
-        out.append(dst)
-    return out
+    dst = config.staging / src.name
+    if dst.exists():
+        warn(f"  ⚠  {dst.name} staging 已存在(疑似 parse 失败遗留的 orphan),覆盖重写")
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+    return dst
+
+
+def copy_to_staging(config: Config, factor_dirs: list[Path]) -> list[Path]:
+    """Batch wrapper kept for resubmit. New submit code path uses _copy_one_to_staging
+    so it can interleave copy + lock + parse atomically per factor.
+    """
+    return [_copy_one_to_staging(config, src) for src in factor_dirs]
 
 
 def submit_one(staging_dir: Path, submitted_by: str, config: Config,
-               store: StateStore) -> bool:
+               store: StateStore, npy_index: dict | None = None) -> bool:
     submitted_at = datetime.now().isoformat(timespec="seconds")
 
     py_files = sorted(staging_dir.glob("*.py"))
@@ -75,7 +81,8 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
     try:
         normalize_factor_xml(staging_dir)
         meta = parse_factor(staging_dir, config,
-                            submitted_by=submitted_by, submitted_at=submitted_at)
+                            submitted_by=submitted_by, submitted_at=submitted_at,
+                            npy_index=npy_index)
     except SyntaxError as e:
         error(f"  ✘  {staging_dir.name} syntax error: {e}")
         return False
@@ -95,6 +102,10 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
         submitted_by=submitted_by,
     )
     store.put(record)
+
+    if meta.author and meta.author != submitted_by:
+        warn(f"  ⚠  {meta.name}: 推断 author={meta.author!r} 与 submitter={submitted_by!r} 不一致,"
+             f"后续 -u 过滤按 author,可能漏掉本因子")
 
     info(f"  ✔  {meta.name} → {meta_path}")
     return True
@@ -119,38 +130,57 @@ def run_submit(args):
         bottom()
         return
 
-    user_of = {d: user for user, d in found}
-    src_dirs = [d for _, d in found]
-
-    # 先过滤已入库的因子,避免 copytree 后才发现重复,留下无 meta.json 的 staging 残骸
-    to_process: list[Path] = []
+    # 先过滤已入库的因子,避免无意义的 copy + 锁开销(锁内会再 re-check)
+    to_process: list[tuple[str, Path]] = []
     skipped = 0
-    for src in src_dirs:
+    for user, src in found:
         existing = store.get(src.name)
         if existing is not None:
             error(f"  ✘  {src.name} 已存在于 state 中"
                   f"(status={existing.status.value}),请用 ops resubmit 提交新代码")
             skipped += 1
             continue
-        to_process.append(src)
+        to_process.append((user, src))
 
     if not to_process:
         warn("没有可提交的因子")
         bottom()
         return
 
-    staging_dirs = copy_to_staging(config, to_process)
+    # npy_index 全量 scan 一次, 整个 batch 共享, 避免 N 个因子 N 次扫盘
+    npy_index = _build_npy_index(config.nio_data_path)
 
     passed = failed = 0
-    for src, staged in zip(to_process, staging_dirs):
-        submitted_by = user_of[src]
-        print("submitting ", end=""); highlight(f"{staged.name}")
+    for submitted_by, src in to_process:
+        name = src.name
+        print("submitting ", end=""); highlight(name)
+        staged: Path | None = None
         try:
-            with factor_lock(staged.name):
-                ok = submit_one(staged, submitted_by, config, store)
+            with factor_lock(name):
+                # 锁内 re-check, 关闭 filter→copy→lock 之间的并发窗口
+                existing = store.get(name)
+                if existing is not None:
+                    warn(f"  ⚠  {name} 已被并发 submit 抢先入库 "
+                         f"(status={existing.status.value}),跳过")
+                    skipped += 1
+                    continue
+                staged = _copy_one_to_staging(config, src)
+                ok = submit_one(staged, submitted_by, config, store,
+                                npy_index=npy_index)
+                if not ok:
+                    # parse / 文件数不合规等可控失败: 回滚 staging,
+                    # 避免留下 orphan 等下次被静默覆盖
+                    shutil.rmtree(staged, ignore_errors=True)
         except FactorLocked:
-            warn(f"  ⚠  {staged.name} 已被另一个进程占用,跳过")
+            warn(f"  ⚠  {name} 已被另一个进程占用,跳过")
             ok = False
+        except Exception as e:
+            # meta.save / store.put / copytree 等不可控异常: 同样回滚
+            error(f"  ✘  {name} 提交异常: {e}")
+            if staged is not None:
+                shutil.rmtree(staged, ignore_errors=True)
+            ok = False
+
         if ok:
             passed += 1
         else:

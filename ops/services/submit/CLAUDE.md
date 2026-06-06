@@ -8,15 +8,15 @@
 
 `ops cancel` / `ops clear` 不是状态转移,而是把因子从生命周期里**完全移除**:
 - `ops cancel`: state 有 record (SUBMITTED / `--force` 含 CHECKING) → 删 staging + 硬删 state record(从未 ACTIVE,无 tombstone)
-- `ops clear`: state 无 record(`copy_to_staging` 后 `parse_factor` 抛错的孤儿)→ 仅删 staging 目录
+- `ops clear`: state 无 record(进程被 SIGKILL 等非常态崩溃留下的 staging 残骸)→ 仅删 staging 目录
 
 **Flow**:
 ```
 dropbox/{user}/{date}/AlphaXxx/      (QR-owned, read-only source)
-    │  ops submit  → parse_factor() → write meta.json + state=SUBMITTED
+    │  ops submit  → factor_lock → re-check state → copy → parse → meta.json + state=SUBMITTED
     │     │
-    │     └─ parse 失败:staging 目录留下,state 无 record(孤儿)
-    │           → ops clear 清理
+    │     └─ 文件数不合规 / parse 失败 / store.put 异常:自动 rmtree staging,
+    │        不留 orphan(只有进程崩溃才需要 ops clear 兜底)
     ▼
 staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
     │  ops cancel  → 删 staging + 硬删 state record(撤回未入库因子)
@@ -50,11 +50,10 @@ The 2551 legacy entries have `submitted_at = null` and `submitted_by = null`. Th
 
 ## Author Resolution (`parser.py`)
 
-1. XML `<Description author="...">`
-2. If author is in `_GENERIC_AUTHORS = {"gsim_users", "unknown", ""}` — fall back to `_infer_author_from_dir()` which strips the `Alpha` prefix and lowercases the leading word (`AlphaFguo20260303LLM010` → `fguo`)
-3. Else `"unknown"`
+1. `_infer_author_from_dir()` — strips `Alpha` prefix and takes the leading lowercase run (`AlphaFguo20260303LLM010` → `fguo`). 目录命名规范 `Alpha{User}{Xxx}` 是权威来源。
+2. 推不出来(返回 `unknown`)→ 回退到 XML `<Description author="...">`,若其又落入 `_GENERIC_AUTHORS = {"gsim_users", "unknown", ""}` 则最终为 `"unknown"`。
 
-**Watch out**: `_infer_author_from_dir` is purely lexical, not identity-aware. `AlphaInterpFoo` → `interp`, even if submitted by lhw. `ops cancel -u <user>` and `ops clear -u <user>` filter on this inferred author (not `submitted_by`), so off-spec names land under unexpected buckets. When in doubt, use single-factor mode or `ops status -u <user>` to see what the inferred author actually is.
+**Watch out**: `_infer_author_from_dir` 纯词法,不识身份。`AlphaInterpFoo` → `interp`,哪怕是 lhw 提交的。`submit_one` 会在 `meta.author != submitted_by` 时打 warn。`ops cancel -u <user>` / `ops clear -u <user>` 按推断 author 过滤(不是 `submitted_by`),off-spec 命名会落到非预期 bucket。拿不准用单因子模式或 `ops status -u <user>` 看推断结果。
 
 ## XML Normalization (`normalize.py`)
 
@@ -65,6 +64,15 @@ Submit auto-rewrites mismatched ids in-place so the factor is runnable from any 
 - `Modules.Alpha.@module` stem → `{dir_name}`
 
 After `to_lib` / `to_recycle`, check rewrites `Modules.Alpha.@module` to the .py's new absolute path so the factor stays independently runnable from alpha_src or recycle. `__pycache__` is stripped before every move.
+
+## Submit Atomicity (`submit.py::run_submit`)
+
+每个因子串行走一遍 `factor_lock → 锁内 re-check state → _copy_one_to_staging → submit_one`,
+关闭了 filter→copy→lock 之间的并发窗口。任何阶段失败(parse 抛错、`store.put` 异常、文件数
+不合规)都会 `rmtree(staged)` 回滚,正常路径下不再产生 orphan staging。`_build_npy_index`
+在 batch 入口扫一次,传给每个 `parse_factor()` 复用,避免 N 个因子 N 次全盘 scan。
+
+`copy_to_staging(config, dirs)` 是给 `ops resubmit` 留的批量 wrapper,内部就是循环 `_copy_one_to_staging`。
 
 ## Backfill (`services/backfill/backfill.py`)
 
