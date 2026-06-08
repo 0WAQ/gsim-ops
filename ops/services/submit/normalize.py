@@ -21,7 +21,7 @@ is printed if their stems don't carry the expected identifier.
 import xmltodict
 from pathlib import Path
 
-from ops.utils.logger.log import info, warn
+from ops.utils.printer import info, warn
 
 
 MOD_SUFFIX = "Mod"

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from ops.infra.config import Config
 from ops.utils.func import date_range
-from ops.utils.logger.log import info, warn, error, highlight, banner, bottom, progress
+from ops.utils.printer import info, warn, error, highlight, banner, bottom, progress
 from ops.infra.store import default_store, StateStore
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.core.state import FactorRecord, FactorStatus

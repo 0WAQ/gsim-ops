@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from ops.infra.gsim.runner import BacktestError
-from ops.utils.logger.log import info, warn, error
+from ops.utils.printer import info, warn, error
 
 
 class LowerAction(argparse.Action):

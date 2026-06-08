@@ -32,7 +32,7 @@ from pathlib import Path
 from ops.core.state import FactorStatus
 from ops.infra.config import Config
 from ops.infra.store import StateStore
-from ops.utils.logger.log import info, warn
+from ops.utils.printer import info, warn
 
 
 def _now() -> str:

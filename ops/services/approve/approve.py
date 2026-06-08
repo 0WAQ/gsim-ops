@@ -13,7 +13,7 @@ from ops.infra.lock import factor_lock, FactorLocked
 from ops.infra.store import default_store
 from ops.infra.store.json_store import _now
 from ops.core.state import FactorRecord, FactorStatus, CheckRecord
-from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
+from ops.utils.printer import banner, bottom, info, warn, error, highlight
 
 
 _CORRELATION = "correlation"

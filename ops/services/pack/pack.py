@@ -17,7 +17,7 @@ from pathlib import Path
 
 from ops.infra.config import Config
 from ops.infra.lock import factor_lock, FactorLocked
-from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
+from ops.utils.printer import banner, bottom, info, warn, error, highlight
 
 
 DATES_FILE = "__universe/Dates.npy"

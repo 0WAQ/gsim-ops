@@ -6,7 +6,7 @@ from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner, BacktestError
 from ops.infra.lock import factor_lock, FactorLocked
-from ops.utils.logger.log import *
+from ops.utils.printer import *
 from ops.core.alpha.metadata import AlphaMetadata
 
 from .find import scan_factors

@@ -7,7 +7,7 @@ from ops.core.state import FactorRecord, FactorStatus
 from ops.core.factormeta import FactorMeta
 from ops.services.submit.parser import parse_factor
 from ops.services.list.datasource import _build_npy_index
-from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
+from ops.utils.printer import banner, bottom, info, warn, error, highlight
 
 
 META_FILENAME = "meta.json"

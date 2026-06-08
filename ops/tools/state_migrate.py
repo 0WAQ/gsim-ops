@@ -22,7 +22,7 @@ from rich.console import Console
 
 from ops.core.state import FactorRecord, CheckRecord
 from ops.infra.store.redis_store import RedisStateStore
-from ops.utils.logger.log import info, warn
+from ops.utils.printer import info, warn
 
 
 _stderr = Console(stderr=True)

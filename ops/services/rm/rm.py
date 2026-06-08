@@ -19,7 +19,7 @@ from ops.infra.config import Config
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.infra.store import default_store
 from ops.core.state import FactorStatus
-from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
+from ops.utils.printer import banner, bottom, info, warn, error, highlight
 
 
 def _purge_artifacts(name: str, config: Config) -> list[str]:

@@ -30,7 +30,7 @@ from ops.infra.lock import factor_lock, FactorLocked
 from ops.infra.store import default_store
 from ops.core.state import FactorRecord, FactorStatus
 from ops.services.rm.rm import _purge_artifacts
-from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
+from ops.utils.printer import banner, bottom, info, warn, error, highlight
 
 
 _SUPPORTED_STATUSES = {FactorStatus.ACTIVE, FactorStatus.REJECTED, FactorStatus.DELETED}

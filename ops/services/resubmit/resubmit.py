@@ -24,7 +24,7 @@ from ops.core.state import FactorRecord, FactorStatus
 from ops.services.submit.submit import _iter_dropbox_dirs, copy_to_staging
 from ops.services.submit.parser import parse_factor
 from ops.services.submit.normalize import normalize_factor_xml
-from ops.utils.logger.log import banner, bottom, info, warn, error, highlight, progress
+from ops.utils.printer import banner, bottom, info, warn, error, highlight, progress
 
 
 META_FILENAME = "meta.json"

@@ -10,7 +10,7 @@ from ops.infra.gsim.runner import Runner
 from ops.infra.store import default_store
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.services.list.metrics import update_metrics
-from ops.utils.logger.log import *
+from ops.utils.printer import *
 from ops.core.alpha.metadata import AlphaMetadata
 from ops.core.factormeta import FactorMeta
 from ops.core.state import FactorRecord, FactorStatus, CheckRecord

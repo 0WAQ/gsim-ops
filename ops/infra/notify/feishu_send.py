@@ -11,7 +11,7 @@ import json
 import argparse
 import sys
 
-from ops.utils.logger.log import info, warn, error
+from ops.utils.printer import info, warn, error
 
 class FeishuBot:
     def __init__(self, app_id, app_secret):

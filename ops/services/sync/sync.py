@@ -25,7 +25,7 @@ from ops.services.sync.merge import MERGERS
 from ops.services.sync.diff import (
     DirDiff, walk_local, list_remote, diff,
 )
-from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
+from ops.utils.printer import banner, bottom, info, warn, error, highlight
 
 STATE_FILES = ("factor_state.json", "metrics.json", "datasources.json")
 DATA_DIRS = ("alpha_src", "alpha_pnl", "alpha_feature")
