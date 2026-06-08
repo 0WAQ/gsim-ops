@@ -30,14 +30,18 @@ from pathlib import Path
 import numpy as np
 
 # 默认跳的目录 (跟 cc_fingerprint.py 一致)
+# 注: 3D / 1D 已支持, 这里只跳真正的特殊目录
 SKIP_DIRS = {
     'cn_equity', 'cn_equity_feature', 'cn_equity_feature_5min', 'realtime',
-    'delta', 'Interval5m',  # 3D, 用专门工具
-    '__universe',
+    'delta',  # per-date 切片, 形状不规则
+    '__universe',  # 元数据, 不是数据
     'ALL', 'ALL_GIM', 'ALL_TRD', 'FULL',
     'HS300', 'ZZ500', 'ZZ1000', 'ipo',
     'TOP1000', 'TOP1500', 'TOP2000', 'TOP2600', 'TOP3000', 'TOP3300', 'TOP4000',
 }
+
+# 3D 数据的可能 K 值 (中间轴): 49=5min bars, 12=季度 fore, 3=年度 fore
+KNOWN_3D_K = [49, 12, 3]
 
 # 按字段名识别"应非负"
 NONNEG_KEYWORDS = ['_value_', '_volume_', '_trades_', '_count', 'turnover', 'amo',
@@ -57,36 +61,63 @@ def is_nonneg_field(name: str) -> bool:
     return any(k in n for k in NONNEG_KEYWORDS)
 
 
-def infer_2d(file_size: int, n_inst: int):
+def infer_shape(file_size: int, n_inst: int):
+    """
+    推断 .npy 形状.
+    Returns ((shape_tuple), dtype, ndim, err_msg).
+    Order: 2D float64 / 2D int8 / 1D int64 / 1D float64 / 3D float64 (T, K, N) for K in [49, 12, 3].
+    """
     if file_size == 0:
-        return None, None, "empty file"
+        return None, None, None, "empty file"
+
+    # 2D 优先 (主流)
     row_bytes = n_inst * 8
     if file_size % row_bytes == 0:
-        return file_size // row_bytes, 'float64', None
+        T = file_size // row_bytes
+        return (T, n_inst), 'float64', 2, None
     if file_size % n_inst == 0:
-        return file_size // n_inst, 'int8', None
-    return None, None, f"unfit float64/int8: size={file_size} N={n_inst}"
+        T = file_size // n_inst
+        return (T, n_inst), 'int8', 2, None
+
+    # 1D 备选 (例: aindexeodprices/*.npy 是 (T,) 一维)
+    # 通过 cutoff_idx 反推: 1D 大小 = T * 8 (float64) 或 T * 8 (int64)
+    if file_size % 8 == 0:
+        T = file_size // 8
+        # 合理 T 范围 (cc 历史 3000-5000 量级)
+        if 1000 <= T <= 10000:
+            return (T,), 'float64', 1, None
+
+    # 3D float64 (T, K, N)
+    for K in KNOWN_3D_K:
+        denom = K * n_inst * 8
+        if file_size % denom == 0:
+            T = file_size // denom
+            return (T, K, n_inst), 'float64', 3, None
+
+    return None, None, None, f"unfit shape: size={file_size} N={n_inst}"
 
 
 def validate_file(npy: Path, n_inst: int, cutoff_idx: int, trim_last: int):
     """
     扫一个 .npy, 返回质量摘要 dict 或 skip 原因.
+    支持 1D (T,) / 2D (T, N) / 3D (T, K, N) float64 + 2D (T, N) int8.
     """
     try:
         size = npy.stat().st_size
     except OSError as e:
         return None, f"stat fail: {e}"
 
-    T_full, dtype, err = infer_2d(size, n_inst)
-    if T_full is None:
+    shape, dtype, ndim, err = infer_shape(size, n_inst)
+    if shape is None:
         return None, err
+    T_full = shape[0]
 
     t_end = min(cutoff_idx, T_full)
     t_end = max(0, t_end - trim_last)
     if t_end == 0:
         return None, "no rows in cutoff after trim"
 
-    arr = np.memmap(npy, dtype=dtype, mode='r', shape=(T_full, n_inst))
+    arr = np.memmap(npy, dtype=dtype, mode='r', shape=shape)
     slc = np.asarray(arr[:t_end])
 
     total_cells = slc.size
@@ -126,15 +157,23 @@ def validate_file(npy: Path, n_inst: int, cutoff_idx: int, trim_last: int):
             'n_pos': int((slc > 0).sum()),
         }
 
-    # 每天 NaN 数, 用来 detect 全 NaN 天 / 全 finite 天 + 有效数据范围
+    # 每天 NaN 数 (沿非 T 轴归约), 用来 detect 全 NaN 天 / 全 finite 天 + 有效数据范围
     if dtype == 'float64':
-        nan_per_day = np.isnan(slc).sum(axis=1)
-        all_nan_days = int((nan_per_day == n_inst).sum())
+        if ndim == 1:
+            # 1D (T,): 每"天"就一个值, NaN per day 等于该值是否 NaN
+            nan_per_day = np.isnan(slc).astype('int64')
+            cells_per_day = 1
+        elif ndim == 2:
+            nan_per_day = np.isnan(slc).sum(axis=1)
+            cells_per_day = n_inst
+        else:  # 3D (T, K, N)
+            nan_per_day = np.isnan(slc).sum(axis=(1, 2))
+            cells_per_day = slc.shape[1] * slc.shape[2]
+        all_nan_days = int((nan_per_day == cells_per_day).sum())
         no_nan_days = int((nan_per_day == 0).sum())
-        data_day_mask = nan_per_day < n_inst
+        data_day_mask = nan_per_day < cells_per_day
     else:
         all_nan_days = no_nan_days = 0
-        # int8: 假设所有行都有数据 (因为 int8 没有 NaN 概念)
         data_day_mask = np.ones(t_end, dtype=bool) if t_end > 0 else np.zeros(0, dtype=bool)
 
     # 找首末有效数据 idx
@@ -165,7 +204,8 @@ def validate_file(npy: Path, n_inst: int, cutoff_idx: int, trim_last: int):
         severity = 'critical' if severity == 'ok' else severity
 
     return {
-        'shape': [int(T_full), int(n_inst)],
+        'shape': [int(x) for x in shape],
+        'ndim': int(ndim),
         'dtype': dtype,
         'cells_scanned': int(total_cells),
         't_end': int(t_end),

@@ -36,20 +36,22 @@ import numpy as np
 
 CUTOFF_YYYYMMDD = 20241231
 
-# 跳目录 (顶层, 用户确认: L2 系列 + universe mask + 3D + delta + meta)
+# 跳目录 (顶层, 用户确认: L2 系列 + universe mask + delta + meta)
+# 注: 3D 已支持 (T, K, N), K=49/12/3
 SKIP_DIRS = {
     # L2 (147 已知缺 25 年前数据, 不可比)
     'cn_equity', 'cn_equity_feature', 'cn_equity_feature_5min', 'realtime',
     # 切片 (奇怪 shape, 单独处理)
     'delta',
-    # 3D (v1 不处理)
-    'Interval5m',
     # universe / 元数据 (跟数据无关, user 不要比)
     '__universe',
     'ALL', 'ALL_GIM', 'ALL_TRD', 'FULL',
     'HS300', 'ZZ500', 'ZZ1000', 'ipo',
     'TOP1000', 'TOP1500', 'TOP2000', 'TOP2600', 'TOP3000', 'TOP3300', 'TOP4000',
 }
+
+# 3D 数据的可能 K 值
+KNOWN_3D_K = [49, 12, 3]
 
 
 def load_universe(root: Path):
@@ -65,54 +67,73 @@ def load_universe(root: Path):
     return dates, insts
 
 
-def infer_2d(file_size: int, n_inst: int):
-    """Try to infer (T, N) shape + dtype. Returns (T, dtype_str) or (None, reason_str)."""
+def infer_shape(file_size: int, n_inst: int):
+    """
+    推断 .npy 形状. Returns (shape_tuple, dtype, ndim) or (None, reason_str, 0).
+    Order: 2D float64 / 2D int8 / 1D float64 / 3D float64 (T, K, N) for K in [49, 12, 3].
+    """
     if file_size == 0:
-        return None, "empty"
-    # float64 优先
+        return None, "empty", 0
+    # 2D 优先
     row_bytes = n_inst * 8
     if file_size % row_bytes == 0:
-        return file_size // row_bytes, 'float64'
-    # int8 备选
+        T = file_size // row_bytes
+        return (T, n_inst), 'float64', 2
     if file_size % n_inst == 0:
-        return file_size // n_inst, 'int8'
-    return None, f"unfit float64/int8: size={file_size} N={n_inst}"
+        T = file_size // n_inst
+        return (T, n_inst), 'int8', 2
+    # 1D float64
+    if file_size % 8 == 0:
+        T = file_size // 8
+        if 1000 <= T <= 10000:
+            return (T,), 'float64', 1
+    # 3D float64 (T, K, N)
+    for K in KNOWN_3D_K:
+        denom = K * n_inst * 8
+        if file_size % denom == 0:
+            T = file_size // denom
+            return (T, K, n_inst), 'float64', 3
+    return None, f"unfit shape: size={file_size} N={n_inst}", 0
 
 
 def fingerprint_file(npy: Path, n_inst: int, cutoff_idx: int):
     """
     Compute fingerprint for one .npy file.
+    支持 1D (T,) / 2D (T, N) / 3D (T, K, N) float64 + 2D (T, N) int8.
+    sum / nan 归约方式按 ndim 区分: 1D 每天 1 cell, 2D 沿 N 归约, 3D 沿 (K, N) 双轴.
     Returns (fp_dict | None, skip_reason | None).
-    fp_dict keys: 'sum', 'nan', 'shape', 'dtype'
     """
     try:
         file_size = npy.stat().st_size
     except OSError as e:
         return None, f"stat fail: {e}"
 
-    T_full, info = infer_2d(file_size, n_inst)
-    if T_full is None:
-        return None, info
-    dtype = info
-    shape = (T_full, n_inst)
+    shape, dtype, ndim = infer_shape(file_size, n_inst)
+    if shape is None:
+        return None, dtype  # dtype carries the error message here
+    T_full = shape[0]
 
-    if T_full < cutoff_idx:
-        # File shorter than cutoff - use what's there
-        t_end = T_full
-    else:
-        t_end = cutoff_idx
+    t_end = min(cutoff_idx, T_full) if T_full >= cutoff_idx else T_full
     if t_end == 0:
         return None, "no rows in cutoff"
 
     try:
         arr = np.memmap(npy, dtype=dtype, mode='r', shape=shape)
-        slc = np.asarray(arr[:t_end])  # materialize only the slice we need
+        slc = np.asarray(arr[:t_end])
     except Exception as e:
         return None, f"memmap/read fail: {e}"
 
     if dtype == 'float64':
-        fp_sum = np.nansum(slc, axis=1).astype('float64')
-        fp_nan = np.isnan(slc).sum(axis=1).astype('int32')
+        if ndim == 1:
+            fp_sum = slc.astype('float64')
+            fp_sum = np.where(np.isnan(fp_sum), 0.0, fp_sum)
+            fp_nan = np.isnan(slc).astype('int32')
+        elif ndim == 2:
+            fp_sum = np.nansum(slc, axis=1).astype('float64')
+            fp_nan = np.isnan(slc).sum(axis=1).astype('int32')
+        else:  # 3D
+            fp_sum = np.nansum(slc, axis=(1, 2)).astype('float64')
+            fp_nan = np.isnan(slc).sum(axis=(1, 2)).astype('int32')
     else:  # int8
         fp_sum = slc.sum(axis=1, dtype='int64').astype('float64')
         fp_nan = np.zeros(t_end, dtype='int32')
@@ -121,7 +142,7 @@ def fingerprint_file(npy: Path, n_inst: int, cutoff_idx: int):
         'sum':   fp_sum,
         'nan':   fp_nan,
         'shape': np.asarray(shape, dtype='int64'),
-        'dtype': np.asarray([0 if dtype == 'float64' else 1], dtype='int8'),
+        'dtype': np.asarray([{1: 0, 2: 1}.get(ndim, 2), 0 if dtype == 'float64' else 1], dtype='int8'),
     }, None
 
 

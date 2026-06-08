@@ -1,0 +1,60 @@
+[i] root=/tank/vault/datasvc/data/cc_2025
+[i] cutoff=20241231 idx=3657  trim_last=1
+[i] N=5484 dates_total=3900
+[i] 待扫 2196 文件
+[200/2196] elapsed=332s rate=0.6/s
+[400/2196] elapsed=557s rate=0.7/s
+[600/2196] elapsed=739s rate=0.8/s
+[800/2196] elapsed=1001s rate=0.8/s
+[1000/2196] elapsed=1254s rate=0.8/s
+[1200/2196] elapsed=1585s rate=0.8/s
+[1400/2196] elapsed=1978s rate=0.7/s
+[1600/2196] elapsed=2328s rate=0.7/s
+[1800/2196] elapsed=2600s rate=0.7/s
+[2000/2196] elapsed=2899s rate=0.7/s
+
+[i] 完成: scan=2196 skip=0 耗时=3173s
+[i] 严重度: ok=1925 warn=54 critical=217
+[i] freshness 失守 (40): 同目录 cohort 末日落后 ≥30d
+[i] 报告: /home/wbai/gsim-ops/report/data/validate_cc_2025_new.json
+
+=== STALE / freshness 失守 (40) ===
+  asharebalancesheet/asharebalancesheet.acc_exp.npy: last=20220105 (cohort median=20241230, gap=723d)
+  asharebalancesheet/asharebalancesheet.consumptive_bio_assets.npy: last=20190828 (cohort median=20241230, gap=1294d)
+  asharebalancesheet/asharebalancesheet.deferred_exp.npy: last=20220426 (cohort median=20241230, gap=651d)
+  asharebalancesheet/asharebalancesheet.deferred_inc.npy: last=20210422 (cohort median=20241230, gap=895d)
+  asharebalancesheet/asharebalancesheet.deposit_received.npy: last=20130425 (cohort median=20241230, gap=2840d)
+  asharebalancesheet/asharebalancesheet.incl_pledge_loan.npy: last=20141027 (cohort median=20241230, gap=2477d)
+  asharebalancesheet/asharebalancesheet.incl_seat_fees_exchange.npy: last=20240429 (cohort median=20241230, gap=164d)
+  asharebalancesheet/asharebalancesheet.subr_rec.npy: last=20210429 (cohort median=20241230, gap=890d)
+  asharebalancesheet/asharebalancesheet.unconfirmed_invest_loss.npy: last=20170510 (cohort median=20241230, gap=1858d)
+  asharecashflow/asharecashflow.conv_debt_into_cap.npy: last=20200814 (cohort median=20241230, gap=1061d)
+  asharecashflow/asharecashflow.decr_deferred_exp.npy: last=20220721 (cohort median=20241230, gap=593d)
+  asharecashflow/asharecashflow.fa_fnc_leases.npy: last=20210428 (cohort median=20241230, gap=891d)
+  asharecashflow/asharecashflow.incr_acc_exp.npy: last=20220929 (cohort median=20241230, gap=544d)
+  asharecashflow/asharecashflow.less_beg_bal_cash_equ.npy: last=20241030 (cohort median=20241230, gap=43d)
+  asharecashflow/asharecashflow.net_incr_disp_faas.npy: last=20190523 (cohort median=20241230, gap=1362d)
+  ... 共 40 个
+
+=== CRITICAL 非 stale (177) ===
+  Dipv/Dipv.dipv1.npy: ['inf:199422'] (max=0.4415584415584417, n_neg=4265389)
+  Dipv/Dipv.dipv10.npy: ['inf:2'] (max=3.510814542107685, n_neg=4504251)
+  Dipv/Dipv.dipv19.npy: ['inf:219328'] (max=2.466019417475728, n_neg=0)
+  Dipv/Dipv.dipv5.npy: ['inf:199422'] (max=1.1010101010101012, n_neg=4322018)
+  Dipv/Dipv.dipv6.npy: ['inf:1'] (max=0.3934837092731829, n_neg=4372837)
+  Dipv/Dipv.dipv7.npy: ['inf:2'] (max=1.0296495956873315, n_neg=4640817)
+  Dipv/Dipv.dipv9.npy: ['inf:199422'] (max=1.064967860422406, n_neg=4316099)
+  Dipva/Dipva.dipva1.npy: ['inf:199423'] (max=0.05706564251884657, n_neg=4304358)
+  DmgrPwang_industry_equ_fancy_factors/DmgrPwang_industry_equ_fancy_factors.t3_fund_top10_weight_max.npy: ['neg_in_nonneg:1624246'] (max=3.0, n_neg=1624246)
+  DmgrPwang_industry_equ_fancy_factors/DmgrPwang_industry_equ_fancy_factors.t3_fund_top10_weight_mean.npy: ['neg_in_nonneg:1574723'] (max=3.0, n_neg=1574723)
+  DmgrPwang_industry_equ_fancy_factors/DmgrPwang_industry_equ_fancy_factors.t4_hk_holdvol_chg_all120.npy: ['neg_in_nonneg:2519618'] (max=3.0, n_neg=2519618)
+  DmgrPwang_industry_equ_fancy_factors/DmgrPwang_industry_equ_fancy_factors.t4_hk_holdvol_chg_all60.npy: ['neg_in_nonneg:2490738'] (max=3.0, n_neg=2490738)
+  DmgrPwang_industry_equ_fancy_factors/DmgrPwang_industry_equ_fancy_factors.t4_hk_holdvol_chg_b120.npy: ['neg_in_nonneg:2470814'] (max=3.0, n_neg=2470814)
+  DmgrPwang_industry_equ_fancy_factors/DmgrPwang_industry_equ_fancy_factors.t4_hk_holdvol_chg_b60.npy: ['neg_in_nonneg:2514914'] (max=3.0, n_neg=2514914)
+  DmgrPwang_industry_equ_fancy_factors/DmgrPwang_industry_equ_fancy_factors.t4_hk_holdvol_chg_c60.npy: ['neg_in_nonneg:2581165'] (max=3.0, n_neg=2581165)
+  DmgrPwang_industry_equ_fancy_factors/DmgrPwang_industry_equ_fancy_factors.t6_ff3sysvol_20.npy: ['neg_in_nonneg:5435397'] (max=3.0, n_neg=5435397)
+  DmgrPwang_industry_equ_fancy_factors/DmgrPwang_industry_equ_fancy_factors.t9_news_num_pos_vol_30.npy: ['neg_in_nonneg:3355203'] (max=3.0, n_neg=3355203)
+  DmgrPwang_industry_equ_fancy_factors/DmgrPwang_industry_equ_fancy_factors.t9_news_num_vol_30.npy: ['neg_in_nonneg:3614924'] (max=3.0, n_neg=3614924)
+  Dpv/Dpv.dpv16.npy: ['inf:339880'] (max=28216.0, n_neg=10943112)
+  Dpv/Dpv.dpv17.npy: ['inf:339880'] (max=82264.30612244898, n_neg=10943102)
+  ... 共 177 个, 完整列表见 JSON

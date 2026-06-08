@@ -50,12 +50,19 @@ def compare_one(fp_a: dict, fp_b: dict, rtol: float, trim_last: int):
 
     a_shape = fp_a['shape']
     b_shape = fp_b['shape']
-    # N must match (不同股票数没法比)
-    if a_shape[1] != b_shape[1]:
+    # 维度不同 (1D vs 2D vs 3D)
+    if len(a_shape) != len(b_shape):
         return 'shape_diff', {
             'a_shape': a_shape.tolist(),
             'b_shape': b_shape.tolist(),
-            'reason': 'N (axis 1) differs',
+            'reason': f'ndim differs: {len(a_shape)} vs {len(b_shape)}',
+        }
+    # 各轴 (除 T) 必须一致
+    if len(a_shape) >= 2 and not np.array_equal(a_shape[1:], b_shape[1:]):
+        return 'shape_diff', {
+            'a_shape': a_shape.tolist(),
+            'b_shape': b_shape.tolist(),
+            'reason': 'non-T axis differs',
         }
 
     # T 可能各自不同长度 (各地 cutoff 不同), 取共同前缀
