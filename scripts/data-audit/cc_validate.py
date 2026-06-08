@@ -65,34 +65,39 @@ def infer_shape(file_size: int, n_inst: int):
     """
     推断 .npy 形状.
     Returns ((shape_tuple), dtype, ndim, err_msg).
-    Order: 2D float64 / 2D int8 / 1D int64 / 1D float64 / 3D float64 (T, K, N) for K in [49, 12, 3].
+    Order: 3D float64 (T, K, N) > 2D float64 > 2D int8 > 1D float64.
+    3D 优先, 因为 3D float64 文件大小同时被 N*8 整除 (会被 2D 误抓).
+    用 "T 在合理范围 1000-10000" 来排除噪声 K 匹配.
     """
     if file_size == 0:
         return None, None, None, "empty file"
 
-    # 2D 优先 (主流)
-    row_bytes = n_inst * 8
-    if file_size % row_bytes == 0:
-        T = file_size // row_bytes
-        return (T, n_inst), 'float64', 2, None
-    if file_size % n_inst == 0:
-        T = file_size // n_inst
-        return (T, n_inst), 'int8', 2, None
-
-    # 1D 备选 (例: aindexeodprices/*.npy 是 (T,) 一维)
-    # 通过 cutoff_idx 反推: 1D 大小 = T * 8 (float64) 或 T * 8 (int64)
-    if file_size % 8 == 0:
-        T = file_size // 8
-        # 合理 T 范围 (cc 历史 3000-5000 量级)
-        if 1000 <= T <= 10000:
-            return (T,), 'float64', 1, None
-
-    # 3D float64 (T, K, N)
+    # 3D float64 (T, K, N) 优先 — Interval5m 等
     for K in KNOWN_3D_K:
         denom = K * n_inst * 8
         if file_size % denom == 0:
             T = file_size // denom
-            return (T, K, n_inst), 'float64', 3, None
+            if 1000 <= T <= 10000:  # 合理的 cc T 范围
+                return (T, K, n_inst), 'float64', 3, None
+
+    # 2D float64
+    row_bytes = n_inst * 8
+    if file_size % row_bytes == 0:
+        T = file_size // row_bytes
+        if 1000 <= T <= 10000:
+            return (T, n_inst), 'float64', 2, None
+
+    # 2D int8
+    if file_size % n_inst == 0:
+        T = file_size // n_inst
+        if 1000 <= T <= 10000:
+            return (T, n_inst), 'int8', 2, None
+
+    # 1D float64
+    if file_size % 8 == 0:
+        T = file_size // 8
+        if 1000 <= T <= 10000:
+            return (T,), 'float64', 1, None
 
     return None, None, None, f"unfit shape: size={file_size} N={n_inst}"
 

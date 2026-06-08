@@ -70,29 +70,34 @@ def load_universe(root: Path):
 def infer_shape(file_size: int, n_inst: int):
     """
     推断 .npy 形状. Returns (shape_tuple, dtype, ndim) or (None, reason_str, 0).
-    Order: 2D float64 / 2D int8 / 1D float64 / 3D float64 (T, K, N) for K in [49, 12, 3].
+    Order: 3D float64 (T,K,N) > 2D float64 > 2D int8 > 1D float64.
+    3D 优先 + T 在 1000-10000 范围, 避免 3D 文件被 2D 误抓 (Interval5m).
     """
     if file_size == 0:
         return None, "empty", 0
-    # 2D 优先
+    # 3D float64 优先
+    for K in KNOWN_3D_K:
+        denom = K * n_inst * 8
+        if file_size % denom == 0:
+            T = file_size // denom
+            if 1000 <= T <= 10000:
+                return (T, K, n_inst), 'float64', 3
+    # 2D float64
     row_bytes = n_inst * 8
     if file_size % row_bytes == 0:
         T = file_size // row_bytes
-        return (T, n_inst), 'float64', 2
+        if 1000 <= T <= 10000:
+            return (T, n_inst), 'float64', 2
+    # 2D int8
     if file_size % n_inst == 0:
         T = file_size // n_inst
-        return (T, n_inst), 'int8', 2
+        if 1000 <= T <= 10000:
+            return (T, n_inst), 'int8', 2
     # 1D float64
     if file_size % 8 == 0:
         T = file_size // 8
         if 1000 <= T <= 10000:
             return (T,), 'float64', 1
-    # 3D float64 (T, K, N)
-    for K in KNOWN_3D_K:
-        denom = K * n_inst * 8
-        if file_size % denom == 0:
-            T = file_size // denom
-            return (T, K, n_inst), 'float64', 3
     return None, f"unfit shape: size={file_size} N={n_inst}", 0
 
 
