@@ -1,7 +1,11 @@
 import json
 import re
 import fnmatch
-from colorama import Fore, Style, init
+import shutil
+
+from rich.console import Console
+from rich.table import Table
+from rich import box
 
 from ops.core.library import LibraryScanner, FactorInfo
 from ops.core.state import FactorStatus, FactorRecord
@@ -11,26 +15,65 @@ from .datasource import load_datasources, refresh_datasources, merge_datasources
 from .bcorr import load_bcorr, refresh_bcorr, merge_bcorr
 
 
-init(autoreset=True)
-
-
 DASH = "—"
 
+_console = Console(width=shutil.get_terminal_size((140, 50)).columns)
 
-_STATUS_COLOR = {
-    FactorStatus.ACTIVE:    Fore.GREEN,
-    FactorStatus.REJECTED:  Fore.RED,
-    FactorStatus.SUBMITTED: Fore.YELLOW,
-    FactorStatus.CHECKING:  Fore.YELLOW,
-    FactorStatus.DECAYING:  Fore.MAGENTA,
-    FactorStatus.RETIRED:   Style.DIM,
-    FactorStatus.DELETED:   Style.DIM,
+_STATUS_STYLE = {
+    FactorStatus.ACTIVE:    "green",
+    FactorStatus.REJECTED:  "red",
+    FactorStatus.SUBMITTED: "yellow",
+    FactorStatus.CHECKING:  "yellow",
+    FactorStatus.DECAYING:  "magenta",
+    FactorStatus.RETIRED:   "dim",
+    FactorStatus.DELETED:   "dim",
 }
+
+
+def _fmt(v, prec=2):
+    return f"{v:.{prec}f}" if v is not None else DASH
+
+
+def _metric(f: FactorInfo, name: str):
+    return _fmt(getattr(f.metrics, name)) if f.metrics else DASH
+
+
+def _bcorr(f: FactorInfo):
+    v = f.bcorr.get("max_bcorr") if f.bcorr else None
+    return _fmt(v)
+
+
+def _datasource(f: FactorInfo, key):
+    return ", ".join(f.datasources.get(key, [])) if f.datasources else ""
+
+
+def _fail_stage(rec: FactorRecord):
+    if rec and rec.status == FactorStatus.REJECTED and rec.last_fail_stage:
+        return rec.last_fail_stage
+    return ""
+
+
+# (header, justify, extras, getter(factor, record) -> str)
+_BASE_COLS = [
+    ("name",    "left",  {"no_wrap": True}, lambda f, r: f.name),
+    ("author",  "left",  {},                lambda f, r: f.author),
+    ("delay",   "right", {},                lambda f, r: str(f.delay) if f.delay is not None else "?"),
+    ("ret%",    "right", {},                lambda f, r: _metric(f, "ret")),
+    ("shrp",    "right", {},                lambda f, r: _metric(f, "shrp")),
+    ("mdd%",    "right", {},                lambda f, r: _metric(f, "mdd")),
+    ("tvr%",    "right", {},                lambda f, r: _metric(f, "tvr")),
+    ("fitness", "right", {},                lambda f, r: _metric(f, "fitness")),
+    ("bcorr",   "right", {},                lambda f, r: _bcorr(f)),
+]
+_FAIL_COL   = ("fail_stage", "left", {},                    lambda f, r: _fail_stage(r))
+_TABLES_COL = ("tables",     "left", {"overflow": "fold"},  lambda f, r: _datasource(f, "tables"))
+_FIELDS_COL = ("fields",     "left", {"overflow": "fold"},  lambda f, r: _datasource(f, "fields"))
+
 
 def print_table(factors: list[FactorInfo], records: dict[str, FactorRecord],
                 show_tables=False, show_fields=False):
     if not factors:
-        print(Fore.YELLOW + "No factors found.")
+        _console.print("[yellow]No factors found.[/]")
         return
 
     has_rejected = any(
@@ -38,42 +81,22 @@ def print_table(factors: list[FactorInfo], records: dict[str, FactorRecord],
         for f in factors
     )
 
-    header = f"{'name':<40} {'author':<10} {'delay':>5} {'ret%':>8} {'shrp':>8} {'mdd%':>8} {'tvr%':>8} {'fitness':>8} {'bcorr':>8}"
-    if has_rejected:
-        header += f"  {'fail_stage':<12}"
-    if show_tables:
-        header += f"  {'tables'}"
-    if show_fields:
-        header += f"  {'fields'}"
-    separator = "\u2500" * max(len(header), 90)
+    cols = list(_BASE_COLS)
+    if has_rejected: cols.append(_FAIL_COL)
+    if show_tables:  cols.append(_TABLES_COL)
+    if show_fields:  cols.append(_FIELDS_COL)
 
-    print(Fore.CYAN + separator)
-    print(Fore.CYAN + Style.BRIGHT + header)
-    print(Fore.CYAN + separator)
+    table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", pad_edge=False)
+    for header, justify, extras, _ in cols:
+        table.add_column(header, justify=justify, **extras)
 
     for f in factors:
-        m = f.metrics
-        ret = f"{m.ret:>8.2f}" if m else f"{DASH:>8}"
-        shrp = f"{m.shrp:>8.2f}" if m else f"{DASH:>8}"
-        mdd = f"{m.mdd:>8.2f}" if m else f"{DASH:>8}"
-        tvr = f"{m.tvr:>8.2f}" if m else f"{DASH:>8}"
-        fitness = f"{m.fitness:>8.2f}" if m else f"{DASH:>8}"
-        delay = f"{f.delay:>5}" if f.delay is not None else f"{'?':>5}"
-        bcorr = f"{f.bcorr['max_bcorr']:>8.2f}" if f.bcorr and f.bcorr.get('max_bcorr') is not None else f"{DASH:>8}"
-        line = f"{f.name:<40} {f.author:<10} {delay} {ret} {shrp} {mdd} {tvr} {fitness} {bcorr}"
         rec = records.get(f.name)
-        if has_rejected:
-            stage = rec.last_fail_stage if rec and rec.status == FactorStatus.REJECTED and rec.last_fail_stage else ""
-            line += f"  {stage:<12}"
-        if show_tables and f.datasources:
-            line += f"  {', '.join(f.datasources.get('tables', []))}"
-        if show_fields and f.datasources:
-            line += f"  {', '.join(f.datasources.get('fields', []))}"
-        color = _STATUS_COLOR.get(rec.status if rec else None, "") # type: ignore
-        print(color + line)
+        style = _STATUS_STYLE.get(rec.status, "") if rec else ""
+        table.add_row(*(get(f, rec) for _, _, _, get in cols), style=style)
 
-    print(Fore.CYAN + separator)
-    print(f"Total: {len(factors)} factors")
+    _console.print(table)
+    _console.print(f"Total: {len(factors)} factors")
 
 
 def print_json(factors: list[FactorInfo]):
