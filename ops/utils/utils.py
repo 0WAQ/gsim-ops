@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from ops.infra.gsim.runner import BacktestError
+from ops.utils.log import logger
 from ops.utils.printer import info, warn, error
 
 
@@ -61,7 +62,8 @@ class Gsim:
         except sp.CalledProcessError as e:
             raise BacktestError(f"❌ looking forward!!! ({xml_path}) {e.stderr}") from e
         except sp.TimeoutExpired as e:
-            ...
+            logger.warning("Gsim.run_backtest timeout xml={} after={}s", xml_path, e.timeout)
+            raise BacktestError(f"timeout after {e.timeout}s ({xml_path})") from e
 
 
     @staticmethod
@@ -71,10 +73,14 @@ class Gsim:
             simsummary_py = "/usr/local/gsim/tools/simsummary.py"
             sim_path = pnl_path + ".sim"
             with open(sim_path, 'w+') as f:
-                sp.run([python, simsummary_py, pnl_path], stdout=f, text=True)
+                proc = sp.run([python, simsummary_py, pnl_path],
+                              stdout=f, stderr=sp.PIPE, text=True)
+            if proc.stderr:
+                logger.warning("simsummary stderr pnl={} stderr={!r}", pnl_path, proc.stderr[:500])
             info("✅ simsummary succeed")
             return sim_path
         except Exception as e:
+            logger.exception("Gsim.run_simsummary failed pnl={}", pnl_path)
             error(f"❌ simsummary failed: {e}")
             return None
 
@@ -96,4 +102,5 @@ class Gsim:
                     info(f"✅ {os.path.dirname(output_path)} doesn't have forward looking!")
             return output_path
         except sp.CalledProcessError as e:
+            logger.exception("Gsim.run_diff failed lhs={} rhs={}", lhs, rhs)
             error(f"run diff failed: {e}")

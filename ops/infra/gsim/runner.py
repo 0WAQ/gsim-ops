@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ..config import Config
 from ops.core.metrics import Metrics
+from ops.utils.log import logger
 
 
 class BacktestError(Exception):
@@ -30,6 +31,7 @@ class Runner:
                 timeout=config.timeout
             )
             if result.returncode != 0:
+                logger.warning("bcorr (vs pnl_prod) rc={} stderr={!r}", result.returncode, result.stderr[:500])
                 return None
 
             # pnl_prod
@@ -47,6 +49,7 @@ class Runner:
                 timeout=config.timeout
             )
             if result.returncode != 0:
+                logger.warning("bcorr (vs pnl_alphalib) rc={} stderr={!r}", result.returncode, result.stderr[:500])
                 return None
             for line in result.stdout.strip().split('\n'):
                 match = re.match(r"^(\S+)\s+([-\d.]+)", line.strip())
@@ -55,8 +58,9 @@ class Runner:
 
 
             return corrs
-    
+
         except Exception:
+            logger.exception("run_bcorr failed pnl={}", pnl_file)
             return None
 
     @staticmethod
@@ -69,8 +73,9 @@ class Runner:
                 timeout=config.timeout
             )
             if result.returncode != 0:
+                logger.warning("simsummary rc={} stderr={!r}", result.returncode, result.stderr[:500])
                 return None
-            
+
             lines = result.stdout.strip().split('\n')
             if not lines:
                 return None
@@ -90,11 +95,13 @@ class Runner:
                 mdd = float(parts[7])
                 fitness = float(parts[9])
                 return Metrics(ret, tvr, shrp, mdd, fitness)
-                
+
             except (ValueError, IndexError) as e:
+                logger.warning("simsummary parse failed: {} last_line={!r}", e, lines[-1] if lines else "")
                 return None
-                
-        except Exception as e:
+
+        except Exception:
+            logger.exception("run_simsummary failed pnl={}", pnl_file)
             return None
 
     @staticmethod

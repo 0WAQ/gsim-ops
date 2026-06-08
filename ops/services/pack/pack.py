@@ -18,6 +18,7 @@ from pathlib import Path
 from ops.infra.config import Config
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.utils.printer import banner, bottom, info, warn, error, highlight
+from ops.utils.log import logger
 
 
 DATES_FILE = "__universe/Dates.npy"
@@ -93,7 +94,8 @@ def _atomic_write_memmap(target: Path, ram: np.ndarray) -> None:
     except Exception:
         if tmp.exists():
             try: tmp.unlink()
-            except OSError: pass
+            except OSError as oe:
+                logger.warning("pack tmpfile cleanup failed tmp={} err={}", tmp, oe)
         raise
 
 

@@ -1,4 +1,5 @@
 import argparse
+import sys
 
 from ops.cli.run import add_run_subparser
 from ops.cli.check import add_check_subparser
@@ -17,45 +18,54 @@ from ops.cli.approve import add_approve_subparser
 from ops.cli.cancel import add_cancel_subparser
 from ops.cli.clear import add_clear_subparser
 from ops.infra.sudo import maybe_elevate, ensure_redis_password
+from ops.utils.log import logger
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        prog="ops",
-        description="Gsim Operations Tool",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
+    try:
+        parser = argparse.ArgumentParser(
+            prog="ops",
+            description="Gsim Operations Tool",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+        )
 
-    subparsers = parser.add_subparsers(
-        title="sub-command", dest="sub-command", required=True
-    )
+        subparsers = parser.add_subparsers(
+            title="sub-command", dest="sub-command", required=True
+        )
 
-    add_run_subparser(subparsers)
-    add_check_subparser(subparsers)
-    add_list_subparser(subparsers)
-    add_info_subparser(subparsers)
-    add_health_subparser(subparsers)
-    add_submit_subparser(subparsers)
-    add_status_subparser(subparsers)
-    add_backfill_subparser(subparsers)
-    add_pack_subparser(subparsers)
-    add_sync_subparser(subparsers)
-    add_rm_subparser(subparsers)
-    add_resubmit_subparser(subparsers)
-    add_recheck_subparser(subparsers)
-    add_approve_subparser(subparsers)
-    add_cancel_subparser(subparsers)
-    add_clear_subparser(subparsers)
+        add_run_subparser(subparsers)
+        add_check_subparser(subparsers)
+        add_list_subparser(subparsers)
+        add_info_subparser(subparsers)
+        add_health_subparser(subparsers)
+        add_submit_subparser(subparsers)
+        add_status_subparser(subparsers)
+        add_backfill_subparser(subparsers)
+        add_pack_subparser(subparsers)
+        add_sync_subparser(subparsers)
+        add_rm_subparser(subparsers)
+        add_resubmit_subparser(subparsers)
+        add_recheck_subparser(subparsers)
+        add_approve_subparser(subparsers)
+        add_cancel_subparser(subparsers)
+        add_clear_subparser(subparsers)
 
-    args = parser.parse_args()
-    # 新 shell 下 OPS_STATE_REDIS_PASSWORD 没 export 时,
-    # sudo grep 一次 config.state.redis.password_file 拿密码塞 env,
-    # 后续 self-elevate 透传给 root 子进程。
-    ensure_redis_password(args)
-    # JFS 集中运维: write 命令 + alpha_src root-owned 时自动 sudo 提权,
-    # 否则 no-op (legacy prod 模式 / read-only 命令直通)。详见 ops/infra/sudo.py。
-    maybe_elevate(args)
-    args.func(args)
+        args = parser.parse_args()
+        # 新 shell 下 OPS_STATE_REDIS_PASSWORD 没 export 时,
+        # sudo grep 一次 config.state.redis.password_file 拿密码塞 env,
+        # 后续 self-elevate 透传给 root 子进程。
+        ensure_redis_password(args)
+        # JFS 集中运维: write 命令 + alpha_src root-owned 时自动 sudo 提权,
+        # 否则 no-op (legacy prod 模式 / read-only 命令直通)。详见 ops/infra/sudo.py。
+        maybe_elevate(args)
+        args.func(args)
+    except SystemExit:
+        raise  # argparse --help / explicit sys.exit() are control flow, not bugs
+    except BaseException:
+        logger.exception("ops crashed argv={}", sys.argv)
+        raise
+    finally:
+        logger.complete()  # drain enqueue=True queue before exit
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner, BacktestError
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.utils.printer import *
+from ops.utils.log import logger
 from ops.core.alpha.metadata import AlphaMetadata
 
 from .find import scan_factors
@@ -38,7 +39,8 @@ def _restore_dates(xml_file: Path, orig_start: str, orig_end: str) -> None:
             encoding="utf-8",
         )
     except Exception:
-        pass
+        logger.exception("XML restore failed file={} orig=({},{}) — XML may be in bad state",
+                         xml_file, orig_start, orig_end)
 
 
 def run_one(factor_dir: Path, config: Config,

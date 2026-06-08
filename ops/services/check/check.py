@@ -1,5 +1,4 @@
 import shutil
-import traceback
 import xmltodict
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +10,7 @@ from ops.infra.store import default_store
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.services.list.metrics import update_metrics
 from ops.utils.printer import *
+from ops.utils.log import logger
 from ops.core.alpha.metadata import AlphaMetadata
 from ops.core.factormeta import FactorMeta
 from ops.core.state import FactorRecord, FactorStatus, CheckRecord
@@ -331,7 +331,7 @@ class CheckerPipeline:
             # Environment / framework bug — NOT a factor problem.
             # Keep factor in staging, leave meta.json untouched, revert state to SUBMITTED.
             error(f"  ✘  {factor.key} unexpected error: {e}")
-            traceback.print_exc()
+            logger.exception("check pipeline crashed factor={}", factor.key)
             check.finished_at = datetime.now().isoformat(timespec="seconds")
             check.passed = None
             check.fail_reason = f"unexpected: {e}"
