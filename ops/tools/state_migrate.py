@@ -18,8 +18,14 @@ import os
 import sys
 from pathlib import Path
 
+from rich.console import Console
+
 from ops.core.state import FactorRecord, CheckRecord
 from ops.infra.store.redis_store import RedisStateStore
+from ops.utils.logger.log import info, warn
+
+
+_stderr = Console(stderr=True)
 
 
 def main() -> int:
@@ -39,7 +45,7 @@ def main() -> int:
     if args.password_env:
         password = os.environ.get(args.password_env)
         if not password:
-            print(f"env var {args.password_env} not set", file=sys.stderr)
+            _stderr.print(f"[red]env var {args.password_env} not set[/]")
             return 1
     if args.password_file:
         for line in args.password_file.read_text().splitlines():
@@ -48,24 +54,24 @@ def main() -> int:
                 break
 
     if not args.json.exists():
-        print(f"source json missing: {args.json}", file=sys.stderr)
+        _stderr.print(f"[red]source json missing: {args.json}[/]")
         return 1
 
     raw = json.loads(args.json.read_text() or "{}")
     records = {k: FactorRecord.from_dict(v) for k, v in raw.items()}
-    print(f"loaded {len(records)} records from {args.json}")
+    info(f"loaded {len(records)} records from {args.json}")
 
     if args.dry_run:
-        print("dry-run; exiting")
+        info("dry-run; exiting")
         for n in list(records.keys())[:5]:
             r = records[n]
-            print(f"  sample: {n}  status={r.status.value}  author={r.author}  checks={len(r.check_history)}")
+            info(f"  sample: {n}  status={r.status.value}  author={r.author}  checks={len(r.check_history)}")
         return 0
 
     store = RedisStateStore(url=args.url, library_id=args.lib, password=password)
 
     if args.reset:
-        print(f"--reset: wiping target keys for library={args.lib}")
+        warn(f"--reset: wiping target keys for library={args.lib}")
         # Read existing index + checks keys, then delete.
         names = store.r.smembers(store._index_key)
         if names:
@@ -75,7 +81,7 @@ def main() -> int:
                 pipeline_keys.append(store._checks_key(n))
             store.r.delete(*pipeline_keys)
         store.r.delete(store._index_key)
-        print(f"  deleted {len(names)} factor records")
+        warn(f"  deleted {len(names)} factor records")
 
     written = 0
     for name, rec in records.items():
@@ -91,15 +97,15 @@ def main() -> int:
                 p.execute()
         written += 1
         if written % 200 == 0:
-            print(f"  {written}/{len(records)}")
+            info(f"  {written}/{len(records)}")
 
-    print(f"wrote {written} records")
+    info(f"wrote {written} records")
 
     # Sanity check
     listed = store.list()
-    print(f"verification: store.list() returns {len(listed)} records")
+    info(f"verification: store.list() returns {len(listed)} records")
     if len(listed) != len(records):
-        print(f"  WARN: count mismatch (json had {len(records)})", file=sys.stderr)
+        _stderr.print(f"[red]  WARN: count mismatch (json had {len(records)})[/]")
         return 1
     return 0
 

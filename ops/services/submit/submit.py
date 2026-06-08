@@ -4,7 +4,7 @@ from datetime import datetime
 
 from ops.infra.config import Config
 from ops.utils.func import date_range
-from ops.utils.logger.log import info, warn, error, highlight, banner, bottom
+from ops.utils.logger.log import info, warn, error, highlight, banner, bottom, progress
 from ops.infra.store import default_store, StateStore
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.core.state import FactorRecord, FactorStatus
@@ -153,7 +153,7 @@ def run_submit(args):
     passed = failed = 0
     for submitted_by, src in to_process:
         name = src.name
-        print("submitting ", end=""); highlight(name)
+        progress("submitting ", name)
         staged: Path | None = None
         try:
             with factor_lock(name):

@@ -228,7 +228,7 @@ class CheckerPipeline:
         total = len(self.metadatas)
         prog  = (i + 1) / total
         bar   = f"[{i+1:>{len(str(total))}}/{total}] {prog:>6.1%}"
-        print(f"{bar} checking ", end=""); highlight(f"{factor.key}")
+        progress(f"{bar} checking ", factor.key)
 
         try:
             with factor_lock(factor.name):

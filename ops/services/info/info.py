@@ -1,66 +1,62 @@
-from colorama import Fore, Style, init
+import shutil
+
+from rich.console import Console
+from rich.tree import Tree
+
 from ops.core.library import LibraryScanner
 from ops.services.list.metrics import load_metrics
 from ops.services.list.datasource import load_datasources
 
 
-init(autoreset=True)
+_console = Console(width=shutil.get_terminal_size((140, 50)).columns)
+
+
+def _kv(key, value, width=12):
+    return f"[bold]{key:<{width}}[/] {value}"
+
+
+_METRIC_KEYS = [("ret%:", "ret"), ("shrp:", "shrp"), ("mdd%:", "mdd"),
+                ("tvr%:", "tvr"), ("fitness:", "fitness")]
+
 
 def run_info(args):
-    """Run the info command."""
     scanner = LibraryScanner.from_config_path(args.config_path)
     factor = scanner.get(args.factor_name)
 
     if factor is None:
-        print(Fore.RED + f"Factor not found: {args.factor_name}")
-        print(Fore.YELLOW + f"Check if the factor exists in: {scanner.alpha_src}")
+        _console.print(f"[red]Factor not found:[/] {args.factor_name}")
+        _console.print(f"[yellow]Check if the factor exists in:[/] {scanner.alpha_src}")
         return
 
-    # Get date range
     first_date, last_date = scanner.get_dump_date_range(factor.name)
     date_range = f"{first_date} ~ {last_date}" if first_date else "N/A"
+    metrics = load_metrics(args.config_path).get(factor.name)
+    ds = load_datasources(args.config_path).get(factor.name)
 
-    # Get metrics
-    metrics_map = load_metrics(args.config_path)
-    metrics = metrics_map.get(factor.name)
+    tree = Tree(f"[bold cyan]Factor: {factor.name}[/]  [dim](author: {factor.author})[/]")
 
-    # Print info
-    separator = "─" * 60
-    print(Fore.CYAN + separator)
-    print(Fore.CYAN + Style.BRIGHT + f" Factor: {factor.name}")
-    print(Fore.CYAN + separator)
+    paths = tree.add("[yellow]Paths[/]")
+    paths.add(_kv("Source:", factor.src_path))
+    paths.add(_kv("Dump:",   factor.dump_path))
+    paths.add(_kv("PNL:",    factor.pnl_path))
 
-    print(f"  {'Author:':<15} {factor.author}")
-    print()
-    print(Fore.YELLOW + "  Paths:")
-    print(f"    {'Source:':<12} {factor.src_path}")
-    print(f"    {'Dump:':<12} {factor.dump_path}")
-    print(f"    {'PNL:':<12} {factor.pnl_path}")
-    print()
-    print(Fore.YELLOW + "  Statistics:")
-    print(f"    {'Dump Days:':<12} {factor.dump_days}")
-    print(f"    {'Date Range:':<12} {date_range}")
-    print(f"    {'Has PNL:':<12} {Fore.GREEN + 'Yes' if factor.has_pnl else Fore.RED + 'No'}")
-    print()
-    print(Fore.YELLOW + "  Metrics:")
+    stats = tree.add("[yellow]Statistics[/]")
+    stats.add(_kv("Dump Days:", factor.dump_days))
+    stats.add(_kv("Date Range:", date_range))
+    stats.add(_kv("Has PNL:", "[green]Yes[/]" if factor.has_pnl else "[red]No[/]"))
+
+    m = tree.add("[yellow]Metrics[/]")
     if metrics:
-        print(f"    {'ret%:':<12} {metrics.ret:.2f}")
-        print(f"    {'shrp:':<12} {metrics.shrp:.2f}")
-        print(f"    {'mdd%:':<12} {metrics.mdd:.2f}")
-        print(f"    {'tvr%:':<12} {metrics.tvr:.2f}")
-        print(f"    {'fitness:':<12} {metrics.fitness:.2f}")
+        for label, attr in _METRIC_KEYS:
+            m.add(_kv(label, f"{getattr(metrics, attr):.2f}"))
     else:
-        print(f"    {'—  (run ops list --refresh-metrics to fetch)'}")
+        m.add("[dim]—  (run ops list --refresh-metrics to fetch)[/]")
 
-    # Data Sources
-    ds_map = load_datasources(args.config_path)
-    ds = ds_map.get(factor.name)
-    print()
-    print(Fore.YELLOW + "  Data Sources:")
+    d = tree.add("[yellow]Data Sources[/]")
     if ds:
-        print(f"    {'Tables:':<12} {', '.join(ds.get('tables', []))}")
-        print(f"    {'Fields:':<12} {', '.join(ds.get('fields', []))}")
+        d.add(_kv("Tables:", ", ".join(ds.get("tables", []))))
+        d.add(_kv("Fields:", ", ".join(ds.get("fields", []))))
     else:
-        print(f"    {'—  (run ops list --refresh-datasources to fetch)'}")
+        d.add("[dim]—  (run ops list --refresh-datasources to fetch)[/]")
 
-    print(Fore.CYAN + separator)
+    _console.print(tree)

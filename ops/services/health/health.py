@@ -1,6 +1,11 @@
+import shutil
 from dataclasses import dataclass
 from collections import Counter
-from colorama import Fore, Style, init
+
+from rich.console import Console
+from rich.table import Table
+from rich.rule import Rule
+from rich import box
 
 from ops.core.library import LibraryScanner, FactorInfo
 from ops.core.state import FactorStatus
@@ -9,13 +14,13 @@ from ops.services.list.metrics import load_metrics, refresh_metrics
 from ops.services.list.datasource import load_datasources, refresh_datasources
 
 
-init(autoreset=True)
+_console = Console(width=shutil.get_terminal_size((140, 50)).columns)
 
 OK = "OK"
 WARNING = "WARNING"
 ERROR = "ERROR"
 
-_LEVEL_COLOR = {OK: Fore.GREEN, WARNING: Fore.YELLOW, ERROR: Fore.RED}
+_LEVEL_STYLE = {OK: "green", WARNING: "yellow", ERROR: "red"}
 
 
 @dataclass
@@ -90,13 +95,17 @@ def _check_unresolved_tables(datasources: dict) -> list[Issue]:
 
 def _print_issues(issues: list[Issue]) -> None:
     if not issues:
-        print(Fore.GREEN + "  (none)")
+        _console.print("  [green](none)[/]")
         return
+    table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", pad_edge=False)
+    table.add_column("level", no_wrap=True)
+    table.add_column("category", style="dim", no_wrap=True)
+    table.add_column("factor", no_wrap=True)
+    table.add_column("message", overflow="fold")
     for i in issues:
-        color = _LEVEL_COLOR.get(i.level, "")
-        prefix = f"{color}{i.level:<8}{Style.RESET_ALL} {Style.DIM}{i.category:<20}{Style.RESET_ALL}"
-        target = i.factor if i.factor else "-"
-        print(f"  {prefix} {target:<45} {i.message}")
+        style = _LEVEL_STYLE.get(i.level, "")
+        table.add_row(f"[{style}]{i.level}[/]", i.category, i.factor or "-", i.message)
+    _console.print(table)
 
 
 def run_health(args):
@@ -126,11 +135,11 @@ def run_health(args):
         need_metrics = any(i.category == "missing-metrics" for i in issues)
         need_ds = any(i.category == "missing-datasources" for i in issues)
         if need_metrics:
-            print(Fore.CYAN + "Refreshing metrics...")
+            _console.print("[cyan]Refreshing metrics...[/]")
             metrics = refresh_metrics(factors, scanner.config, args.config_path)
             fixed_msgs.append("metrics refreshed")
         if need_ds:
-            print(Fore.CYAN + "Refreshing datasources...")
+            _console.print("[cyan]Refreshing datasources...[/]")
             datasources = refresh_datasources(factors, scanner.config, args.config_path)
             fixed_msgs.append("datasources refreshed")
         if need_metrics or need_ds:
@@ -138,19 +147,19 @@ def run_health(args):
             issues += _check_missing_metrics(factors, metrics)
             issues += _check_missing_datasources(factors, datasources)
 
-    separator = "─" * 70
-    print(Fore.CYAN + separator)
-    print(Fore.CYAN + Style.BRIGHT + f" Factor Library Health Check  ({len(factors)} factors{', user=' + args.user if args.user else ''})")
-    print(Fore.CYAN + separator)
+    title = f"[bold cyan]Factor Library Health Check[/]  ({len(factors)} factors{', user=' + args.user if args.user else ''})"
+    _console.print(Rule(title, style="cyan", characters="━"))
     _print_issues(issues)
-    print(Fore.CYAN + separator)
+    _console.print(Rule(style="cyan", characters="━"))
 
-    counts = Counter(i.level for i in issues)
-    summary = " | ".join(
-        f"{_LEVEL_COLOR.get(lvl, '')}{counts.get(lvl, 0)} {lvl}{Style.RESET_ALL}"
-        for lvl in (ERROR, WARNING)
-    )
-    ok_status = Fore.GREEN + "ALL OK" + Style.RESET_ALL if not issues else summary
-    print(f"Summary: {ok_status}")
+    if not issues:
+        _console.print("Summary: [green]ALL OK[/]")
+    else:
+        counts = Counter(i.level for i in issues)
+        summary = " | ".join(
+            f"[{_LEVEL_STYLE.get(lvl, '')}]{counts.get(lvl, 0)} {lvl}[/]"
+            for lvl in (ERROR, WARNING)
+        )
+        _console.print(f"Summary: {summary}")
     if fixed_msgs:
-        print(Fore.CYAN + "Fixed: " + ", ".join(fixed_msgs))
+        _console.print(f"[cyan]Fixed:[/] {', '.join(fixed_msgs)}")

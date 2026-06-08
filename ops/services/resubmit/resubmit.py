@@ -24,7 +24,7 @@ from ops.core.state import FactorRecord, FactorStatus
 from ops.services.submit.submit import _iter_dropbox_dirs, copy_to_staging
 from ops.services.submit.parser import parse_factor
 from ops.services.submit.normalize import normalize_factor_xml
-from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
+from ops.utils.logger.log import banner, bottom, info, warn, error, highlight, progress
 
 
 META_FILENAME = "meta.json"
@@ -126,7 +126,7 @@ def run_resubmit(args) -> None:
 
     passed = failed = 0
     for (user, src), staged in zip(existing, staging_dirs):
-        print("resubmitting ", end=""); highlight(f"{staged.name}")
+        progress("resubmitting ", staged.name)
         try:
             with factor_lock(staged.name):
                 ok = _resubmit_one(staged, user, config, store)

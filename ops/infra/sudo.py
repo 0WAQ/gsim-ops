@@ -22,6 +22,10 @@ import shutil
 import subprocess
 import sys
 
+from rich.console import Console
+
+_stderr = Console(stderr=True)
+
 
 # 写 alpha_src / staging / alpha_pnl / recycle / alpha_feature 的子命令
 WRITE_COMMANDS = {
@@ -152,9 +156,5 @@ def maybe_elevate(args) -> None:
         f"--preserve-env={env_list}",
         ops_bin,
     ] + sys.argv[1:]
-    print(
-        f"  [ops] alpha_src is root-owned; elevating via sudo",
-        file=sys.stderr,
-        flush=True,
-    )
+    _stderr.print("  [dim][ops] alpha_src is root-owned; elevating via sudo[/]")
     os.execvp("sudo", sudo_argv)  # never returns

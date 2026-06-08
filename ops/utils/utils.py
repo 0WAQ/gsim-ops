@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from ops.infra.gsim.runner import BacktestError
+from ops.utils.logger.log import info, warn, error
 
 
 class LowerAction(argparse.Action):
@@ -56,7 +57,7 @@ class Gsim:
             sp.run([python, run_py, xml_path],
                    stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE,
                    text=True, check=True, timeout=3600)
-            print("✅ backtest succeed")
+            info("✅ backtest succeed")
         except sp.CalledProcessError as e:
             raise BacktestError(f"❌ looking forward!!! ({xml_path}) {e.stderr}") from e
         except sp.TimeoutExpired as e:
@@ -71,10 +72,10 @@ class Gsim:
             sim_path = pnl_path + ".sim"
             with open(sim_path, 'w+') as f:
                 sp.run([python, simsummary_py, pnl_path], stdout=f, text=True)
-            print("✅ simsummary succeed")
+            info("✅ simsummary succeed")
             return sim_path
         except Exception as e:
-            print(f"❌ simsummary failed: {e}")
+            error(f"❌ simsummary failed: {e}")
             return None
 
     
@@ -84,15 +85,15 @@ class Gsim:
             output_path = os.path.join(os.path.dirname(lhs), "diff.txt")
             with open(output_path, 'w+') as f:
                 _ = sp.run(["diff", lhs, rhs], stdout=f, text=True)
-                print(f"running diff: {output_path}")
+                info(f"running diff: {output_path}")
                 size = f.seek(0, 2)
                 if size != 0:
                     with open(out, 'w+') as f1:
                         f1.write(os.path.dirname(lhs))
                         f1.writelines(f.readlines())
-                    print(f"❌ {os.path.dirname(output_path)} has forward looking!") 
+                    error(f"❌ {os.path.dirname(output_path)} has forward looking!")
                 else:
-                    print(f"✅ {os.path.dirname(output_path)} doesn't have forward looking!")
+                    info(f"✅ {os.path.dirname(output_path)} doesn't have forward looking!")
             return output_path
         except sp.CalledProcessError as e:
-            print(f"run diff failed: {e}")
+            error(f"run diff failed: {e}")

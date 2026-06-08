@@ -49,8 +49,7 @@ def run_one(factor_dir: Path, config: Config,
     total_n = len(str(total))
     prog = (i + 1) / total
     bar = f"[{i+1:>{total_n}}/{total}] {prog:>6.1%}"
-    print(f"{bar} running ", end="")
-    highlight(name)
+    progress(f"{bar} running ", name)
 
     try:
         with factor_lock(name):
@@ -119,7 +118,7 @@ def run_factors(args) -> None:
     factors = scan_factors(users, factor_name, config)
 
     if not factors:
-        print("No factors found.")
+        warn("No factors found.")
         return
 
     start_date: str = args.start_date

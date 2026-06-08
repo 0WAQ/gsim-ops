@@ -141,12 +141,12 @@ def parse_filters(filter_str: str) -> list[tuple[str, str, str]] | None:
         if m:
             key, op, value = m.group(1), m.group(2), m.group(3)
             if key not in FILTER_KEYS:
-                print(f"Unknown filter key: '{key}'. Supported: {', '.join(sorted(FILTER_KEYS))}")
+                _console.print(f"[red]Unknown filter key:[/] '{key}'. Supported: {', '.join(sorted(FILTER_KEYS))}")
                 has_error = True
                 continue
             filters.append((key, op, value))
         else:
-            print(f"Invalid filter syntax: '{part}'. Expected: key=value or key>value (use quotes: --filter-by \"...\")")
+            _console.print(f"[red]Invalid filter syntax:[/] '{part}'. Expected: key=value or key>value (use quotes: --filter-by \"...\")")
             has_error = True
     if has_error:
         return None
@@ -216,7 +216,7 @@ def run_list(args):
 
     if args.filter_by is not None:
         if not args.filter_by.strip():
-            print("Empty filter expression.")
+            _console.print("[red]Empty filter expression.[/]")
             return
         filters = parse_filters(args.filter_by)
         if filters is None:

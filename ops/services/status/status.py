@@ -1,46 +1,83 @@
+import shutil
+
+from rich.console import Console
+from rich.table import Table
+from rich.rule import Rule
+from rich import box
+
 from ops.core.state import FactorStatus, FactorRecord
 from ops.infra.config import Config
 from ops.infra.store import default_store
-from ops.utils.logger.log import banner, bottom, info, warn, error, highlight
 
 
-_STATUS_COLOR = {
-    FactorStatus.SUBMITTED: info,
-    FactorStatus.CHECKING:  highlight,
-    FactorStatus.ACTIVE:    info,
-    FactorStatus.REJECTED:  error,
-    FactorStatus.DECAYING:  warn,
-    FactorStatus.RETIRED:   warn,
-    FactorStatus.DELETED:   warn,
+_console = Console(width=shutil.get_terminal_size((140, 50)).columns)
+
+_STATUS_STYLE = {
+    FactorStatus.SUBMITTED: "green",
+    FactorStatus.CHECKING:  "bold yellow",
+    FactorStatus.ACTIVE:    "green",
+    FactorStatus.REJECTED:  "red",
+    FactorStatus.DECAYING:  "yellow",
+    FactorStatus.RETIRED:   "dim",
+    FactorStatus.DELETED:   "dim",
 }
 
 
-def _print_one(rec: FactorRecord) -> None:
-    color = _STATUS_COLOR.get(rec.status, info)
-    color(f"  {rec.name:<40}  {rec.status.value:<10}  {rec.author:<10}  {rec.updated_at}")
-    if rec.status == FactorStatus.REJECTED and rec.last_fail_stage:
-        print(f"      ↳ {rec.last_fail_stage}: {rec.last_fail_reason}")
+def _kv(key, value, width=14):
+    return f"  [bold]{key:<{width}}[/] {value}"
+
+
+def _outcome(c):
+    if c.passed:
+        return "[green]PASS[/]"
+    if c.passed is False:
+        return "[red]FAIL[/]"
+    return "[dim]SKIP[/]"
 
 
 def _print_detail(rec: FactorRecord) -> None:
-    print(f"name         : {rec.name}")
-    print(f"author       : {rec.author}")
-    print(f"status       : {rec.status.value}")
-    print(f"submitted_at : {rec.submitted_at}")
-    print(f"submitted_by : {rec.submitted_by}")
-    print(f"entered_at   : {rec.entered_at}")
-    print(f"rejected_at  : {rec.rejected_at}")
-    print(f"updated_at   : {rec.updated_at}")
+    _console.print(Rule(f"[bold cyan]因子状态 · {rec.name}[/]", style="cyan", characters="━"))
+    style = _STATUS_STYLE.get(rec.status, "")
+    _console.print(_kv("name",         rec.name))
+    _console.print(_kv("author",       rec.author))
+    _console.print(_kv("status",       f"[{style}]{rec.status.value}[/]"))
+    _console.print(_kv("submitted_at", rec.submitted_at))
+    _console.print(_kv("submitted_by", rec.submitted_by))
+    _console.print(_kv("entered_at",   rec.entered_at))
+    _console.print(_kv("rejected_at",  rec.rejected_at))
+    _console.print(_kv("updated_at",   rec.updated_at))
     if rec.last_fail_stage:
-        print(f"last_fail    : {rec.last_fail_stage} — {rec.last_fail_reason}")
+        _console.print(_kv("last_fail", f"[red]{rec.last_fail_stage}[/] — {rec.last_fail_reason}"))
     if rec.check_history:
-        print(f"check_history ({len(rec.check_history)}):")
+        _console.print(_kv("check_history", f"({len(rec.check_history)})"))
         for i, c in enumerate(rec.check_history, 1):
-            outcome = "PASS" if c.passed else ("FAIL" if c.passed is False else "SKIP")
-            line = f"  [{i}] {c.started_at} → {c.finished_at}  {outcome}"
+            line = f"    [dim][{i}][/] {c.started_at} → {c.finished_at}  {_outcome(c)}"
             if c.failed_stage:
-                line += f"  ({c.failed_stage}: {c.fail_reason})"
-            print(line)
+                line += f"  [red]({c.failed_stage}: {c.fail_reason})[/]"
+            _console.print(line)
+    _console.print(Rule(style="cyan", characters="━"))
+
+
+def _print_list(records: list[FactorRecord]) -> None:
+    table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", pad_edge=False)
+    table.add_column("name", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("author", no_wrap=True)
+    table.add_column("updated_at", no_wrap=True)
+    table.add_column("note", overflow="fold")
+    for rec in records:
+        style = _STATUS_STYLE.get(rec.status, "")
+        note = ""
+        if rec.status == FactorStatus.REJECTED and rec.last_fail_stage:
+            note = f"[red]{rec.last_fail_stage}[/]: {rec.last_fail_reason}"
+        table.add_row(
+            rec.name,
+            f"[{style}]{rec.status.value}[/]",
+            rec.author,
+            str(rec.updated_at),
+            note,
+        )
+    _console.print(table)
 
 
 def run_status(args) -> None:
@@ -53,23 +90,18 @@ def run_status(args) -> None:
     if name is not None:
         rec = store.get(name)
         if rec is None:
-            warn(f"未找到因子: {name}")
+            _console.print(f"[yellow]未找到因子: {name}[/]")
             return
-        banner(f"因子状态 · {name}")
         _print_detail(rec)
-        bottom()
         return
 
     status_enum = FactorStatus(status_filter) if status_filter else None
     records = store.list(author=author, status=status_enum)
     records.sort(key=lambda r: r.name)
 
-    banner("因子状态")
+    _console.print(Rule("[bold cyan]因子状态[/]", style="cyan", characters="━"))
     if not records:
-        warn("没有匹配的因子记录")
+        _console.print("[yellow]没有匹配的因子记录[/]")
     else:
-        print(f"  {'name':<40}  {'status':<10}  {'author':<10}  updated_at")
-        print(f"  {'-'*40}  {'-'*10}  {'-'*10}  {'-'*19}")
-        for rec in records:
-            _print_one(rec)
-    bottom()
+        _print_list(records)
+    _console.print(Rule(style="cyan", characters="━"))

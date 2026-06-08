@@ -11,6 +11,8 @@ import json
 import argparse
 import sys
 
+from ops.utils.logger.log import info, warn, error
+
 class FeishuBot:
     def __init__(self, app_id, app_secret):
         self.app_id = app_id
@@ -135,38 +137,38 @@ def main():
     # 创建机器人
     try:
         bot = FeishuBot(APP_ID, APP_SECRET)
-        
+
         # 获取 open_id
-        print(f"正在查找用户: {args.email}")
+        info(f"正在查找用户: {args.email}")
         open_id = bot.get_open_id_by_email(args.email)
-        
+
         if not open_id:
-            print(f"❌ 未找到用户: {args.email}")
+            error(f"❌ 未找到用户: {args.email}")
             sys.exit(1)
-        
-        print(f"✅ 找到用户: {open_id}")
-        
+
+        info(f"✅ 找到用户: {open_id}")
+
         # 发送消息
         if args.card:
             if not args.title or not args.content:
-                print("❌ 发送卡片需要 --title 和 --content 参数")
+                error("❌ 发送卡片需要 --title 和 --content 参数")
                 sys.exit(1)
-            
-            print("正在发送卡片消息...")
+
+            info("正在发送卡片消息...")
             bot.send_card_message(open_id, args.title, args.content)
-            print("✅ 卡片消息发送成功！")
-        
+            info("✅ 卡片消息发送成功!")
+
         elif args.text:
-            print("正在发送文本消息...")
+            info("正在发送文本消息...")
             bot.send_text_message(open_id, args.text)
-            print("✅ 文本消息发送成功！")
-        
+            info("✅ 文本消息发送成功!")
+
         else:
-            print("❌ 请指定 --text 或 --card")
+            error("❌ 请指定 --text 或 --card")
             sys.exit(1)
-    
+
     except Exception as e:
-        print(f"❌ 错误: {e}")
+        error(f"❌ 错误: {e}")
         sys.exit(1)
 
 
