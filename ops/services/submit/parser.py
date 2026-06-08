@@ -22,14 +22,14 @@ def _infer_author_from_dir(factor_dir_name: str) -> str:
         name = name[5:]
     author = []
     for ch in name:
-        if ch.isupper() or ch.isdigit():
+        if ch.islower():
+            author.append(ch)
+        elif ch.isupper():
             if author:
-                break
-            if ch.isdigit():
                 break
             author.append(ch.lower())
         else:
-            author.append(ch)
+            break
     return "".join(author) or "unknown"
 
 
@@ -156,7 +156,7 @@ def parse_factor(
     birthday = _to_int(desc.get("birthday"))
     universe = desc.get("universe", "")
     category = desc.get("category", "")
-    delay = _to_int(desc.get("delay") or alpha_node.get("@delay"), 1)
+    delay = _to_int(alpha_node.get("@delay") or desc.get("delay"), 1)
     backdays = _to_int(constants.get("@backdays"))
     dump_alpha = str(alpha_node.get("@dumpAlphaFile", "false")).lower() == "true"
     has_curve = _has_intraday_curve(alpha_node)
