@@ -126,13 +126,25 @@ def validate_file(npy: Path, n_inst: int, cutoff_idx: int, trim_last: int):
             'n_pos': int((slc > 0).sum()),
         }
 
-    # 每天 NaN 数, 用来 detect 全 NaN 天 / 全 finite 天
+    # 每天 NaN 数, 用来 detect 全 NaN 天 / 全 finite 天 + 有效数据范围
     if dtype == 'float64':
         nan_per_day = np.isnan(slc).sum(axis=1)
         all_nan_days = int((nan_per_day == n_inst).sum())
         no_nan_days = int((nan_per_day == 0).sum())
+        data_day_mask = nan_per_day < n_inst
     else:
         all_nan_days = no_nan_days = 0
+        # int8: 假设所有行都有数据 (因为 int8 没有 NaN 概念)
+        data_day_mask = np.ones(t_end, dtype=bool) if t_end > 0 else np.zeros(0, dtype=bool)
+
+    # 找首末有效数据 idx
+    if data_day_mask.any():
+        valid_idx = np.where(data_day_mask)[0]
+        first_data_idx = int(valid_idx[0])
+        last_data_idx = int(valid_idx[-1])
+    else:
+        first_data_idx = -1
+        last_data_idx = -1
 
     # 综合判定
     flags = []
@@ -164,6 +176,8 @@ def validate_file(npy: Path, n_inst: int, cutoff_idx: int, trim_last: int):
         'n_neginf': int(n_neginf),
         'all_nan_days': all_nan_days,
         'no_nan_days': no_nan_days,
+        'first_data_idx': first_data_idx,
+        'last_data_idx': last_data_idx,
         'stats': stats,
         'flags': flags,
         'severity': severity,
@@ -226,6 +240,13 @@ def main():
         if rep is None:
             skipped.append([rel, err])
             continue
+        # idx → YYYYMMDD
+        if rep['first_data_idx'] >= 0:
+            rep['first_data_date'] = int(dates[rep['first_data_idx']])
+            rep['last_data_date'] = int(dates[rep['last_data_idx']])
+        else:
+            rep['first_data_date'] = None
+            rep['last_data_date'] = None
         results[rel] = rep
         severity_counts[rep['severity']] += 1
         if (i + 1) % args.progress_every == 0:
@@ -234,6 +255,38 @@ def main():
             print(f"[{i+1}/{len(eligible)}] elapsed={el:.0f}s rate={rate:.1f}/s", flush=True)
 
     elapsed = time.time() - t0
+
+    # 同目录 cohort freshness 比对: 按一级目录分组, 末日远早于同组中位数的 flag stale
+    from collections import defaultdict
+    by_dir = defaultdict(list)
+    for rel, rep in results.items():
+        if rep.get('last_data_date'):
+            by_dir[rel.split('/')[0]].append((rel, rep))
+    stale_findings = {}
+    STALE_GAP_DAYS = 30  # 同组末日相差 30 个交易日以上算 stale
+    for d, items in by_dir.items():
+        if len(items) < 3:
+            continue  # 太少不做 cohort 比对
+        last_dates = sorted(rep['last_data_idx'] for _, rep in items)
+        median_last_idx = last_dates[len(last_dates) // 2]
+        for rel, rep in items:
+            gap = median_last_idx - rep['last_data_idx']
+            if gap >= STALE_GAP_DAYS:
+                rep.setdefault('flags', []).append(f'stale:{gap}d_behind_cohort')
+                # stale 一定升级为 critical (这是真问题, 跟 build 漏一样级别)
+                if rep['severity'] == 'ok':
+                    rep['severity'] = 'critical'
+                stale_findings[rel] = {
+                    'last_data_date': rep['last_data_date'],
+                    'cohort_median_date': int(dates[median_last_idx]),
+                    'gap_days': int(gap),
+                    'dir': d,
+                }
+    # 重新统计 severity (因为 stale 可能升级了)
+    severity_counts = {'ok': 0, 'warn': 0, 'critical': 0}
+    for rep in results.values():
+        severity_counts[rep['severity']] += 1
+
     out = {
         'root': str(root),
         'cutoff': args.cutoff,
@@ -245,6 +298,7 @@ def main():
         'n_skipped': len(skipped),
         'severity_counts': severity_counts,
         'elapsed_sec': round(elapsed, 1),
+        'stale_findings': stale_findings,
         'results': results,
         'skipped': skipped,
     }
@@ -252,12 +306,24 @@ def main():
     print(f"\n[i] 完成: scan={len(results)} skip={len(skipped)} 耗时={elapsed:.0f}s", flush=True)
     print(f"[i] 严重度: ok={severity_counts['ok']} "
           f"warn={severity_counts['warn']} critical={severity_counts['critical']}", flush=True)
+    if stale_findings:
+        print(f"[i] freshness 失守 ({len(stale_findings)}): 同目录 cohort 末日落后 ≥{STALE_GAP_DAYS}d", flush=True)
     print(f"[i] 报告: {args.out}", flush=True)
 
-    # 打印 critical 文件清单
-    critical = [(k, v) for k, v in results.items() if v['severity'] == 'critical']
+    # 打印 stale findings (新加的最重要类)
+    if stale_findings:
+        print(f"\n=== STALE / freshness 失守 ({len(stale_findings)}) ===", flush=True)
+        for rel, info in list(stale_findings.items())[:15]:
+            print(f"  {rel}: last={info['last_data_date']} "
+                  f"(cohort median={info['cohort_median_date']}, gap={info['gap_days']}d)", flush=True)
+        if len(stale_findings) > 15:
+            print(f"  ... 共 {len(stale_findings)} 个", flush=True)
+
+    # 打印 critical 文件清单 (排除 stale-only, 那些上面已经打)
+    critical = [(k, v) for k, v in results.items()
+                if v['severity'] == 'critical' and k not in stale_findings]
     if critical:
-        print(f"\n=== CRITICAL ({len(critical)}) ===", flush=True)
+        print(f"\n=== CRITICAL 非 stale ({len(critical)}) ===", flush=True)
         for k, v in critical[:20]:
             print(f"  {k}: {v['flags']} (max={v['stats']['max']}, n_neg={v['stats']['n_neg']})", flush=True)
         if len(critical) > 20:

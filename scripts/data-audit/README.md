@@ -41,11 +41,18 @@ python3 cc_validate.py --root /datasvc/data/cc_all --limit 20 --out report.json
 
 | 严重度 | 条件 |
 |---|---|
-| `critical` | 全 0 文件 / inf 出现 / 应非负字段含负值 |
+| `critical` | 全 0 文件 / inf 出现 / 应非负字段含负值 / **同目录 cohort 末日落后 ≥30 个交易日 (stale)** |
 | `warn`     | 全 NaN 文件 (可能源真没数据, 但需关注) |
 | `ok`       | 通过所有检查 |
 
 退出码: 0 = 没有 critical, 1 = 有 critical。可直接接 cron 告警。
+
+**每文件附带的有效范围**:
+- `first_data_idx` / `first_data_date` — 沿 N 归约后首个非全 NaN 日
+- `last_data_idx` / `last_data_date` — 同上的末日
+
+**stale_findings 节** (报告顶层):
+自动按一级目录 cohort 比对, 末日 `≥ 30 个交易日早于 cohort median` 的文件直接列出, 不用扫所有文件。例: `HK_HOLDVOL_CHG_*20` 末日 20240816 而同目录其他字段末日 20260601 → 自动列出。
 
 **输出 JSON 结构**:
 ```json
