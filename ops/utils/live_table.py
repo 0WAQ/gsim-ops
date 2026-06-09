@@ -25,6 +25,7 @@ from enum import Enum
 
 from rich.console import Console, Group
 from rich.live import Live
+from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 from rich import box
@@ -78,6 +79,10 @@ class FactorRow:
     outcome: str = ""           # "→ lib" / "→ recycle/checkbias: corr 0.87" / "locked" / ...
     outcome_style: str = ""
     started_at: float | None = None  # monotonic; reserved for future timing column
+    # Persistent Spinner instance reused across Live renders so the animation
+    # actually advances. Recreating a Spinner each render resets it to frame 0
+    # so it never animates.
+    spinner: Spinner | None = field(default=None, repr=False)
 
     def is_done(self) -> bool:
         return bool(self.outcome)
@@ -128,6 +133,14 @@ class LiveDriver:
             row.stages[stage] = Status.RUNNING
             row.current_stage = stage
             row.current_status = Status.RUNNING
+            # Persist spinner across renders so its frame counter advances;
+            # mutate text in place rather than re-creating, otherwise the
+            # spinner re-starts at frame 0 every time and never animates.
+            if row.spinner is None:
+                row.spinner = Spinner("dots", text=Text(f" {stage}", style="yellow"),
+                                      style="yellow")
+            else:
+                row.spinner.update(text=Text(f" {stage}", style="yellow"))
         elif kind == "stage_done":
             _, name, stage, status = ev
             row = self.rows.get(name)
@@ -139,6 +152,7 @@ class LiveDriver:
             # overwrites — mirrors how a tail of build output reads.
             row.current_stage = stage
             row.current_status = status
+            row.spinner = None  # static glyph from now on
         elif kind == "done":
             _, name, outcome_kind, note, style = ev
             row = self.rows.get(name)
@@ -146,6 +160,7 @@ class LiveDriver:
                 return
             row.outcome = note
             row.outcome_style = style
+            row.spinner = None
             counter_key = _OUTCOME_COUNTER.get(outcome_kind, "error")
             self._counts[counter_key] += 1
             self._recent.append(row)
@@ -202,17 +217,20 @@ class LiveDriver:
         t.add_column("stage", no_wrap=True)
         t.add_column("outcome", overflow="fold")
         for row in rows:
-            stage_cell = Text()
-            if row.current_stage:
-                stage_cell.append(row.current_status.glyph, style=row.current_status.style)
-                stage_cell.append(f" {row.current_stage}", style=row.current_status.style)
-            cells: list[str | Text] = [
+            stage_cell: "Spinner | Text"
+            if row.current_status is Status.RUNNING and row.spinner is not None:
+                stage_cell = row.spinner
+            else:
+                stage_cell = Text()
+                if row.current_stage:
+                    stage_cell.append(row.current_status.glyph, style=row.current_status.style)
+                    stage_cell.append(f" {row.current_stage}", style=row.current_status.style)
+            t.add_row(
                 str(row.idx),
                 row.name,
                 stage_cell,
                 Text(row.outcome, style=row.outcome_style),
-            ]
-            t.add_row(*cells)
+            )
         return t
 
     def _render(self):

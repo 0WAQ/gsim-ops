@@ -323,6 +323,8 @@ class CheckerPipeline:
         except CheckSkip as e:
             if current_stage:
                 _emit_stage_done(current_stage, Status.SKIPPED)
+            logger.warning("check skipped factor={} stage={} reason={}",
+                           factor.key, e.stage, str(e))
             check.finished_at = datetime.now().isoformat(timespec="seconds")
             check.passed = None
             check.failed_stage = e.stage
@@ -330,13 +332,15 @@ class CheckerPipeline:
             store.append_check(factor.name, check)
             store.transition(factor.name, FactorStatus.SUBMITTED)
             q.put(("done", factor.name, "error",
-                   f"⊝ {e.stage} skipped: {str(e)[:80]}", "yellow"))
+                   f"⊝ {e.stage} skipped: {str(e)[:60]}", "yellow"))
             return "error"
 
         except CheckFail as e:
             if e.stage in _RETRYABLE_STAGES:
                 if current_stage:
                     _emit_stage_done(current_stage, Status.RETRYABLE)
+                logger.warning("check retryable failure factor={} stage={} reason={}",
+                               factor.key, e.stage, str(e))
                 # Environmental/config failure — revert to SUBMITTED, keep in staging
                 check.finished_at = datetime.now().isoformat(timespec="seconds")
                 check.passed = False
@@ -345,11 +349,13 @@ class CheckerPipeline:
                 store.append_check(factor.name, check)
                 store.transition(factor.name, FactorStatus.SUBMITTED)
                 q.put(("done", factor.name, "error",
-                       f"↻ retry: {e.stage} ({str(e)[:80]})", "yellow"))
+                       f"↻ retry: {e.stage} ({str(e)[:60]})", "yellow"))
                 return "error"
             else:
                 if current_stage:
                     _emit_stage_done(current_stage, Status.FAILED)
+                logger.warning("check rejected factor={} stage={} reason={}",
+                               factor.key, e.stage, str(e))
                 # Factor quality failure — REJECTED + recycle
                 prepare_for_recycle(factor)
                 self.to_recycle(factor, e)
@@ -364,7 +370,7 @@ class CheckerPipeline:
                                  last_fail_stage=e.stage,
                                  last_fail_reason=str(e))
                 q.put(("done", factor.name, "fail",
-                       f"→ recycle/{e.stage}: {str(e)[:80]}", "red"))
+                       f"→ recycle/{e.stage}: {str(e)[:60]}", "red"))
                 return "fail"
 
         except Exception as e:
@@ -467,6 +473,8 @@ class CheckerPipeline:
             warn(f"⚠ 异常 : {errored:>4}  (留在 staging,可 recheck)")
         if locked > 0:
             warn(f"⚠ 占用 : {locked:>4}  (被其他进程持有,跳过)")
+        if failed > 0 or errored > 0:
+            info("完整失败原因见 ~/.cache/ops/logs/ops.log")
         bottom()
 
 
