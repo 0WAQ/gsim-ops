@@ -58,7 +58,7 @@ FILE_SINK_ID = logger.add(
     retention="14 days",
     compression="gz",
     enqueue=True,
-    backtrace=True,
+    backtrace=False,
     diagnose=False,
 )
 
