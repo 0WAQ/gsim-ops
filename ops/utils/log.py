@@ -48,7 +48,7 @@ FILE_SINK_ID = logger.add(
         "<dim>{process}</dim> | "
         "<level>{level: <8}</level> | "
         "<cyan>{name}:{function}:{line}</cyan> - "
-        "<level>{message}</level>"
+        "{message}"
     ),
     # ANSI escape codes go directly into the file. View with `less -R`,
     # `tail` (most terminals), or `cat`. Plain `grep` matches will include
