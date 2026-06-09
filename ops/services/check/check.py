@@ -1,3 +1,4 @@
+import multiprocessing as mp
 import shutil
 import xmltodict
 from datetime import datetime
@@ -10,7 +11,8 @@ from ops.infra.store import default_store
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.services.list.metrics import update_metrics
 from ops.utils.printer import *
-from ops.utils.log import logger
+from ops.utils.printer import _console as _printer_console
+from ops.utils.log import logger, STDERR_SINK_ID
 from ops.core.alpha.metadata import AlphaMetadata
 from ops.core.factormeta import FactorMeta
 from ops.core.state import FactorRecord, FactorStatus, CheckRecord
@@ -18,6 +20,10 @@ from ops.core.alpha.results.compliance import *
 from ops.core.alpha.results.correlation import *
 from ops.core.alpha.results.checkpoint import *
 from ops.core.alpha.results.checkbias import *
+
+# Imported AFTER the `results.*` star imports so its Status doesn't get
+# shadowed by the stub Status enum in core/alpha/results/base.py.
+from ops.utils.live_table import LiveDriver, Status, make_factor_rows
 
 from .xml_prepare import *
 from .reconcile import reconcile
@@ -31,6 +37,10 @@ from .checker.correlation_checker import CorrelationChecker
 
 # Stages whose failure is likely environmental/config — revert to SUBMITTED, leave in staging.
 _RETRYABLE_STAGES = {"validate", "long_backtest"}
+
+# Stage names + display order for the Live table. Must match keys used in
+# _run_one_locked when emitting (stage_start, ...) / (stage_done, ...) events.
+STAGES = ("validate", "checkbias", "checkpoint", "long_backtest", "compliance", "correlation")
 
 
 class CheckerPipeline:
@@ -223,59 +233,79 @@ class CheckerPipeline:
             submitted_by=submitted_by,
         ))
 
-    def run_one(self, factor: AlphaMetadata, i: int) -> str:
-        """Returns one of: 'pass' | 'fail' | 'error' | 'locked'."""
-        total = len(self.metadatas)
-        prog  = (i + 1) / total
-        bar   = f"[{i+1:>{len(str(total))}}/{total}] {prog:>6.1%}"
-        progress(f"{bar} checking ", factor.key)
+    def run_one(self, factor: AlphaMetadata, i: int, q) -> str:
+        """Returns one of: 'pass' | 'fail' | 'error' | 'locked'.
 
+        Stage events are emitted via the queue `q` so the parent's LiveDriver
+        can render them. The return string is also still consumed by the
+        parent for counter accumulation.
+        """
         try:
             with factor_lock(factor.name):
-                return self._run_one_locked(factor)
+                return self._run_one_locked(factor, q)
         except FactorLocked:
-            warn(f"  ⚠  {factor.key} 已被另一个进程占用,跳过")
+            q.put(("done", factor.name, "locked", "🔒 已被另一个进程占用", "yellow"))
             return "locked"
 
-    def _run_one_locked(self, factor: AlphaMetadata) -> str:
+    def _run_one_locked(self, factor: AlphaMetadata, q) -> str:
         store = default_store(self.config)
         self._ensure_record(factor, store)
         check = CheckRecord(started_at=datetime.now().isoformat(timespec="seconds"))
         store.transition(factor.name, FactorStatus.CHECKING)
 
+        # Track which stage is currently running so the catch-all except clauses
+        # can mark it failed in the Live table.
+        current_stage: str | None = None
+
+        def _emit_stage_start(stage: str) -> None:
+            nonlocal current_stage
+            current_stage = stage
+            q.put(("stage_start", factor.name, stage))
+
+        def _emit_stage_done(stage: str, status: Status) -> None:
+            nonlocal current_stage
+            current_stage = None
+            q.put(("stage_done", factor.name, stage, status))
+
         try:
             # 0. Validate — short backtest, no firewall (env/config check)
+            _emit_stage_start("validate")
             prepare_for_validate(factor)
             self.validate_checker.check(factor)
-            info(f"  ✔  {factor.key} validate passed")
+            _emit_stage_done("validate", Status.PASSED)
 
             # 1. Checkbias — firewall injection + short backtest
+            _emit_stage_start("checkbias")
             prepare_for_checkbias(factor)
             self.checkbias_checker.check(factor)
-            info(f"  ✔  {factor.key} checkbias passed")
+            _emit_stage_done("checkbias", Status.PASSED)
 
             # 2. Checkpoint — breakpoint stability
+            _emit_stage_start("checkpoint")
             prepare_for_checkpoint(factor)
             self.checkpoint_checker.check(factor)
             self.checkpoint_checker.clean(factor)
-            info(f"  ✔  {factor.key} checkpoint passed")
+            _emit_stage_done("checkpoint", Status.PASSED)
 
             # 3. Long Backtest — full history (pure run, no checks)
+            _emit_stage_start("long_backtest")
             prepare_for_long_backtest(factor)
             self.long_backtest_checker.check(factor)
-            info(f"  ✔  {factor.key} long_backtest passed")
+            _emit_stage_done("long_backtest", Status.PASSED)
 
             # 4. Compliance — position limits check
+            _emit_stage_start("compliance")
             prepare_for_compliance(factor)
             self.compliance_checker.check(factor)
-            info(f"  ✔  {factor.key} compliance passed")
+            _emit_stage_done("compliance", Status.PASSED)
 
             # 5. Correlation — correlation against library
+            _emit_stage_start("correlation")
             prepare_for_correlation(factor)
             self.correlation_checker.check(factor)
-            info(f"  ✔  {factor.key} correlation passed")
+            _emit_stage_done("correlation", Status.PASSED)
 
-            # 6. Archive — simsummary + move to lib
+            # 6. Archive — simsummary + move to lib (no live column; folded into outcome)
             metrics = Runner.run_simsummary(factor.pnl_file, self.config)
             prepare_for_archive(factor)
             self.to_lib(factor)
@@ -287,32 +317,40 @@ class CheckerPipeline:
             check.passed = True
             store.append_check(factor.name, check)
             store.transition(factor.name, FactorStatus.ACTIVE, entered_at=now)
+            q.put(("done", factor.name, "pass", "→ lib", "green"))
             return "pass"
 
         except CheckSkip as e:
-            warn(f"  ⚠  {factor.key} {e.stage} skipped. ({str(e)})")
+            if current_stage:
+                _emit_stage_done(current_stage, Status.SKIPPED)
             check.finished_at = datetime.now().isoformat(timespec="seconds")
             check.passed = None
             check.failed_stage = e.stage
             check.fail_reason = str(e)
             store.append_check(factor.name, check)
             store.transition(factor.name, FactorStatus.SUBMITTED)
+            q.put(("done", factor.name, "error",
+                   f"⊝ {e.stage} skipped: {str(e)[:80]}", "yellow"))
             return "error"
 
         except CheckFail as e:
             if e.stage in _RETRYABLE_STAGES:
+                if current_stage:
+                    _emit_stage_done(current_stage, Status.RETRYABLE)
                 # Environmental/config failure — revert to SUBMITTED, keep in staging
-                error(f"  ✘  {factor.key} {e.stage} failed (环境/配置问题). ({str(e)})")
                 check.finished_at = datetime.now().isoformat(timespec="seconds")
                 check.passed = False
                 check.failed_stage = e.stage
                 check.fail_reason = str(e)
                 store.append_check(factor.name, check)
                 store.transition(factor.name, FactorStatus.SUBMITTED)
+                q.put(("done", factor.name, "error",
+                       f"↻ retry: {e.stage} ({str(e)[:80]})", "yellow"))
                 return "error"
             else:
+                if current_stage:
+                    _emit_stage_done(current_stage, Status.FAILED)
                 # Factor quality failure — REJECTED + recycle
-                error(f"  ✘  {factor.key} {e.stage} failed. ({str(e)})")
                 prepare_for_recycle(factor)
                 self.to_recycle(factor, e)
                 now = datetime.now().isoformat(timespec="seconds")
@@ -325,18 +363,23 @@ class CheckerPipeline:
                                  rejected_at=now,
                                  last_fail_stage=e.stage,
                                  last_fail_reason=str(e))
+                q.put(("done", factor.name, "fail",
+                       f"→ recycle/{e.stage}: {str(e)[:80]}", "red"))
                 return "fail"
 
         except Exception as e:
             # Environment / framework bug — NOT a factor problem.
             # Keep factor in staging, leave meta.json untouched, revert state to SUBMITTED.
-            error(f"  ✘  {factor.key} unexpected error: {e}")
+            if current_stage:
+                _emit_stage_done(current_stage, Status.FAILED)
             logger.exception("check pipeline crashed factor={}", factor.key)
             check.finished_at = datetime.now().isoformat(timespec="seconds")
             check.passed = None
             check.fail_reason = f"unexpected: {e}"
             store.append_check(factor.name, check)
             store.transition(factor.name, FactorStatus.SUBMITTED)
+            q.put(("done", factor.name, "error",
+                   f"! unexpected: {str(e)[:80]}", "red"))
             return "error"
 
     def run(self):
@@ -347,19 +390,74 @@ class CheckerPipeline:
 
         banner("因子检测")
 
-        passed = failed = errored = locked = 0
-        with ProcessPoolExecutor(max_workers=min(20, max(1, len(self.metadatas)))) as pool:
-            futures: list[Future[str]] = []
-            for i, factor in enumerate(self.metadatas):
-                f = pool.submit(self.run_one, factor, i)
-                futures.append(f)
+        if not self.metadatas:
+            info("没有待检测因子")
+            bottom()
+            return
 
-            for f in as_completed(futures):
-                match f.result():
-                    case "pass":   passed  += 1
-                    case "fail":   failed  += 1
-                    case "error":  errored += 1
-                    case "locked": locked  += 1
+        ctx = mp.get_context("fork")
+        rows = make_factor_rows([f.name for f in self.metadatas], STAGES)
+
+        # Stage events go through a Manager-backed Queue. Manager.Queue is a
+        # proxy (~5ms per put/get) but is the only multiprocessing queue that
+        # works reliably as a ProcessPoolExecutor task argument; raw mp.Queue
+        # cannot survive being pickled into the pool's task pipe. The overhead
+        # is negligible vs the 30+min wall time of long_backtest per factor.
+
+        # Temporarily redirect loguru's stderr sink so any logger.warning /
+        # logger.exception during the pool run renders above the Live region
+        # instead of tearing the table mid-update. Restore on exit.
+        stderr_redirected = False
+        try:
+            logger.remove(STDERR_SINK_ID)
+            stderr_redirected = True
+        except ValueError:
+            # already removed elsewhere — fine
+            pass
+
+        try:
+            with mp.Manager() as mgr, ProcessPoolExecutor(
+                max_workers=min(20, max(1, len(self.metadatas))),
+                mp_context=ctx,
+            ) as pool:
+                q = mgr.Queue()
+                futures: list[Future[str]] = [
+                    pool.submit(self.run_one, factor, i, q)
+                    for i, factor in enumerate(self.metadatas)
+                ]
+                # During Live, route loguru WARNING+ to live.console.print so it
+                # appears above the live region without corrupting it.
+                live_sink_id = logger.add(
+                    lambda msg: _printer_console.print(msg, end=""),
+                    level="WARNING",
+                    format="<level>{level: <8}</level> | <cyan>{name}:{function}:{line}</cyan> - {message}",
+                    colorize=True,
+                    backtrace=False,
+                    diagnose=False,
+                )
+                try:
+                    driver = LiveDriver(rows, q, futures, STAGES,
+                                        console=_printer_console)
+                    passed, failed, errored, locked = driver.run()
+                finally:
+                    try:
+                        logger.remove(live_sink_id)
+                    except ValueError:
+                        pass
+        finally:
+            if stderr_redirected:
+                # Re-add the stderr sink with the same config as ops/utils/log.py.
+                # Keep this in sync with that module's STDERR_SINK_ID definition.
+                import sys
+                logger.add(
+                    sys.stderr,
+                    level="WARNING",
+                    format="<level>{level: <8}</level> | <cyan>{name}:{function}:{line}</cyan> - {message}",
+                    colorize=True,
+                    backtrace=False,
+                    diagnose=False,
+                    enqueue=True,
+                )
 
         banner("检测汇总")
         info(f"✔ 通过 : {passed:>4}")

@@ -30,7 +30,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 logger.remove()
 
-logger.add(
+STDERR_SINK_ID = logger.add(
     sys.stderr,
     level="WARNING",
     format="<level>{level: <8}</level> | <cyan>{name}:{function}:{line}</cyan> - {message}",
@@ -40,7 +40,7 @@ logger.add(
     enqueue=True,
 )
 
-logger.add(
+FILE_SINK_ID = logger.add(
     LOG_DIR / "ops.log",
     level="DEBUG",
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {process} | {level: <8} | {name}:{function}:{line} - {message}",
@@ -53,4 +53,4 @@ logger.add(
 )
 
 
-__all__ = ["logger", "LOG_DIR"]
+__all__ = ["logger", "LOG_DIR", "STDERR_SINK_ID", "FILE_SINK_ID"]
