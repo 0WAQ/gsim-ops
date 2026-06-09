@@ -213,7 +213,7 @@ class LiveDriver:
                   pad_edge=False, show_header=True, title=title,
                   title_justify="left", title_style="bold")
         t.add_column("#", justify="right", no_wrap=True, style="dim")
-        t.add_column("name", no_wrap=True, max_width=50, overflow="ellipsis")
+        t.add_column("name", no_wrap=True, max_width=50, overflow="ellipsis", style="bold")
         t.add_column("stage", no_wrap=True)
         t.add_column("outcome", overflow="fold")
         for row in rows:
