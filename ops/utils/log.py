@@ -43,7 +43,17 @@ STDERR_SINK_ID = logger.add(
 FILE_SINK_ID = logger.add(
     LOG_DIR / "ops.log",
     level="DEBUG",
-    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {process} | {level: <8} | {name}:{function}:{line} - {message}",
+    format=(
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+        "<dim>{process}</dim> | "
+        "<level>{level: <8}</level> | "
+        "<cyan>{name}:{function}:{line}</cyan> - "
+        "<level>{message}</level>"
+    ),
+    # ANSI escape codes go directly into the file. View with `less -R`,
+    # `tail` (most terminals), or `cat`. Plain `grep` matches will include
+    # escape codes; use `grep --color=always` or `less` for colored search.
+    colorize=True,
     rotation="20 MB",
     retention="14 days",
     compression="gz",
