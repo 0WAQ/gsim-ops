@@ -72,7 +72,9 @@ _OUTCOME_COUNTER = {
 class FactorRow:
     idx: int                    # 1-based for display
     name: str
-    stages: dict[str, Status]   # populated from STAGES
+    stages: dict[str, Status]   # full pipeline state, kept for is_in_flight()
+    current_stage: str = ""     # the stage whose status is shown in the table cell
+    current_status: Status = Status.PENDING
     outcome: str = ""           # "→ lib" / "→ recycle/checkbias: corr 0.87" / "locked" / ...
     outcome_style: str = ""
     started_at: float | None = None  # monotonic; reserved for future timing column
@@ -124,12 +126,19 @@ class LiveDriver:
             if row.started_at is None:
                 row.started_at = time.monotonic()
             row.stages[stage] = Status.RUNNING
+            row.current_stage = stage
+            row.current_status = Status.RUNNING
         elif kind == "stage_done":
             _, name, stage, status = ev
             row = self.rows.get(name)
             if row is None:
                 return
             row.stages[stage] = status
+            # Keep current_stage pointing at the just-completed stage so the row
+            # briefly shows ✓/✗ for it before stage_start of the next one
+            # overwrites — mirrors how a tail of build output reads.
+            row.current_stage = stage
+            row.current_status = status
         elif kind == "done":
             _, name, outcome_kind, note, style = ev
             row = self.rows.get(name)
@@ -189,16 +198,20 @@ class LiveDriver:
                   pad_edge=False, show_header=True, title=title,
                   title_justify="left", title_style="bold")
         t.add_column("#", justify="right", no_wrap=True, style="dim")
-        t.add_column("name", no_wrap=True)
-        for s in self.stages:
-            t.add_column(s, justify="center", no_wrap=True)
+        t.add_column("name", overflow="fold")
+        t.add_column("stage", no_wrap=True)
         t.add_column("outcome", overflow="fold")
         for row in rows:
-            cells: list[str | Text] = [str(row.idx), row.name]
-            for s in self.stages:
-                st = row.stages[s]
-                cells.append(Text(st.glyph, style=st.style))
-            cells.append(Text(row.outcome, style=row.outcome_style))
+            stage_cell = Text()
+            if row.current_stage:
+                stage_cell.append(row.current_status.glyph, style=row.current_status.style)
+                stage_cell.append(f" {row.current_stage}", style=row.current_status.style)
+            cells: list[str | Text] = [
+                str(row.idx),
+                row.name,
+                stage_cell,
+                Text(row.outcome, style=row.outcome_style),
+            ]
             t.add_row(*cells)
         return t
 
