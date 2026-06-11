@@ -12,3 +12,8 @@ wheels/
 # temp
 other/
 tmp/
+
+# mlflow tracking (auto-created by `mlflow run`)
+mlflow.db
+mlruns/
+mlartifacts/
