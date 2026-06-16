@@ -55,7 +55,7 @@ def _fail_stage(rec: FactorRecord):
 
 # (header, justify, extras, getter(factor, record) -> str)
 _BASE_COLS = [
-    ("name",    "left",  {"no_wrap": True, "max_width": 50, "overflow": "ellipsis"}, lambda f, r: f.name),
+    ("name",    "left",  {"no_wrap": True, "max_width": 36, "overflow": "ellipsis"}, lambda f, r: f.name),
     ("author",  "left",  {},                lambda f, r: f.author),
     ("delay",   "right", {},                lambda f, r: str(f.delay) if f.delay is not None else "?"),
     ("ret%",    "right", {},                lambda f, r: _metric(f, "ret")),
