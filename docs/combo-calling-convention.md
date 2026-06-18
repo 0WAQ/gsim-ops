@@ -41,7 +41,7 @@ combo 信号可以是模型算的, 也可以是现成因子的线性组合。据
 | **ComboProject 根** | 一个 combo 提交物的根目录 | `Combo{UnixId}{ComboName}/` | qr 交付的**输入** | 一个 combo 一个 |
 | **`${RUN_DIR}`** (Combo run 根) | 某一次评估跑出的产物目录 | `<ComboProject>/runs/predict_<start>-<end>/` | ops 跑出的**输出** | 滚动评估每轮一个 |
 
-- ComboProject 根 = 输入 (meta/predict/models/config), 相对固定, ops 本来就知道在哪 → **不需要占位符**
+- ComboProject 根 = 输入 (predict/models/config), 相对固定, ops 本来就知道在哪 → **不需要占位符**
 - `${RUN_DIR}` = 输出 (这一轮的 .npy), 每轮新增 → config 里用它作 npy 前缀
 - 二者必须分开: 否则"输入"和"输出"混在一起 (就是早期 output/ 杂乱的根因), 且 `${RUN_DIR}` 字面别和 project 根混
 
@@ -53,7 +53,6 @@ combo 信号可以是模型算的, 也可以是现成因子的线性组合。据
 
 ```
 Combo{UnixId}{ComboName}/
-├── combo.meta.json        # 身份 + feature 声明 + 主产物名          [必交]
 ├── predict/               # 推理代码 (算信号, 入口 predict.py)       [A 模型型必交; C 纯线性无]
 ├── models/                # 模型权重 (按日期命名的 checkpoint + feature_names.csv)  [A 必交; C 无]
 ├── config.simple.xml      # backtest config, 每个 stats 一份 (环境字段写占位符)  [必交]
@@ -62,8 +61,8 @@ Combo{UnixId}{ComboName}/
 ├── config.opt.xml         #   opt 是独立结构 (StatsOptV5 + RiskOpt 多腿), 非套壳
 └── runs/                  # ★ 所有产物统一出口 (提交时为空, ops/qr 跑测时生成)
     └── predict_<start>-<end>/ #   A: 一次 predict (按区间命名); C 无此层, 用 backtest_<start>-<end>/
-        ├── combo.npy         #     predict 主信号 (meta 声明名); 多腿/中间产物由 predict 自定
-        ├── combo.npy.meta.json   # 数据版本/区间细节记此 (不进目录名)
+        ├── combo.npy         #     predict 主信号 (固定名 combo.npy); 多腿/中间产物由 predict 自定
+        ├── combo.npy.meta.json   # predict 自动落的产物元信息 (数据版本/区间; 非提交物)
         ├── simple/           #   config.simple.xml 注入后跑的 backtest
         │   ├── pnl/
         │   ├── summary.txt
@@ -72,7 +71,9 @@ Combo{UnixId}{ComboName}/
         └── opt/              #   config.opt.xml; 多 checkpoint/ positions/ (优化器运行时产物)
 ```
 
-> 形态 C (纯 gsim 线性) 提交物 = `combo.meta.json` + `config.<stats>.xml` (无 predict/models);
+> 身份 (作者/combo 名) 由目录名 `Combo{UnixId}{ComboName}` 表达; 数据依赖由 config + `feature_names.csv`
+> 自描述。**无提交物元信息文件** (不需要 combo.meta.json)。
+> 形态 C (纯 gsim 线性) 提交物 = `config.<stats>.xml` (无 predict/models);
 > 产物落 `runs/backtest_<start>-<end>/<stats>/` (无 predict 层)。详见上面"combo 形态"章节。
 
 **predict / backtest 逻辑分离** (★ 核心):
@@ -131,16 +132,15 @@ ops 调用 combo 的 predict, 算出信号 .npy。combo 内部怎么读 feature 
 | `output-dir` | 输出目录 | combo 在此目录下产出 .npy (可多个, 见多腿)。ops 实际传 `runs/predict_<start>-<end>/`; qr 本地自测随便指一个目录 |
 
 **combo 产出 (输出)**:
-- **主产物**: 一个 float64 memmap `.npy`, 文件名由 `combo.meta.json` 的 `predict.main_output` 声明 (如 `combo.npy`)
+- **主产物**: 一个 float64 memmap `.npy`, **文件名固定为 `combo.npy`**
   - shape = `(data_root 日期数, 股票数)` —— **shape 从 data_root 推导, 不许写死**
   - `[start, end]` 外的行可 NaN
 - **中间产物** (可选): predict 内部可落多个 npy (如 lhw 的 lgbm 腿 / mlp 腿), ops 不管, backtest 不用
 
-**★ 主产物名三方对齐** (闭合 predict 输出与 config 引用的缺口):
-- `combo.meta.json` 声明 `predict.main_output: "combo.npy"`
-- predict 默认 `--out-name` = 同名 (ops 不传也对; 别留 lhw 那种默认长名≠config名的不一致)
+**★ 主产物名固定** (闭合 predict 输出与 config 引用的缺口):
+- predict 默认 `--out-name` = `combo.npy` (ops 不传也对)
 - config 里 `npydata="${RUN_DIR}/combo.npy"` 引用同名
-- → 三处统一, ops 注入时按 meta 主产物名对齐 config + 传 --out-name
+- → 硬性规定固定名, 无需声明/协商; ops 注入时直接对齐
 
 **回测与日增是同一个接口, 只换 start/end**:
 - 回测 (评估): `start~end` 全段 → 全段 .npy → gsim backtest → pnl
@@ -244,9 +244,9 @@ qr 碰不到 —— 靠 `${DATA_ROOT}` 由 ops 注入 (qr config 里只有占位
 
 | 检查项 | 不通过 |
 |---|---|
-| `combo.meta.json` + `config.<stats>.xml` (≥1 份) 齐全 (A 形态另需 `predict/` + `models/`) | 拒收 |
+| `config.<stats>.xml` (≥1 份) 齐全 (A 形态另需 `predict/` + `models/`) | 拒收 |
 | (A 形态) `predict/predict.py` 接受 data_root/start/end/device/output-dir | 拒收 |
-| (A 形态) `combo.meta.json` 声明 `predict.main_output`, 且 predict 默认 out-name / config npy 引用与之同名 | 拒收 |
+| (A 形态) predict 主产物固定为 `combo.npy`, config 引用 `${RUN_DIR}/combo.npy` | 拒收 |
 | 形态判定: 有模型成品 .npy 但无 predict 代码 = B 形态 | 拒收 (见 combo 形态) |
 | `config.<stats>.xml` 里**无绝对文件路径**, npy 引用全是 `${RUN_DIR}/...` 或 `${DATA_ROOT}/...` | 拒收 |
 | `config.<stats>.xml` 无占位符外的 qr 个人路径 (`/home/xxx/...`) | 拒收 |
@@ -259,12 +259,12 @@ qr 碰不到 —— 靠 `${DATA_ROOT}` 由 ops 注入 (qr config 里只有占位
 
 | 场景 | 结果 |
 |---|---|
-| 最小集 (meta+predict+models) 独立 predict→backtest | ✓ 2025 sharpe 0.61, 与完整包 bit 级一致 |
+| 最小集 (predict+models+config) 独立 predict→backtest | ✓ 2025 sharpe 0.61, 与完整包 bit 级一致 |
 | 纯 config backtest (零 .py, gsim 自带 ProdNpyLoad) | ✓ |
 | 占位符注入 (单腿) | ✓ |
 | 多腿 + 优化器 (v0.2 注入版, Hump×3 + RiskOpt20) | ✓ status optimal 全段 |
 | 多腿 `${RUN_DIR}` 前缀 + 相对路径 | ✓ 两腿各自加载跑通 |
-| 主产物名三方对齐 (不传 --out-name 默认产出 combo.npy) | ✓ |
+| 主产物名固定 combo.npy (不传 --out-name 默认产出 combo.npy) | ✓ |
 | 四份 config.<stats>.xml 共存 (simple/bench/layer/opt 各跑各落) | ✓ 四 stats 各占子目录 |
 | C 形态纯线性 (无 predict/无 ${RUN_DIR}, cc 现成因子组合) | ✓ 直接 backtest 跑通 |
 
