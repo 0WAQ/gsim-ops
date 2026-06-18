@@ -270,11 +270,25 @@ qr 碰不到 —— 靠 `${DATA_ROOT}` 由 ops 注入 (qr config 里只有占位
 
 > 样例 combo: `tmp/CombolhwEqualRawV23/` (A 模型型), `tmp/ComboTestLinear/` (C 纯线性)。验证日志: `tmp/combo-test-log.md`。
 
+## 已知限制 (当前不支持)
+
+**跨 combo 依赖**: 某些 opt 形态不自包含, 而是用 `AlphaLoad` 读**另一个 combo** dump 的每日 position
+(`alphaDir` 指向上游 combo 的 `combo_eq/position/`), 再过优化器。
+实例: `wbai/prod_combo_mhe_tl_fguo662_wangpy_cut2601` 依赖 `mhe/combo_mhe_tl_fguo662_wangpy_cut2601`
+(前者是后者的 opt 形态)。
+
+问题: 本规范假设 combo 自包含 (predict → 自己的 .npy → backtest)。跨 combo 依赖下, 下游的样本外评估
+要求上游也在样本外重跑 (产出新 position), 涉及依赖解析 + 拓扑序调度, 当前接口不覆盖。
+
+当前处理: **暂不支持依赖链**。需要 opt 的 combo, 应把上游逻辑内联进自己的 config (自包含),
+或等依赖链模式清晰后单独设计。相关: 线性组合除 `AlphaComboEqual` 外还有 `AlphaLoad` (读外部 position) 等形式, 一并搁置。
+
 ## 未来扩展
 
 - ops 注入逻辑实现 (读 config 模板 → 替占位符 → 算 H → 跑 gsim) 做成 `ops combo` 子命令
 - 多 combo 批量评估 + 排名 (对接 tmp/combo_doc.md 的滚动评估制度)
 - 样本内优化器 API (研究员自助查样本内优化后表现, 绝不返回样本外)
+- 跨 combo 依赖链支持 (见上"已知限制")
 
 ---
 
