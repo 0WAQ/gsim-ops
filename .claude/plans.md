@@ -419,3 +419,28 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 **触发条件**:
 - 立即做的前提:Phase D/E 准备启动,需要增量来压成本
 - 或者:有人开始关心日更全量重写的 S3 流量费用
+
+
+## redis-jfs 6380 maxclients 根因治理 (2026-06-23 事故后, Not Started)
+
+事故详情见 memory `project_incident_redis_maxclients`。已治标 (maxclients 10000→50000 + 持久化到 `/etc/redis-jfs/redis.conf`),根因未除。
+
+**根因**: 160/150 是 512 核机器,juicefs (go-redis) 连接池按核数 × 倍数算,单 mount 进程持有 5000+ socket 连到共生的 6380 (JFS metadata + ops state)。默认 maxclients 10000 对这规模从一开始就低。不是泄漏,是配置/硬件规模不匹配。
+
+**待办 (按性价比排序)**:
+
+1. **给 juicefs mount 设连接池上限** —— 从源头压连接数,比无限调大 maxclients 治本。
+   - 查 juicefs 1.3.1 mount 是否支持 `--max-conns` / metadata 连接池相关参数 (go-redis `PoolSize` 默认 `10 * runtime.GOMAXPROCS`,512 核 → 5120)。
+   - 若支持: 在所有 mount 点 (160/150/144) 显式设一个合理上限 (如 256/512),重挂生效。重挂会短暂中断该机 JFS,排期做。
+   - 若不支持: 只能靠 maxclients 留足余量 + 监控。
+
+2. **评估 ops state 从 6380 拆到独立 redis** —— 消除"juicefs 池打满 → ops 跟着挂"的共生耦合。
+   - ops state 量极小 (state hash + index set + checks list),单独跑个轻量 redis (甚至复用 6379) 即可。
+   - 改 `config.yaml` 的 `state.redis.url` 指向新实例 + 数据迁移 (state-* key 量小,SCAN+MIGRATE 或重建)。
+   - 权衡: 多一个要维护的 redis vs 故障隔离。优先级看共生事故是否再发。
+
+3. **连接数监控告警** —— 当前打满前无告警 (跟 server-topology "监控=人工" 一致)。
+   - 简单版: cron 每 5min `redis-cli INFO clients` 的 `connected_clients` 超阈值 (如 40000) 发飞书。
+   - 复用 `ops/infra/notify/feishu_send.py`。
+
+**触发条件**: 共生事故再发 → 做 1+2; 否则 1 (连接池上限) 随下次 JFS 维护窗口顺手做,3 可独立先上。
