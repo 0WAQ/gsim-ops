@@ -14,15 +14,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | server-160 | 10.9.100.160 | 北京托管机房 (IDC) | JFS master, ZFS pool `/tank/vault/`, redis-jfs:6380 master + sentinel:26380; **NFS owner** (`/datasvc/data/`, 导出给 150/145); **yifei L2 feature 生产节点** (每日 20:00 后) |
 | server-150 | 10.9.100.150 | 北京托管机房 (IDC) | JFS client + **NFS 客户端** (透明读 160 的 `/datasvc/data/`) + redis-jfs:6380 replica + sentinel:26380 |
 | server-145 | 10.9.100.145 | 北京托管机房 (IDC) | JFS client + **NFS 客户端** (`/datasvc/data/` 实际挂 160 NFS, 老说"数据节点不在 JFS 集群" 已校正, 实际两套都在) |
+| server-170 | 10.9.100.170 | 北京托管机房 (IDC) | JFS client (`/ext4/alphalib`, cache 100G); sentinel 客户端 (本机不跑 redis/sentinel); 与 yifei clickhouse 同盘 `/ext4` (2026-06-24 接入) |
 | intel-workstation-144 | 10.6.100.144 | 本地办公网 | JFS client (`/storage/vault/`, 跨段 LAN→IDC) + sentinel:26380 (纯投票); **本地 NFS owner** 导出给 10.6.100.145/146; **冷副本**, 只有 cc_2024 / cc_2025, 不在生产同步链路 |
 | local-145 | 10.6.100.145 | 本地办公网 | 本地 NFS 客户端 (挂 144) — 注意跟北京 10.9.100.145 同号但不同机 |
 | local-146 | 10.6.100.146 | 本地办公网 | 本地 NFS 客户端 (挂 144) |
 
-**网络划分**: 10.6/16 (本地办公网, 144/145/146) / 10.9/16 (北京 IDC, 160/150/145) / 10.12/16 (上海中信 IDC, 147)。三段互通但 144 ↔ IDC 走跨段路由, 带宽和延迟显著差于 IDC 内部。**写并发场景把生产留在 IDC**, 144 主要做研究 + 跨地域容灾验证。任何"机器间数据传输"的脚本要把 144 当 WAN 节点考虑(超时调宽、避免无理由的 chatty 协议)。
+**网络划分**: 10.6/16 (本地办公网, 144/145/146) / 10.9/16 (北京 IDC, 160/150/145/170) / 10.12/16 (上海中信 IDC, 147)。三段互通但 144 ↔ IDC 走跨段路由, 带宽和延迟显著差于 IDC 内部。**写并发场景把生产留在 IDC**, 144 主要做研究 + 跨地域容灾验证。任何"机器间数据传输"的脚本要把 144 当 WAN 节点考虑(超时调宽、避免无理由的 chatty 协议)。
 
 **数据同步**: rawdata 在 147 抓取, 每日增量 CSV → 北京 160, 各地独立 build_cc (**不是 cc bytes 镜像**, 是 rawdata 同步 + 各地各跑)。本地 144 是冷副本, 早期 CSV 一次性推过去自建 cc_2024/cc_2025, 不在生产同步链路内。详见 memory [[reference-server-topology]]。
 
-**JFS / Sentinel 拓扑**(2026-06-05 上线): JuiceFS 挂载点共享 `/tank/vault/alphalib`(144 上是 `/storage/vault/alphalib`), metadata 走 `redis-sentinel://160:26380,150:26380,144:26380/mymaster/0`。Redis Sentinel 实测 failover 9.12 s。详见 `scripts/juicefs-poc/README.md` + `.claude/plans.md` Phase B-8/C。
+**JFS / Sentinel 拓扑**(2026-06-05 上线): JuiceFS 挂载点共享 alphalib 卷,挂载点 per-host 可不同(160/150 `/tank/vault/alphalib`,144 `/storage/vault/alphalib`,170 `/ext4/alphalib`); metadata 走 `redis-sentinel://160:26380,150:26380,144:26380/mymaster/0`。Redis Sentinel 实测 failover 9.12 s。新 client 用 `scripts/juicefs-poc/join.sh` 接入(挂载点/cache per-host,sidecar 必须是 `<挂载点>.local`)。详见 `scripts/juicefs-poc/README.md` + `.claude/plans.md` Phase B-8/C。
 
 **JFS vs NFS 分工**: JFS 只服务 alphalib (因子库多机多写场景, 2026-06 新增); cc / dm / L2 feature 走老 NFS (单 owner 多读, 各地 owner 各管各的, 早期方案保留)。两套存储分场景共存。
 

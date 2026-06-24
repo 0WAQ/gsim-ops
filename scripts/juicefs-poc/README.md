@@ -179,6 +179,14 @@ ssh <client> 'sudo bash /tmp/juicefs-poc/join.sh --meta-host 10.9.100.160 --meta
 
 `join.sh` 末尾自动校验 sidecar symlink 的 target 等于本机 `JFS_LOCAL_DIR`,跨节点路径不一致会报错并提示。
 
+**⚠ join 后必须补 `alphalib-jfs.env`(否则 ops 跑不了)**:`join.sh` 把密码写进 `/etc/juicefs/alphalib.env`(不带 `-jfs`,client 名),但 `config.yaml` 的 `state.redis.password_file` 指向 `/etc/juicefs/alphalib-jfs.env`(带 `-jfs`,主节点 06-meta-migrate 后的名)。文件名对不上 → `ops` 启动 `sudo grep` 拿到空密码 → `redis.exceptions.AuthenticationError: Authentication required`。挂载本身不受影响,只有 ops state 读写炸。client 不跑 06-meta-migrate 所以不会自动生成带 `-jfs` 的名。补一份(内容同一密码)即可:
+
+```bash
+echo "META_PASSWORD=$(sudo grep -oP 'META_PASSWORD=\K.*' /etc/juicefs/alphalib.env)" \
+  | sudo tee /etc/juicefs/alphalib-jfs.env >/dev/null
+sudo chmod 600 /etc/juicefs/alphalib-jfs.env && sudo chown root:root /etc/juicefs/alphalib-jfs.env
+```
+
 ### Sentinel HA 部署(160/150/144)
 
 主节点 6380 实例起好之后接着部:
