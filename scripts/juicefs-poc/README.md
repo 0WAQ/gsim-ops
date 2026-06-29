@@ -365,6 +365,10 @@ JFS  /tank/vault/alphalib/        root:alpha-data 2755
 - [ ] sudo NOPASSWD wrapper(root-owned binary + 限定命令,完全去掉 sudo prompt)
 - [ ] MinIO root key rotation(PoC 用 root key 暴露过日志)
 - [ ] 删 prod 数据 `/mnt/storage/alphalib/`(上线稳定一周后)
+- [ ] **juicefs mount 连接池上限**:512 核机 go-redis 池默认 `10*GOMAXPROCS`≈5120,单 mount 顶满 6380。查 1.3.1 是否支持 `--max-conns` 类参数,所有 mount 点设上限重挂(2026-06-23 maxclients 打满事故根因,已临时调 50000)
+- [ ] **ops state 从 6380 拆独立 redis**:消除 juicefs 池打满→ops 跟着挂的共生耦合
+- [ ] **6380 连接数告警**:cron 查 `connected_clients` 超阈值发飞书(打满前无告警)
+  - 上三条详情见 `.claude/plans.md` "redis-jfs 6380 maxclients 根因治理" + memory `project_incident_redis_maxclients`
 
 ## 失败回退
 
