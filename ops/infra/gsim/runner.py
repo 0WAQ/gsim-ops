@@ -20,6 +20,13 @@ class BacktestError(Exception):
         return repr(self.args)
 
 
+class ScriptError(Exception):
+    """qr 自带脚本 (predict.py / train.py) 执行失败。"""
+    def __init__(self, script: str, stderr: str):
+        self.script = script
+        super().__init__(f"{script} failed: {stderr[:1000]}")
+
+
 class Runner:
     @staticmethod
     def run_bcorr(pnl_file: Path, config: Config) -> list[tuple[str, float]] | None:
@@ -115,3 +122,23 @@ class Runner:
 
         if result.returncode != 0:
             raise BacktestError(result.stderr)
+
+    @staticmethod
+    def run_script(script: Path, args: list[str], python: str, cwd: Path,
+                   config: Config, timeout: int | None = None) -> str:
+        """跑 qr 自带脚本 (combo 的 predict.py / train.py)。
+
+        用 `python` 指定的解释器 (combo 场景固定 gsim venv, 有 torch/lgbm),
+        区别于 run_backtest 用 config.python_path (ops/gsim 工具的解释器)。
+        失败抛 ScriptError, 成功返回 stdout。
+        """
+        result = subprocess.run(
+            [python, str(script), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout or config.timeout,
+            cwd=str(cwd),
+        )
+        if result.returncode != 0:
+            raise ScriptError(str(script), result.stderr)
+        return result.stdout

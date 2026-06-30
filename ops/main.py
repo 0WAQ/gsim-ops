@@ -17,6 +17,7 @@ from ops.cli.recheck import add_recheck_subparser
 from ops.cli.approve import add_approve_subparser
 from ops.cli.cancel import add_cancel_subparser
 from ops.cli.clear import add_clear_subparser
+from ops.cli.combo import add_combo_subparser
 from ops.infra.sudo import maybe_elevate, ensure_redis_password
 from ops.utils.log import logger
 
@@ -49,6 +50,7 @@ def main():
         add_approve_subparser(subparsers)
         add_cancel_subparser(subparsers)
         add_clear_subparser(subparsers)
+        add_combo_subparser(subparsers)
 
         args = parser.parse_args()
         # 新 shell 下 OPS_STATE_REDIS_PASSWORD 没 export 时,

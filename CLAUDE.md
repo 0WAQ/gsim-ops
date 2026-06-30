@@ -78,6 +78,8 @@ uv run ops cancel -u wbai -y         # 批量,跳过确认
 uv run ops clear AlphaXxx            # 清 staging 孤儿(state 无 record 的目录)
 uv run ops clear                     # 扫全部孤儿
 uv run ops clear -u lhw -y           # 按 author 推断过滤,跳过确认
+uv run ops combo run <dir> --start 20250102 --end 20251231          # combo 端到端代测 (predict+backtest)
+uv run ops combo run <dir> --start 20241210 --end 20241231 --predict-start 20241201 --stats simple  # 留 warmup, 单 stats
 ```
 
 No test suite exists. Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
@@ -102,6 +104,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `approve` | 人工审批 correlation 失败因子,REJECTED → ACTIVE(不重跑 check) | `ops/services/approve/` |
 | `cancel` | 撤回未入库的 SUBMITTED 因子(删 staging + 硬删 state record) | `ops/services/cancel/` |
 | `clear` | 清理 staging 孤儿(state 无 record 的目录,submit parse 失败留下) | `ops/services/clear/` |
+| `combo` | QR combo 端到端代测(predict+backtest, 占位符注入, 无状态) | `ops/services/combo/` |
 | `check` | 7-stage validation pipeline (runs in-place on staging) | `ops/services/check/` |
 | `run` | Run backtest on factors in library | `ops/services/run/` |
 | `status` | Query factor lifecycle state | `ops/services/status/` |

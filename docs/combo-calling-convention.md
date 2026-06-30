@@ -315,6 +315,7 @@ qr 碰不到 —— 靠 `${DATA_ROOT}` 由 ops 注入 (qr config 里只有占位
 | 主产物名固定 combo.npy (不传 --out-name 默认产出 combo.npy) | ✓ |
 | 四份 config.<stats>.xml 共存 (simple/bench/layer/opt 各跑各落) | ✓ 四 stats 各占子目录 |
 | C 形态纯线性 (无 predict/无 ${RUN_DIR}, cc 现成因子组合) | ✓ 直接 backtest 跑通 |
+| **`ops combo run` 端到端** (模型型 predict→backtest / 纯线性直接 backtest / 四 stats 含 opt) | ✓ 命令产出与手动一致 (simple sharpe 4.96 一字不差) |
 
 > 样例 combo: `tmp/CombolhwEqualRawV23/` (A 模型型), `tmp/ComboTestLinear/` (C 纯线性)。验证日志: `tmp/combo-test-log.md`。
 
@@ -331,9 +332,18 @@ qr 碰不到 —— 靠 `${DATA_ROOT}` 由 ops 注入 (qr config 里只有占位
 当前处理: **暂不支持依赖链**。需要 opt 的 combo, 应把上游逻辑内联进自己的 config (自包含),
 或等依赖链模式清晰后单独设计。相关: 线性组合除 `AlphaComboEqual` 外还有 `AlphaLoad` (读外部 position) 等形式, 一并搁置。
 
+## 已实现
+
+- **`ops combo run <combo_dir>` 子命令** (`ops/services/combo/`, `ops/cli/combo.py`): 端到端编排 —
+  形态自动判定 (有 `predict/` = 模型型) → [predict, 用 gsim venv] → 逐 stats 占位符注入 →
+  gsim backtest → simsummary。无状态, 产物落 `<combo_dir>/runs/`。
+  用法: `ops combo run <dir> --start <s> --end <e> [--predict-start <ws>] [--stats simple,bench,layer,opt]`。
+  实现细节见 `ops/services/combo/CLAUDE.md`。
+
 ## 未来扩展
 
-- ops 注入逻辑实现 (读 config 模板 → 替占位符 → 算 H → 跑 gsim) 做成 `ops combo` 子命令
+- `ops combo train` (滚动训练阶段, ops 用 OS 数据滚动训 checkpoint, 见"滚动训练"章节; `combo run` 已预留子命令结构)
+- `H` (日期数) 动态计算注入 (现靠 ProdNpyLoad 默认 3900 = cc_2025; cc 变长时加)
 - 多 combo 批量评估 + 排名 (对接 tmp/combo_doc.md 的滚动评估制度)
 - 样本内优化器 API (研究员自助查样本内优化后表现, 绝不返回样本外)
 - 跨 combo 依赖链支持 (见上"已知限制")
