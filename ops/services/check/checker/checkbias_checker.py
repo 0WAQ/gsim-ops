@@ -11,6 +11,13 @@ FIREWALL_FILE = Path(__file__).parent / "firewall.py"
 ALWAYS_GUARD = {'valid'}
 FIREWALL_PY_SUFFIX = "_firewall.py"
 
+# 框架级静态数据 tag:不随交易日变化、开盘前已知、instrument 维静态属性
+# (如 ipodate 每只股票上市日期,是 1D NIO_VECTOR)。这类数据不含未来信息,
+# factor 常用 self.ipodate[:n] 按票维切片,firewall 会把票维下标误判成日期前视。
+# 按 getData tag(而非 attr 名)精确排除:无论 QR 把它命名成 self.ipo / self.ipodate,
+# 命中 tag 就不注入 firewall。valid 已由 ALWAYS_GUARD/ALWAYS_ALLOW_DI 单独处理。
+STATIC_TAGS = {'ipodate'}
+
 
 class _GenerateDecoratorInjector(ast.NodeTransformer):
     def __init__(self, delay: int, data_attrs: set[str]):
@@ -56,6 +63,10 @@ class _GetDataAttrCollector(ast.NodeVisitor):
             return
         target = node.targets[0]
         if self._is_self_attr(target) and self._is_getdata_call(node.value):
+            # 命中框架级静态数据 tag(如 ipodate)的不收集 → 不注入 firewall,
+            # 避免票维静态向量被误判为日期前视。
+            if self._getdata_tag(node.value) in STATIC_TAGS:
+                return
             self.attrs.add(target.attr) # type: ignore
 
     def _is_self_attr(self, node):
@@ -71,6 +82,18 @@ class _GetDataAttrCollector(ast.NodeVisitor):
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Call):
             return self._is_getdata_func(node.value.func)
         return False
+
+    def _getdata_tag(self, node) -> str | None:
+        """Extract the first string arg of the getData(...) call, or None.
+
+        Handles both `dr.getData('tag')` and `dr.getData('tag').data`.
+        """
+        call = node.value if isinstance(node, ast.Attribute) else node
+        if isinstance(call, ast.Call) and call.args:
+            first = call.args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                return first.value
+        return None
 
     def _is_getdata_func(self, node):
         return (isinstance(node, ast.Attribute)

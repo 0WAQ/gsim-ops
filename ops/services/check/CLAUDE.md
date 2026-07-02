@@ -42,6 +42,7 @@ Uses AST to inject `@DataFirewall(delay=X, data_attrs={...})` decorator onto the
 
 **`_SafeProxy` behavior**:
 - `__getitem__`: validates date index against `max_di`, truncates data along axis 0 for ndim >= 2 (1D arrays not truncated — may be instrument-dimension)
+- **框架级静态数据按 getData tag 排除**:`checkbias_checker.STATIC_TAGS`(当前 `{'ipodate'}`)里的 tag,collector 收集 attr 时直接跳过,**不注入 firewall**。这类数据(如 `ipodate` 每股上市日期,1D `NIO_VECTOR`,长度=instrument 数)不随交易日变化、开盘前已知,factor 常 `self.ipodate[:n]` 按票维切片,若被 wrap 会把票维下标误判成日期前视。按 tag(非 attr 名)排除,QR 命名成 `self.ipo`/`self.ipodate` 都兜得住。`valid` 是另一条路径(`ALWAYS_GUARD`/`ALWAYS_ALLOW_DI`,注入但放行 `[di]`)。
 - `__setitem__`: delegates directly to underlying data (supports `self.alpha[idx] = value`)
 - `__getattr__`: truncates sub-arrays (`.data`, ndarray attributes); returns original value for metadata (`.shape`, `.dtype`, `.ndim`) to avoid breaking buffer allocation
 
