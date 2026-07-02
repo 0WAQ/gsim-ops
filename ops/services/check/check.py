@@ -27,6 +27,7 @@ from ops.utils.live_table import LiveDriver, Status, make_factor_rows
 
 from .xml_prepare import *
 from .reconcile import reconcile
+from .report import write_check_report
 from .checker.base import *
 from .checker.validate_checker import ValidateChecker
 from .checker.checkbias_checker import CheckbiasChecker
@@ -57,6 +58,10 @@ class CheckerPipeline:
         self.config.alpha_dump.mkdir(exist_ok=True)
         self.config.alpha_pnl.mkdir(exist_ok=True)
         self.retry = retry
+
+        # kept for report file naming (see .report.write_check_report)
+        self._user = users[0] if users else None
+        self._factor = factor
 
         self.metadatas = self._scan_factors(users, factor)
         for md in self.metadatas:
@@ -473,8 +478,14 @@ class CheckerPipeline:
             warn(f"⚠ 异常 : {errored:>4}  (留在 staging,可 recheck)")
         if locked > 0:
             warn(f"⚠ 占用 : {locked:>4}  (被其他进程持有,跳过)")
+
+        report_path = write_check_report(
+            self.config, self.config_path, rows,
+            user=self._user, factor=self._factor,
+        )
+        info(f"报告 : {report_path}")
         if failed > 0 or errored > 0:
-            info("完整失败原因见 ~/.cache/ops/logs/ops.log")
+            info("完整失败原因见上述报告 / ~/.cache/ops/logs/ops.log")
         bottom()
 
 

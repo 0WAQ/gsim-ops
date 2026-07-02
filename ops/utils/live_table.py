@@ -78,6 +78,7 @@ class FactorRow:
     current_status: Status = Status.PENDING
     outcome: str = ""           # "→ lib" / "→ recycle/checkbias: corr 0.87" / "locked" / ...
     outcome_style: str = ""
+    outcome_kind: str = ""      # clean classification for reports: pass|fail|error|locked
     started_at: float | None = None  # monotonic; reserved for future timing column
     # Persistent Spinner instance reused across Live renders so the animation
     # actually advances. Recreating a Spinner each render resets it to frame 0
@@ -160,6 +161,7 @@ class LiveDriver:
                 return
             row.outcome = note
             row.outcome_style = style
+            row.outcome_kind = _OUTCOME_COUNTER.get(outcome_kind, "error")
             row.spinner = None
             counter_key = _OUTCOME_COUNTER.get(outcome_kind, "error")
             self._counts[counter_key] += 1
