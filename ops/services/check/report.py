@@ -1,17 +1,17 @@
 """Structured check report.
 
-`ops check` 跑完落一份结构化 JSON 到 ~/.cache/ops/reports/,给 QR 发失败原因用。
-完整 fail_reason(不截断)从 Redis check_history 读,不用 UI rows 里被截断的 note。
+`ops check` 跑完落一份结构化 JSON 到 docs/reports/check/,给 QR 发失败原因用,
+也方便随仓库一起提交归档。完整 fail_reason(不截断)从 Redis check_history 读,
+不用 UI rows 里被截断的 note。
 
-产物是可再生的运行记录(数据都在 Redis + metrics.json),放 cache 语义正好,
-不进 git、不进 JFS 共享区、无需提权。一次 run 一份,不 rotation。
+一次 run 一份,不 rotation。数据本身可再生(Redis + metrics.json),但报告随
+仓库版本化保留,方便回溯与转发。
 """
 import json
 from datetime import datetime
 from pathlib import Path
 
-from ops.infra.config import Config
-from ops.infra.cache import CACHE_ROOT
+from ops.infra.config import Config, get_project_root
 from ops.infra.store import default_store
 from ops.services.list.metrics import load_metrics
 from ops.utils.live_table import FactorRow
@@ -21,7 +21,7 @@ REPORT_VERSION = 1
 
 
 def _report_dir() -> Path:
-    d = CACHE_ROOT / "reports"
+    d = get_project_root() / "docs" / "reports" / "check"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

@@ -17,11 +17,11 @@ say so and point at `pipeline-debugger`.
 Two possible sources — the caller tells you which, or you pick by what exists:
 
 **A. Structured JSON report (preferred)** — `ops check` writes one JSON per run to
-`~/.cache/ops/reports/check-<scope>-<ts>.json` (`<scope>` = factor name | user | `all`).
-Latest:
+`docs/reports/check/check-<scope>-<ts>.json` (repo-relative; `<scope>` = factor name |
+user | `all`). Latest:
 
 ```bash
-ls -t ~/.cache/ops/reports/check-*.json | head -1
+ls -t docs/reports/check/check-*.json | head -1
 ```
 
 The caller usually passes a specific file path. If none given, take the latest.

@@ -15,16 +15,16 @@ the `pipeline-debugger` agent instead.
 
 1. **Locate the data source**
 
-   **A. Structured JSON report (preferred)** — `~/.cache/ops/reports/check-<scope>-<ts>.json`
-   (`<scope>` = factor name | user | `all`).
+   **A. Structured JSON report (preferred)** — `docs/reports/check/check-<scope>-<ts>.json`
+   (repo-relative; `<scope>` = factor name | user | `all`).
 
    - No argument → latest report overall:
      ```bash
-     ls -t ~/.cache/ops/reports/check-*.json | head -1
+     ls -t docs/reports/check/check-*.json | head -1
      ```
    - Argument is a user (e.g. `wbai`) → latest for that scope:
      ```bash
-     ls -t ~/.cache/ops/reports/check-wbai-*.json | head -1
+     ls -t docs/reports/check/check-wbai-*.json | head -1
      ```
    - Argument is a full path → use it directly.
 
@@ -61,5 +61,5 @@ the `pipeline-debugger` agent instead.
 /analyze-report              # latest JSON report overall
 /analyze-report wbai         # latest JSON for wbai; if none, fall back to ops.log
 /analyze-report xmf          # a user with no JSON yet → analyze from ops.log
-/analyze-report ~/.cache/ops/reports/check-wbai-20260702-113331.json   # specific file
+/analyze-report docs/reports/check/check-wbai-20260702-113331.json   # specific file
 ```
