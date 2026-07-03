@@ -26,6 +26,7 @@ class FactorMeta:
     code_lines: int = 0
 
     frequency: str = "daily"
+    discovery_method: str | None = None
 
     submitted_at: str | None = None
     submitted_by: str | None = None

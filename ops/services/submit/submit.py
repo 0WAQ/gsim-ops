@@ -90,6 +90,12 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
         error(f"  ✘  {staging_dir.name} parse failed: {e}")
         return False
 
+    if meta.discovery_method not in ("automated", "manual"):
+        error(f"  ✘  {staging_dir.name} discovery_method 缺失或非法: "
+              f"{meta.discovery_method!r}(须为 automated / manual,请在 "
+              f"<Description discovery_method=...> 补全)")
+        return False
+
     meta_path = staging_dir / META_FILENAME
     meta.save(meta_path)
 

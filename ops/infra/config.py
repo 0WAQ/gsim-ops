@@ -58,6 +58,8 @@ class Config:
         self.pnl_prod_path = Path(config["path"]["pnl_prod_path"])
         self.pnl_pool_path = Path(config["path"]["pnl_pool_path"])
         self.pnl_alphalib = Path(config["path"]["pnl_alphalib"])
+        self.pnl_automated = Path(config["path"]["pnl_automated"])
+        self.pnl_manual = Path(config["path"]["pnl_manual"])
         self.python_path = Path(config["path"]["python_path"])
 
         self.alpha_src = Path(config["path"]["alpha_src"])

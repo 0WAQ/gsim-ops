@@ -23,6 +23,8 @@ class AlphaMetadata:
         self.key: AlphaKey = AlphaKey(user, date, self.name)
 
         self.delay = int(self.xml_config["gsim"]["Portfolio"]["Alpha"].get("@delay", 1))
+        desc = self.xml_config["gsim"]["Portfolio"]["Alpha"].get("Description", {}) or {}
+        self.discovery_method = desc.get("@discovery_method")
         self.start_date: str = self.xml_config["gsim"]["Universe"]["@startdate"]
         self.end_date: str = self.xml_config["gsim"]["Universe"]["@enddate"]
         self.pnl_file = config.pnl_path / self.name

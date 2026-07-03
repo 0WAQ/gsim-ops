@@ -172,6 +172,9 @@ def parse_factor(
     frequency = _infer_frequency(tables, has_curve)
     code_lines = _count_lines(py_file)
 
+    # 原样提取,不校验(backfill 也走这里,存量因子无此字段);校验放 submit_one
+    discovery_method = desc.get("discovery_method")
+
     return FactorMeta(
         name=name,
         author=author,
@@ -187,6 +190,7 @@ def parse_factor(
         datasources={"fields": fields, "tables": tables},
         code_lines=code_lines,
         frequency=frequency,
+        discovery_method=discovery_method,
         submitted_by=submitted_by,
         submitted_at=submitted_at,
     )

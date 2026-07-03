@@ -56,6 +56,8 @@ class CheckerPipeline:
         self.config.alpha_src.mkdir(exist_ok=True)
         self.config.alpha_dump.mkdir(exist_ok=True)
         self.config.alpha_pnl.mkdir(exist_ok=True)
+        self.config.pnl_automated.mkdir(parents=True, exist_ok=True)
+        self.config.pnl_manual.mkdir(parents=True, exist_ok=True)
         self.retry = retry
 
         # kept for report file naming (see .report.write_check_report)
@@ -157,6 +159,17 @@ class CheckerPipeline:
         if pnl_dst.exists():
             shutil.rmtree(pnl_dst)
         shutil.move(factor.pnl_file, pnl_dst)
+
+        # 按因子来源 (discovery_method) 把 pnl 额外分流一份到 pnl_automated / pnl_manual。
+        # factor.pnl_file 此时已被 move 走,从入库后的 pnl_dst 拷。pnl 是单文件,copy2。
+        bucket = {"automated": self.config.pnl_automated,
+                  "manual": self.config.pnl_manual}.get(factor.discovery_method)
+        if bucket is not None:
+            bucket.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(pnl_dst, bucket / factor.name)
+        else:
+            logger.warning("discovery_method 缺失/非法, 跳过 pnl 分流 factor={} value={}",
+                           factor.name, factor.discovery_method)
 
     def on_reject(self, factor: AlphaMetadata, e: CheckFail):
         """因子质量失败:src 归档到 alpha_src(与 ACTIVE 同库,状态由 state 区分),

@@ -27,7 +27,11 @@ path:
   alpha_pnl: ${storage}/alphalib/alpha_pnl
   alpha_feature: ${storage}/alphalib/alpha_feature
   staging: ${storage}/alphalib/staging
-  recycle: ${storage}/recycle   # 已退役 (2026-07),保留字段兼容
+  recycle: ${storage}/recycle
+
+  # pnl 按因子来源 (discovery_method) 分流沉淀,入库成功后各拷一份
+  pnl_automated: ${storage}/alphalib/pnl_automated
+  pnl_manual: ${storage}/alphalib/pnl_manual
 
 # 脚本
 script:

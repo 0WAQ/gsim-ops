@@ -2,7 +2,7 @@
 #
 # 把 alphalib 五条数据路径(alpha_src / alpha_dump / alpha_pnl / alpha_feature /
 # staging)指向 JuiceFS 挂载点 /tank/vault/alphalib,其它路径(dropbox / gsim /
-# /datasvc)保持本地。recycle 已退役 (2026-07),字段保留但不再使用。
+# /datasvc)保持本地。recycle 也放进 JuiceFS,保持入库链路全在同一卷上。
 #
 # 用法:uv run ops <cmd> -c config.juicefs.yaml ...
 # 不要拿来跑生产 —— sync 段被注释掉了,且仅供 JuiceFS PoC 第二轮使用。
@@ -32,13 +32,17 @@ path:
   checkpoint_path: ${workspace}/dropbox/checkpoint
   nio_data_path: /datasvc/data/cc_2025
 
-  # 以下五条指向 JuiceFS(recycle 已退役,见下方注释)
+  # 以下五条 + recycle 全部指向 JuiceFS
   alpha_src: ${alphalib_root}/alpha_src
   alpha_dump: ${alphalib_root}/alpha_dump
   alpha_pnl: ${alphalib_root}/alpha_pnl
   alpha_feature: ${alphalib_root}/alpha_feature
   staging: ${alphalib_root}/staging
-  recycle: ${alphalib_root}/recycle   # 已退役 (2026-07),保留字段兼容;check 不再写,reconcile 已下线
+  recycle: ${alphalib_root}/recycle
+
+  # pnl 按因子来源 (discovery_method) 分流沉淀,入库成功后各拷一份
+  pnl_automated: ${alphalib_root}/pnl_automated
+  pnl_manual: ${alphalib_root}/pnl_manual
 
 # 脚本
 script:
