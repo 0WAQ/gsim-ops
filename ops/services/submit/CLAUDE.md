@@ -41,7 +41,7 @@ staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
 
 ## Two Persistence Layers
 
-- **`meta.json`** inside each factor directory — the factor's *identity card*. Fields: name, author, birthday, universe, category, delay, backdays, dump_alpha, has_intraday_curve, operations, declared_data_modules, datasources (fields+tables), code_lines, frequency, submitted_by, submitted_at. Travels with the factor through staging → alpha_src. Defined in `ops/core/factormeta.py`. Persistent — must not be regenerated lossily.
+- **`meta.json`** inside each factor directory — the factor's *identity card*. Fields: name, author, birthday, universe, category, delay, backdays, dump_alpha, has_intraday_curve, operations, declared_data_modules, datasources (fields+tables), code_lines, frequency, discovery_method, submitted_by, submitted_at. Travels with the factor through staging → alpha_src. Defined in `ops/core/factormeta.py`. Persistent — must not be regenerated lossily. `discovery_method` (`automated`/`manual`) 来自 XML `<Description @discovery_method>`,由 `submit_one` 硬校验(缺失/非法拒收);legacy 存量因子该字段为 `None`。
 - **`~/.cache/ops/factor_state.json`** — per-host lifecycle state (FactorRecord: name, author, status, updated_at, submitted_at/by, history of CheckRecord). JSON backend with fcntl locking; can be rebuilt from meta.json + directory location.
 
 ## Backfilled Factors

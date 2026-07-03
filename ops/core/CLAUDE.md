@@ -109,6 +109,8 @@ path:
   recycle:                         # 已退役 (2026-07),保留字段兼容;不再有因子落此
   pnl_prod_path:                   # Gsim production PNL
   pnl_alphalib:                    # Archive PNL
+  pnl_automated:                   # 机器挖掘因子 pnl 池 (discovery_method=automated),archive 时分流
+  pnl_manual:                      # 人工挖掘因子 pnl 池 (discovery_method=manual)
 script:
   run_script:                      # Gsim backtest runner
   simsummary_script:               # PNL summary tool

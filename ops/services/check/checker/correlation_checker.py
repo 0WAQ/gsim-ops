@@ -1,6 +1,8 @@
+from pathlib import Path
+
 from .base import *
 from ops.infra.config import Config
-from ops.infra.gsim.runner import Runner
+from ops.infra.gsim.runner import Runner, resolve_bcorr_pools
 from ops.core.alpha.metadata import AlphaMetadata
 from ops.core.alpha.results.correlation import *
 
@@ -40,18 +42,20 @@ class CorrelationChecker(Checker):
             v.append(f"tvr%={m.tvr:.2f} > {cap} (delay={delay})")
         return v
 
-    def _get_prod_factor_metrics(self, factor_name: str) -> Metrics | None:
-        """获取生产因子库指标 (带缓存)"""
+    def _get_prod_factor_metrics(self, factor_name: str,
+                                 pools: list[Path]) -> Metrics | None:
+        """获取竞品因子指标 (带缓存);在同类对比池里逐个找 pool/factor_name"""
         if factor_name in self._prod_metrics_cache:
             return self._prod_metrics_cache[factor_name]
-        factor_path = self.config.pnl_prod_path / factor_name
-        if not factor_path.exists():
-            return None
-        
-        metrics = Runner.run_simsummary(factor_path, self.config)
-        if metrics:
-            self._prod_metrics_cache[factor_name] = metrics
-        return metrics
+        for pool in pools:
+            factor_path = pool / factor_name
+            if not factor_path.exists():
+                continue
+            metrics = Runner.run_simsummary(factor_path, self.config)
+            if metrics:
+                self._prod_metrics_cache[factor_name] = metrics
+                return metrics
+        return None
     
     def _check_beat(self, metrics: Metrics, other: Metrics):
         """检查是否打败竞争因子 (至少2项优于)"""
@@ -67,8 +71,11 @@ class CorrelationChecker(Checker):
         return win_count >= 2
     
     def check(self, factor: AlphaMetadata) -> CorrResult:
+        # 0. 按因子来源解析同类对比池 (automated/manual 各比各的, legacy 回退全库)
+        pools = resolve_bcorr_pools(self.config, factor.discovery_method)
+
         # 1. 运行 bcorr
-        corrs = Runner.run_bcorr(factor.pnl_file, self.config)
+        corrs = Runner.run_bcorr(factor.pnl_file, self.config, pools=pools)
         if corrs is None:
             raise CorrelationSkip("bcorr 运行失败")
         if not corrs:
@@ -97,7 +104,7 @@ class CorrelationChecker(Checker):
         
         # 7. 检查是否能打败所有高相关因子
         for competitor_name, corr in high_corr_factors:
-            competitor_metrices = self._get_prod_factor_metrics(competitor_name)
+            competitor_metrices = self._get_prod_factor_metrics(competitor_name, pools)
             if not competitor_metrices:
                 continue
 

@@ -8,7 +8,7 @@
 3. **Long Backtest** - Full historical backtest (20150101-20251231), pure run, no checks
 4. **Compliance** - Position limits (max 5% per stock), min stock counts (50 long, 50 short, 100 total)
 5. **Correlation** - 相关性 + 业绩门槛 (单一 stage,见下)
-6. **Archive** - Run simsummary, save metrics to index, move to library; Fail: mark REJECTED (src 归档到 alpha_src)
+6. **Archive** - Run simsummary, save metrics to index, move to library; 按 `discovery_method` 把 pnl 额外拷一份到 `pnl_automated/` 或 `pnl_manual/` (仅入库成功时,REJECTED 不拷;来源未知则 warn 跳过);Fail: mark REJECTED (src 归档到 alpha_src)
 
 **Correlation stage 门槛** (`checker/correlation_checker.py`):
 
@@ -20,6 +20,8 @@
 | bcorr | < 阈值 否则需打败竞品 | `correlation.corr_threshold` (默认 0.7) |
 
 `tvr` 上限按因子 `<Alpha @delay>` 选 d0/d1。任一项不达标 → `CorrelationFail` (REJECTED,日志含违反项,例 `tvr%=55.00 > 50.0 (delay=1)`)。
+
+**bcorr 按因子来源分池** (`discovery_method`):bcorr 只在同类因子间比较,人工因子和机器因子互不撞车。`resolve_bcorr_pools(config, discovery_method)` (`infra/gsim/runner.py`) 决定对比池:`automated` → `pnl_automated/`,`manual` → `pnl_manual/`,来源未知 (legacy 因子 meta/XML 无此字段) 回退全库 (`pnl_prod_path` + `pnl_alphalib`,即分类前旧行为)。高相关时"打败竞品"的竞品业绩 (`_get_prod_factor_metrics`) 也从同类池取。`discovery_method` 由 `AlphaMetadata` 从 XML `<Description @discovery_method>` 读入。`run_bcorr(pnl, config, pools=None)` 缺省 pools 时仍走全库 (`ops list --refresh-bcorr` 未分池,保持全库统计)。
 
 **Failure semantics**:
 - validate / long_backtest fail → revert to SUBMITTED, factor stays in staging (environmental/config issue, retry via `ops check --retry`)

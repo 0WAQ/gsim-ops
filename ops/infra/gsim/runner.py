@@ -27,42 +27,47 @@ class ScriptError(Exception):
         super().__init__(f"{script} failed: {stderr[:1000]}")
 
 
+def resolve_bcorr_pools(config: Config, discovery_method: str | None) -> list[Path]:
+    """按因子来源返回 bcorr 对比池。
+
+    automated / manual 各自只和同类因子比;来源未知 (legacy 因子无此字段) 回退到
+    全库比较 (pnl_prod 生产池 + pnl_alphalib 全库),与分类前的旧行为一致。
+    """
+    if discovery_method == "automated":
+        return [config.pnl_automated]
+    if discovery_method == "manual":
+        return [config.pnl_manual]
+    return [config.pnl_prod_path, config.pnl_alphalib]
+
+
 class Runner:
     @staticmethod
-    def run_bcorr(pnl_file: Path, config: Config) -> list[tuple[str, float]] | None:
+    def run_bcorr(pnl_file: Path, config: Config,
+                  pools: list[Path] | None = None) -> list[tuple[str, float]] | None:
+        """对 pools 里的每个 pnl 目录各跑一次 bcorr,合并结果。
+
+        pools 缺省为 [pnl_prod_path, pnl_alphalib](全库比较,旧行为)。分类比较由
+        调用方传 resolve_bcorr_pools() 的结果。任一目录 bcorr 失败即返回 None。
+        """
+        if pools is None:
+            pools = [config.pnl_prod_path, config.pnl_alphalib]
         try:
-            result = subprocess.run(
-                [config.bcorr_script, str(pnl_file), str(config.pnl_prod_path)],
-                capture_output=True,
-                text=True,
-                timeout=config.timeout
-            )
-            if result.returncode != 0:
-                logger.warning("bcorr (vs pnl_prod) rc={} stderr={!r}", result.returncode, result.stderr[:500])
-                return None
-
-            # pnl_prod
             corrs: list[tuple[str, float]] = []
-            for line in result.stdout.strip().split('\n'):
-                match = re.match(r"^(\S+)\s+([-\d.]+)", line.strip())
-                if match:
-                    corrs.append((match.group(1), float(match.group(2))))
-
-            # alphalib
-            result = subprocess.run(
-                [config.bcorr_script, str(pnl_file), str(config.pnl_alphalib)],
-                capture_output=True,
-                text=True,
-                timeout=config.timeout
-            )
-            if result.returncode != 0:
-                logger.warning("bcorr (vs pnl_alphalib) rc={} stderr={!r}", result.returncode, result.stderr[:500])
-                return None
-            for line in result.stdout.strip().split('\n'):
-                match = re.match(r"^(\S+)\s+([-\d.]+)", line.strip())
-                if match:
-                    corrs.append((match.group(1), float(match.group(2))))
-
+            for pool in pools:
+                result = subprocess.run(
+                    [config.bcorr_script, str(pnl_file), str(pool)],
+                    capture_output=True,
+                    text=True,
+                    timeout=config.timeout
+                )
+                if result.returncode != 0:
+                    logger.warning("bcorr (vs {}) rc={} stderr={!r}",
+                                   pool, result.returncode, result.stderr[:500])
+                    return None
+                for line in result.stdout.strip().split('\n'):
+                    match = re.match(r"^(\S+)\s+([-\d.]+)", line.strip())
+                    if match:
+                        corrs.append((match.group(1), float(match.group(2))))
 
             return corrs
 
