@@ -1,0 +1,30 @@
+# ops Postgres — 派生层/未来因子库元数据存储
+# server-160 (JFS/Redis master 同机), Docker 部署, host 端口 15432 避开默认 5432
+# 数据用 named volume ops-pg-data (本地 ext4, 绝不放 JFS/网络FS)
+# 迁移/备份走 pg_dump 逻辑备份, 见 backup.sh
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: ops-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ops
+      POSTGRES_PASSWORD: ${OPS_PG_PASSWORD:?set OPS_PG_PASSWORD in .env}
+      POSTGRES_DB: ops
+      # 数据非敏感但仍用 scram
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports:
+      - "15432:5432"
+    volumes:
+      - ops-pg-data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ops -d ops"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ops-pg-data:
+    name: ops-pg-data

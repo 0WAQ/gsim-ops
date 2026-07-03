@@ -1,63 +1,28 @@
-import json
-import hashlib
 import os
-import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import datetime
 from pathlib import Path
 
 from tqdm import tqdm
 
 from ops.core.library import FactorInfo
 from ops.infra.config import Config
-from ops.infra.cache import cache_path
+from ops.infra.derived import default_derived_store
 from ops.infra.gsim.runner import Runner
 
-BCORR_VERSION = 1
 DEFAULT_WORKERS = max(1, min(16, (os.cpu_count() or 4) - 2))
 
 
-def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def _get_bcorr_path(config_path: Path) -> Path:
-    legacy_hash = hashlib.md5(str(config_path.resolve()).encode()).hexdigest()[:8]
-    library_id = Config.load(config_path).library_id
-    return cache_path(library_id, "bcorr.json", legacy_hash=legacy_hash)
+def _store(config_path: Path):
+    return default_derived_store(Config.load(config_path))
 
 
 def load_bcorr(config_path: Path) -> dict[str, dict]:
-    path = _get_bcorr_path(config_path)
-    if not path.exists():
-        return {}
-
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            data: dict = json.load(f)
-
-        if data.get("version") != BCORR_VERSION:
-            return {}
-
-        return data.get("bcorr", {})
-    except Exception:
-        return {}
-
-
-def _save_bcorr(config_path: Path, bcorr: dict[str, dict]) -> None:
-    path = _get_bcorr_path(config_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    now = _now_iso()
-    data = {
-        "version": BCORR_VERSION,
-        "created_at": time.time(),
-        "bcorr": {
-            name: {**v, "updated_at": now}
-            for name, v in bcorr.items()
-        },
-    }
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    out: dict[str, dict] = {}
+    for name, rec in _store(config_path).get_all().items():
+        if rec.max_bcorr is None:
+            continue
+        out[name] = {"max_bcorr": rec.max_bcorr, "max_bcorr_factor": rec.max_bcorr_factor}
+    return out
 
 
 def _compute_max_bcorr(factor: FactorInfo, config: Config) -> dict | None:
@@ -89,11 +54,11 @@ def refresh_bcorr(
     factors: list[FactorInfo], config: Config, config_path: Path,
     workers: int = DEFAULT_WORKERS,
 ) -> dict[str, dict]:
-    bcorr = load_bcorr(config_path)
+    # Workers only compute (no store handle in subprocesses); the parent writes.
+    store = _store(config_path)
     targets = [f for f in factors if f.has_pnl]
     if not targets:
-        _save_bcorr(config_path, bcorr)
-        return bcorr
+        return load_bcorr(config_path)
 
     payload = [(f.name, f.pnl_path, f.has_pnl, config_path) for f in targets]
     with ProcessPoolExecutor(max_workers=workers) as ex:
@@ -101,10 +66,9 @@ def refresh_bcorr(
         for fut in tqdm(as_completed(futures), total=len(futures), desc="bcorr"):
             name, result = fut.result()
             if result:
-                bcorr[name] = result
+                store.upsert_bcorr(name, result["max_bcorr"], result["max_bcorr_factor"])
 
-    _save_bcorr(config_path, bcorr)
-    return bcorr
+    return load_bcorr(config_path)
 
 
 def merge_bcorr(
@@ -116,23 +80,4 @@ def merge_bcorr(
 
 
 def update_bcorr(config_path: Path, name: str, max_bcorr: float, max_bcorr_factor: str) -> None:
-    path = _get_bcorr_path(config_path)
-    data: dict = {"version": BCORR_VERSION, "created_at": time.time(), "bcorr": {}}
-
-    if path.exists():
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            pass
-
-    data.setdefault("bcorr", {})[name] = {
-        "max_bcorr": max_bcorr,
-        "max_bcorr_factor": max_bcorr_factor,
-        "updated_at": _now_iso(),
-    }
-    data["created_at"] = time.time()
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _store(config_path).upsert_bcorr(name, max_bcorr, max_bcorr_factor)

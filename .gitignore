@@ -17,3 +17,7 @@ tmp/
 mlflow.db
 mlruns/
 mlartifacts/
+
+# postgres deploy secrets / dumps
+scripts/postgres/.env
+scripts/postgres/dumps/

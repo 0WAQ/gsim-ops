@@ -126,3 +126,21 @@ state:
     url: redis-sentinel://10.9.100.160:26380,10.9.100.150:26380,10.6.100.144:26380/mymaster/0
     password_file: /etc/juicefs/alphalib-jfs.env
     password_key: META_PASSWORD
+
+# 派生层 (index/metrics/datasources/bcorr) 存 Postgres (server-160 docker, host 15432),
+# 三机共享 + 可查询, 替代 per-machine ~/.cache/ops/lib/<lib>/*.json.
+# 密码 fallback: postgres.password (yaml literal) > env OPS_DERIVED_PG_PASSWORD
+#              > password_file (key=OPS_PG_PASSWORD). 部署见 scripts/postgres/README.md.
+# 回退: 删掉本段 (或 backend: json) 即回到单机 JSON 缓存.
+# TODO(密码正规化): 现在 password_file 指向 repo 内 scripts/postgres/.env, 仅在 160 上存在.
+#   正式方案应像 redis 那样放 /etc/ 下 root-only 文件 + 分发到 150/144, 再由 ops sudo grep.
+#   150/144 上要跑 ops 前需先补密码文件.
+derived:
+  backend: postgres
+  postgres:
+    host: 10.9.100.160
+    port: 15432
+    dbname: ops
+    user: ops
+    password_file: /home/wbai/gsim-ops/scripts/postgres/.env
+    password_key: OPS_PG_PASSWORD

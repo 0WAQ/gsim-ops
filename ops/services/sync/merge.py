@@ -151,19 +151,18 @@ def _merge_nested(local_path: Path, remote_path: Path, *,
 
 
 def merge_metrics(local_path: Path, remote_path: Path) -> tuple[int, int]:
-    from ops.services.list.metrics import METRICS_VERSION
-    return _merge_nested(local_path, remote_path,
-                         records_key="metrics", version=METRICS_VERSION)
+    # Deprecated: metrics/datasources no longer live in standalone per-file
+    # JSON caches — they moved into the derived-layer store (derived.json / PG,
+    # see ops/infra/derived/). Legacy S3 sync only ever handled the old
+    # metrics.json/datasources.json; those files are gone, so this is a no-op
+    # kept only so any stale caller doesn't crash. sync itself is retired.
+    return 0, 0
 
 
 def merge_datasources(local_path: Path, remote_path: Path) -> tuple[int, int]:
-    from ops.services.list.datasource import DATASOURCES_VERSION
-    return _merge_nested(local_path, remote_path,
-                         records_key="datasources", version=DATASOURCES_VERSION)
+    return 0, 0
 
 
 MERGERS: dict[str, Callable[[Path, Path], tuple[int, int]]] = {
     "factor_state.json": merge_factor_state,
-    "metrics.json":      merge_metrics,
-    "datasources.json":  merge_datasources,
 }

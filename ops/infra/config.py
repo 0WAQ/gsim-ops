@@ -147,6 +147,56 @@ class Config:
         self.state_redis_password_key: str = redis_cfg.get("password_key") or "META_PASSWORD"
         self.state_redis_password_env: str = redis_cfg.get("password_env") or "OPS_STATE_REDIS_PASSWORD"
 
+        # derived-layer backend (index/metrics/datasources/bcorr).
+        # default json (~/.cache/ops/lib/<lib>/derived.json, per-machine fallback);
+        # set derived.backend: postgres + derived.postgres.{host,port,dbname,user,password*}
+        # for the shared, queryable store. Password resolution mirrors redis:
+        #   1. password (yaml literal) 2. password_env 3. password_file + password_key
+        derived_cfg: Dict[str, Any] = config.get("derived") or {}
+        self.derived_backend: str = derived_cfg.get("backend") or "json"
+        pg_cfg: Dict[str, Any] = derived_cfg.get("postgres") or {}
+        self.derived_postgres_conninfo: str | None = self._build_pg_conninfo(pg_cfg)
+
+    @staticmethod
+    def _build_pg_conninfo(pg_cfg: Dict[str, Any]) -> str | None:
+        """Assemble a libpq conninfo string from derived.postgres.* config.
+
+        Returns None when no host/dbname is configured (backend stays json).
+        Password resolves in the same 3-tier order as redis (literal / env / file).
+        """
+        if not pg_cfg:
+            return None
+        host = pg_cfg.get("host")
+        dbname = pg_cfg.get("dbname")
+        if not host or not dbname:
+            return None
+        pwd: str | None = pg_cfg.get("password")
+        if pwd is None:
+            env_var = pg_cfg.get("password_env") or "OPS_DERIVED_PG_PASSWORD"
+            pwd = os.environ.get(env_var)
+        if pwd is None:
+            pwd_file = pg_cfg.get("password_file")
+            pwd_key = pg_cfg.get("password_key", "OPS_PG_PASSWORD")
+            if pwd_file:
+                try:
+                    with open(pwd_file) as f:
+                        for line in f:
+                            line = line.strip()
+                            if line.startswith(f"{pwd_key}="):
+                                pwd = line.split("=", 1)[1]
+                                break
+                except (PermissionError, OSError, FileNotFoundError):
+                    pass
+        parts = [
+            f"host={host}",
+            f"port={pg_cfg.get('port', 15432)}",
+            f"dbname={dbname}",
+            f"user={pg_cfg.get('user', 'ops')}",
+        ]
+        if pwd:
+            parts.append(f"password={pwd}")
+        return " ".join(parts)
+
     @staticmethod
     def _resolve_vars(raw: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve ${var_name} references in config values.

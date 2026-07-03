@@ -1,25 +1,13 @@
 import ast
-import json
-import hashlib
-import time
-from datetime import datetime
 from pathlib import Path
 
 from ops.core.library import FactorInfo
 from ops.infra.config import Config
-from ops.infra.cache import cache_path
-
-DATASOURCES_VERSION = 1
+from ops.infra.derived import default_derived_store
 
 
-def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def _get_datasources_path(config_path: Path) -> Path:
-    legacy_hash = hashlib.md5(str(config_path.resolve()).encode()).hexdigest()[:8]
-    library_id = Config.load(config_path).library_id
-    return cache_path(library_id, "datasources.json", legacy_hash=legacy_hash)
+def _store(config_path: Path):
+    return default_derived_store(Config.load(config_path))
 
 
 def _build_npy_index(nio_data_path: Path) -> dict[str, str]:
@@ -71,44 +59,19 @@ def resolve_tables(fields: list[str], npy_index: dict[str, str]) -> list[str]:
 
 
 def load_datasources(config_path: Path) -> dict[str, dict]:
-    path = _get_datasources_path(config_path)
-    if not path.exists():
-        return {}
-
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            data: dict = json.load(f)
-
-        if data.get("version") != DATASOURCES_VERSION:
-            return {}
-
-        return data.get("datasources", {})
-    except Exception:
-        return {}
-
-
-def _save_datasources(config_path: Path, datasources: dict[str, dict]) -> None:
-    path = _get_datasources_path(config_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    now = _now_iso()
-    stamped = {
-        name: {**entry, "updated_at": entry.get("updated_at") or now}
-        for name, entry in datasources.items()
-    }
-    data = {
-        "version": DATASOURCES_VERSION,
-        "created_at": time.time(),
-        "datasources": stamped,
-    }
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    out: dict[str, dict] = {}
+    for name, rec in _store(config_path).get_all().items():
+        if rec.fields is None and rec.tables is None:
+            continue
+        out[name] = {"fields": rec.fields or [], "tables": rec.tables or []}
+    return out
 
 
 def refresh_datasources(
     factors: list[FactorInfo], config: Config, config_path: Path
 ) -> dict[str, dict]:
     npy_index = _build_npy_index(config.nio_data_path)
-    datasources = load_datasources(config_path)
+    store = _store(config_path)
 
     for factor in factors:
         py_files = list(factor.src_path.glob("*.py"))
@@ -116,10 +79,9 @@ def refresh_datasources(
             continue
         fields = parse_datasources(py_files[0])
         tables = resolve_tables(fields, npy_index)
-        datasources[factor.name] = {"fields": fields, "tables": tables, "updated_at": _now_iso()}
+        store.upsert_datasources(factor.name, fields, tables)
 
-    _save_datasources(config_path, datasources)
-    return datasources
+    return load_datasources(config_path)
 
 
 def merge_datasources(
