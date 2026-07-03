@@ -147,6 +147,12 @@ class Config:
         self.state_redis_password_key: str = redis_cfg.get("password_key") or "META_PASSWORD"
         self.state_redis_password_env: str = redis_cfg.get("password_env") or "OPS_STATE_REDIS_PASSWORD"
 
+        # state.postgres backend (single source of truth, migrated from redis
+        # 2026-07-04). Reuses the same conninfo builder as derived; password
+        # resolution: postgres.password (literal) > password_env > password_file.
+        state_pg_cfg: Dict[str, Any] = state_cfg.get("postgres") or {}
+        self.state_postgres_conninfo: str | None = self._build_pg_conninfo(state_pg_cfg)
+
         # derived-layer backend (index/metrics/datasources/bcorr).
         # default json (~/.cache/ops/lib/<lib>/derived.json, per-machine fallback);
         # set derived.backend: postgres + derived.postgres.{host,port,dbname,user,password*}

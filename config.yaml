@@ -115,13 +115,22 @@ mode:
 sync:
   library_id: alphalib-juicefs
 
-# 多节点 state 走独立 redis 实例 (6380),跟 JuiceFS metadata 共生
-# 密码 fallback 链: redis.password (yaml literal) > env OPS_STATE_REDIS_PASSWORD
-#                  > sudo grep password_file (key=META_PASSWORD)
-# 第三条让新 shell 跑 ops 时不需要手动 export, ops 进程自动一次 sudo grep
-# 把 password 灌进自身 env, 后续 self-elevate 透传到 root 进程.
+# 因子生命周期 state 真相源 (2026-07-04 从 Redis 迁到 Postgres, 单一真相源)。
+# backend: postgres 走 factor_state 表 (与 factor_derived 同 PG 实例)。
+# 密码 fallback 同 derived: postgres.password > env OPS_DERIVED_PG_PASSWORD
+#   > password_file (key=OPS_PG_PASSWORD)。
+# 回退: backend 改回 redis 即用下方 redis 配置 (Redis 数据迁移时未删, 只读)。
+# 迁移工具: ops/tools/state_to_pg.py。Redis 降为缓存但暂不实装 (直接 PG)。
 state:
-  backend: redis
+  backend: postgres
+  postgres:
+    host: 10.9.100.160
+    port: 15432
+    dbname: ops
+    user: ops
+    password_file: /home/wbai/gsim-ops/scripts/postgres/.env
+    password_key: OPS_PG_PASSWORD
+  # --- 回退用 (backend: redis 即启用) ---
   redis:
     url: redis-sentinel://10.9.100.160:26380,10.9.100.150:26380,10.6.100.144:26380/mymaster/0
     password_file: /etc/juicefs/alphalib-jfs.env

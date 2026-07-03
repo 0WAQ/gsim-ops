@@ -51,3 +51,27 @@ CREATE TABLE IF NOT EXISTS derived_meta (
     value      TEXT,
     PRIMARY KEY (library_id, key)
 );
+
+-- 因子生命周期状态 (真相源, 2026-07-04 从 Redis 迁入)。
+-- (library_id, name) 主键, 与 factor_derived 同主键, 查询时 join。
+-- "factor_state 有 record = 因子存在" 是因子实体的单一定义。
+-- check_history 用 JSONB 列 (读因子时一把读全, 无跨因子按 check 查的需求)。
+CREATE TABLE IF NOT EXISTS factor_state (
+    library_id       TEXT NOT NULL,
+    name             TEXT NOT NULL,
+    author           TEXT,
+    status           TEXT NOT NULL,
+    version          INT NOT NULL DEFAULT 1,
+    submitted_at     TIMESTAMPTZ,
+    submitted_by     TEXT,
+    entered_at       TIMESTAMPTZ,
+    rejected_at      TIMESTAMPTZ,
+    deleted_at       TIMESTAMPTZ,
+    last_fail_stage  TEXT,
+    last_fail_reason TEXT,
+    check_history    JSONB NOT NULL DEFAULT '[]',
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (library_id, name)
+);
+CREATE INDEX IF NOT EXISTS ix_fs_author ON factor_state (library_id, author);
+CREATE INDEX IF NOT EXISTS ix_fs_status ON factor_state (library_id, status);

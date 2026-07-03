@@ -215,10 +215,14 @@ def run_list(args):
     store = default_derived_store(config)
     state_records = {r.name: r for r in default_store(config).list()}
 
-    # get_all may surface orphan rows (e.g. a factor removed from alpha_src but
-    # still carrying a stale bcorr value). The index scan sets author on every
-    # live factor, so author is None marks a row with no index -> not in the
-    # library. Filter those out to match the old scan()-based listing.
+    # A derived row exists per factor, but `author` is only set by the index
+    # scan (of alpha_src). So `author is not None` == "has an index group" ==
+    # "lives in alpha_src" -- this is the list's factor set, unchanged from the
+    # old scan()-driven listing. Rows with metrics/bcorr but no index (e.g. a
+    # factor dropped from alpha_src leaving a stale bcorr) are correctly
+    # excluded. State (now the authoritative existence source in PG) may diverge
+    # from this set (staging-only submits, un-backfilled dirs); that drift is a
+    # health-check concern, deliberately not surfaced here.
     records = sorted(
         (r for r in store.get_all(author=args.user).values() if r.author is not None),
         key=lambda r: r.name,

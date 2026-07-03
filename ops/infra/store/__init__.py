@@ -21,7 +21,15 @@ def default_store(config: Config) -> StateStore:
             raise ValueError("config.state.redis.url is required when state_backend=redis")
         password = getattr(config, "state_redis_password", None)
         return RedisStateStore(url=url, library_id=config.library_id, password=password)
-    raise ValueError(f"unknown state_backend: {backend!r} (json | redis)")
+    if backend == "postgres":
+        conninfo = getattr(config, "state_postgres_conninfo", None)
+        if not conninfo:
+            raise ValueError(
+                "config.state.postgres.{host,dbname,user,...} required when state_backend=postgres"
+            )
+        from .pg_store import PostgresStateStore
+        return PostgresStateStore(conninfo=conninfo, library_id=config.library_id)
+    raise ValueError(f"unknown state_backend: {backend!r} (json | redis | postgres)")
 
 
 __all__ = ["StateStore", "JsonStateStore", "RedisStateStore", "default_store"]
