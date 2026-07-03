@@ -2,7 +2,7 @@
 
 ## Factor Data Sources
 
-Data sources (tables and fields a factor reads via `dr.getData()`) are extracted by AST-parsing the factor `.py` and resolved to table names through an npy index. Cached at `~/.cache/ops/{hash}.datasources.json`.
+Data sources (tables and fields a factor reads via `dr.getData()`) are extracted by AST-parsing the factor `.py` and resolved to table names through an npy index. Stored in the DerivedStore (`infra/derived/`, Postgres or json fallback), keyed by `(library_id, name)`.
 
 **Resolution pipeline** (`datasource.py`):
 1. AST walk finds `*.getData(string_literal)` calls → `fields` list

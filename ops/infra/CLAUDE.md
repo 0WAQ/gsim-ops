@@ -35,7 +35,19 @@ All ops state/cache files live under `~/.cache/ops/`.
 - `cache_path(library_id, filename, legacy_hash=...)` resolves path + one-shot migrates legacy files
 - `library_cache_dir(library_id)` returns the dir, ensuring it exists
 - Locks stay at `~/.cache/ops/locks/` — fcntl, per-machine, never synced
-- Index/metrics/bcorr cache 仍是 per-machine(已知 nice-to-have:搬 redis 让三机一致)
+- Index/metrics/datasources/bcorr **已迁 Postgres**(2026-07-04, 见 `derived/`)。`cache.py` 现仅剩 json 回退后端的 `derived.json` + locks 用;PG 后端下不再写这些缓存。
+
+## Derived (`derived/`)
+
+派生层 (index/metrics/datasources/bcorr) 的存储抽象,替代原 per-machine
+`~/.cache/ops/lib/<lib>/*.json`。三机共享 + 查询不扫盘。范式与 `store/` 一致。
+
+- `base.py` — `DerivedStore` ABC + `DerivedRecord` dataclass(一个因子的四组派生数据合一,扁平字段)。方法:`get_all(author=None)` / `get(name)` / `upsert_index/metrics/datasources/bcorr` / `get_meta/set_meta` / `delete`
+- `pg_store.py` — `PostgresDerivedStore`,单张 `factor_derived` 宽表 (library_id, name) 主键,四组独立 UPSERT,GIN(fields/tables) 反查索引;`derived_meta` 表存 `index_built_at` 水位;psycopg3 连接池
+- `json_store.py` — `JsonDerivedStore`,单文件 `derived.json`,fcntl 锁 + 原子写,回退用
+- `__init__.py` — `default_derived_store(config)` 按 `config.derived_backend` 分发 (json 默认 / postgres)
+- **读写分离**:读侧 (list/info/health) 直接消费 `DerivedRecord`;写侧 `refresh_*`(services/list/)收 names 生产派生数据。index 由 `LibraryScanner.scan()` 扫盘后 publish,新鲜度靠 alpha_src mtime vs `index_built_at` 水位跨机判定
+- 迁移工具 `ops/tools/derived_migrate.py`;部署 `scripts/postgres/README.md`
 
 ## Lock (`lock.py`)
 

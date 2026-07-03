@@ -8,7 +8,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 
 - **infra/config.py**: `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var -> `./config.yaml` -> project root `config.yaml`. Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables (`OPS_GSIM_HOME`, `OPS_STORAGE`, `OPS_WORKSPACE`).
 - **core/alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code. Constructor calls `_modify_always()` which modifies XML on disk (paths from config, not hardcoded). `_modify_always` also updates per-Data module `niodatapath` for L2 data (replaces `/datasvc/data/cc/` prefix with config's `nio_data_path`).
-- **core/library.py**: `LibraryScanner` scans `alpha_src/` with JSON index caching at `~/.cache/ops/` (1-hour TTL, `INDEX_MAX_AGE_SECONDS = 3600`). `--refresh` forces rebuild.
+- **core/library.py**: `LibraryScanner` scans `alpha_src/` and publishes the index (name/author/has_pnl/dump_days/delay) to the DerivedStore (see `infra/derived/`). Freshness = alpha_src mtime vs the store's `index_built_at` watermark (shared across machines); `--refresh` forces a rescan. `FactorInfo` is now a slim scan product (identity + paths + index only) — derived values live in `DerivedRecord`, not here.
 - **core/metrics.py**: `Metrics` dataclass (ret, tvr, shrp, mdd, fitness). Serialization keys use `ret%`, `tvr%`, `mdd%` to indicate percentage fields.
 - **infra/gsim/runner.py**: `Runner` static methods shell out to gsim tools (`run_backtest`, `run_simsummary`, `run_bcorr`) via `subprocess.run` with configurable timeout.
 - **infra/ssh.py**: Paramiko-based SSH client.
@@ -24,11 +24,11 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 
 ## Factor Metrics
 
-Metrics (ret%, shrp, mdd%, tvr%, fitness) are obtained via `simsummary` and cached in `~/.cache/ops/{hash}.metrics.json`.
+Metrics (ret%, shrp, mdd%, tvr%, fitness) are obtained via `simsummary` and stored in the DerivedStore (`infra/derived/`, Postgres or json fallback), keyed by `(library_id, name)`.
 
 **Two update paths**:
-- **Batch**: `ops list --refresh-metrics` — runs simsummary on all factors with PNL files, writes full index
-- **Incremental**: `ops check` — after a factor passes all checks and before archiving, runs simsummary and appends to index via `update_metrics()`
+- **Batch**: `ops list --refresh-metrics` — runs simsummary on the listed factors with PNL files, upserts the metrics group
+- **Incremental**: `ops check` — after a factor passes all checks and before archiving, runs simsummary and upserts via `update_metrics()`
 
 **simsummary output columns** (whitespace-separated):
 ```

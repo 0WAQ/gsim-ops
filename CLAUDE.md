@@ -206,7 +206,7 @@ AlphaXxx/
 - **Feishu credentials hardcoded**: `infra/notify/feishu_send.py` — move to config/env later
 - **`core/alpha/metadata.py` has I/O**: `_modify_always()`, `save()`, `get_v2npy_files()` — extract to services/infra
 - **`ops sync` 在 JFS 上线后是 legacy fallback**: 仅对 `config.prod-legacy.yaml` 有意义,后续整体退役;`ops/services/sync/CLAUDE.md` 有 deprecation 标注
-- **`LibraryScanner` cache per-machine**: `~/.cache/ops/lib/<lib>/index.json` 各机独立,三机数据本身一致但 UI count 可能差 1-2 个。`ops list --refresh` 对齐,长期搬 redis
+- **派生层 (index/metrics/datasources/bcorr) 已迁 Postgres** (2026-07-04, branch `feat/derived-postgres`): 原 per-machine `~/.cache/ops/lib/<lib>/*.json` → 共享 PG (server-160 docker, host 15432), 三机一致 + 查询不扫盘。抽象层 `ops/infra/derived/` (DerivedStore, 仿 store/), 默认 postgres 可回退 json。读写数据流已重构 (读侧走 DerivedRecord, 不再 FactorInfo god-object + merge)。查询过滤仍内存跑 (未下推 SQL, 千级够用)。部署见 `scripts/postgres/README.md`
 
 ## Plans & Roadmap
 
@@ -216,9 +216,11 @@ AlphaXxx/
 - 2026-06-04 ops state 进 Redis (`config.juicefs.yaml` 切 Redis backend)
 - 2026-06-05 Redis Sentinel HA (3-node sentinel, 9.12s failover)
 - 2026-06-05 JFS 上线 + 默认 config 切 JFS (`config.yaml` = JFS, `config.prod-legacy.yaml` 回退)
+- 2026-07-04 Phase G: 派生层 (index/metrics/datasources/bcorr) 迁 Postgres (server-160 docker, host 15432), per-machine JSON 缓存退役; 读写数据流重构 (DerivedRecord 取代 FactorInfo god-object)。branch `feat/derived-postgres`, 部署 `scripts/postgres/`
 
 **仍在路上**:
 - Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/resubmit/recheck` 走 `git add/commit`
 - Phase E: `.state` merge 逻辑简化(其实在 Redis 后大部分逻辑已不需要)
 - Phase F: checkpoint 落地(按设计原则放 JFS / 本地 SSD)
-- Phase C 上线后剩余: 写入重试 wrapper / cache→redis / sync deprecation warning / sudo NOPASSWD wrapper / MinIO key rotation / alpha_dump 退役
+- Phase G 剩余: 反查命令 `ops query --field/--table` (查询下推 SQL, GIN 已建) / PG 密码正规化 (挪 /etc root-only + 分发 150/144) / 150/144 部署 (uv tool install 带 psycopg) / 分支合 main
+- Phase C 上线后剩余: 写入重试 wrapper / sync deprecation warning / sudo NOPASSWD wrapper / MinIO key rotation / alpha_dump 退役
