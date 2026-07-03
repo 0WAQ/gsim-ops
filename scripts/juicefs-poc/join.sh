@@ -215,25 +215,24 @@ else
   sudo chmod 644 "$UMASK_FILE"
   info "  + $UMASK_FILE"
 fi
-# 本地 sidecar:JFS 里 alpha_dump/staging/recycle 是 symlink -> $JFS_LOCAL_DIR/*,
+# 本地 sidecar:JFS 里 alpha_dump/staging 是 symlink -> $JFS_LOCAL_DIR/*,
 # symlink target 是绝对路径,所以本机这些目录必须存在(且 JFS_LOCAL_DIR 必须和主节点一致)。
-sudo mkdir -p "$JFS_LOCAL_DIR"/{alpha_dump,staging,recycle}
+sudo mkdir -p "$JFS_LOCAL_DIR"/{alpha_dump,staging}
 sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR";              sudo chmod 2755 "$JFS_LOCAL_DIR"
 sudo chown "root:$GRP_CORE" "$JFS_LOCAL_DIR/staging";      sudo chmod 2750 "$JFS_LOCAL_DIR/staging"
 sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR/alpha_dump";   sudo chmod 2755 "$JFS_LOCAL_DIR/alpha_dump"
-sudo chown root:root        "$JFS_LOCAL_DIR/recycle";      sudo chmod 1755 "$JFS_LOCAL_DIR/recycle"
-info "  $JFS_LOCAL_DIR/{alpha_dump,staging,recycle} 就绪"
+info "  $JFS_LOCAL_DIR/{alpha_dump,staging} 就绪"
 
 info "==> [6/6] 验证挂载点 + sidecar 一致性"
 require_mountpoint "$JFS_MOUNT"
 info "  $JFS_MOUNT mounted"
 ls "$JFS_MOUNT" | sed 's/^/    /'
 
-# JFS 里 alpha_dump/staging/recycle 是主节点 02-layout 建的 symlink,
+# JFS 里 alpha_dump/staging 是主节点 02-layout 建的 symlink,
 # target 是绝对路径 (主节点的 $JFS_LOCAL_DIR/*)。本机 $JFS_LOCAL_DIR
 # 必须和主节点完全一致,否则 symlink dangling = 业务路径全废。
 SIDECAR_OK=1
-for d in alpha_dump staging recycle; do
+for d in alpha_dump staging; do
   L="$JFS_MOUNT/$d"
   if [[ ! -L "$L" ]]; then
     warn "  $d 不是 symlink (主节点没跑 02-layout,或卷里还没建好)"

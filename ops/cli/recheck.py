@@ -23,8 +23,8 @@ Example:
 
 来源状态:
   active   ← alpha_src/<name>/
-  rejected ← recycle/{user}/{stage}/<name>/
-  deleted  ← alpha_src/<name>/(若 soft-delete 保留)或 recycle/
+  rejected ← alpha_src/<name>/
+  deleted  ← alpha_src/<name>/(soft-delete 保留 src;已 --force 清除则需 ops submit)
 
 默认仅搬源 + 翻状态,alpha_dump / alpha_feature / alpha_pnl 保留。
 version 不变。

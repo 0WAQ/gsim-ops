@@ -19,7 +19,6 @@
 | 自定义数据模块 | `/mnt/storage/data_dmgr/` | Lzhang & Wbai 自定义数据源 |
 | 因子库 | `/mnt/storage/alphalib/` | 因子源代码、PNL、dump、feature |
 | Dropbox | `/mnt/storage/dropbox/{Unix ID}/` | 因子提交入口 |
-| Recycle | `/mnt/storage/recycle/{Unix ID}/` | 被淘汰因子的回收站 |
 
 ### 1.3 模板与示例
 
@@ -372,14 +371,14 @@ uv run ops status -u wbai --status submitted
 
 ### 7.3 未通过处理
 
-未通过的因子进入 `/mnt/storage/recycle/{UnixId}/`，可重新提交：
+未通过因子 src 归档在 `alpha_src/`(状态靠 state 区分),可重新提交:
 
 ```bash
-# 从 recycle 召回 rejected 因子
-uv run ops resubmit AlphaWbaiReversal -s rejected
+# 原代码重跑 check(从 alpha_src 召回到 staging)
+uv run ops recheck AlphaWbaiReversal -s rejected
 
-# 从 dropbox 重新提交
-uv run ops submit -u wbai -s 20260401 -f AlphaWbaiReversal
+# 改了代码从 dropbox 重新提交(version += 1)
+uv run ops resubmit -u wbai -s 20260401 -f AlphaWbaiReversal
 ```
 
 ## 八、日常工作要求

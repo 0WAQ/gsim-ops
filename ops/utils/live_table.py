@@ -76,7 +76,7 @@ class FactorRow:
     stages: dict[str, Status]   # full pipeline state, kept for is_in_flight()
     current_stage: str = ""     # the stage whose status is shown in the table cell
     current_status: Status = Status.PENDING
-    outcome: str = ""           # "→ lib" / "→ recycle/checkbias: corr 0.87" / "locked" / ...
+    outcome: str = ""           # "→ lib" / "→ rejected/checkbias: corr 0.87" / "locked" / ...
     outcome_style: str = ""
     outcome_kind: str = ""      # clean classification for reports: pass|fail|error|locked
     started_at: float | None = None  # monotonic; reserved for future timing column

@@ -28,10 +28,9 @@
 | 数据缓存（只读） | `/datasvc/data/cc/` |
 | 因子库 | `/mnt/storage/alphalib/` |
 | 提交入口 | `/mnt/storage/dropbox/{Unix ID}/` |
-| 淘汰回收站 | `/mnt/storage/recycle/{Unix ID}/` |
 | 生产 PNL 池 | `/usr/local/gsim/pnl_prod/` |
 
-> **路径说明 (2026-06-05 JFS 上线后)**: 生产因子库 canonical 路径已迁至 JuiceFS `/tank/vault/alphalib/`,**`/mnt/storage/alphalib` 是软链指向 JFS 挂载点**, 老脚本不需改路径仍能工作。`/mnt/storage/recycle/` 仍保留旧物理数据 (2026-06 之前), 新淘汰因子落到 `/tank/vault/alphalib/recycle/`。
+> **路径说明 (2026-06-05 JFS 上线后)**: 生产因子库 canonical 路径已迁至 JuiceFS `/tank/vault/alphalib/`,**`/mnt/storage/alphalib` 是软链指向 JFS 挂载点**, 老脚本不需改路径仍能工作。recycle 已于 2026-07 退役(未通过因子 src 归档在 `alpha_src/`,状态靠 state 区分)。
 
 ### 核心命令速查
 

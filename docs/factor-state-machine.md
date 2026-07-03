@@ -8,7 +8,7 @@
 | ACTIVE | 通过验证,生产因子 |
 | REJECTED | 验证未通过,不合格 |
 
-- CHECKING 是 check 运行中的瞬态(代码中为独立状态值,由 reconcile 自动修复回 SUBMITTED/ACTIVE/REJECTED)
+- CHECKING 是 check 运行中的瞬态(代码中为独立状态值);reconcile 已下线,崩在半路的因子由下次 `ops check` 按 staging 目录扫到并重跑覆盖
 - DELETED 是 soft-delete 标记,state record 保留,文件可选保留(ops rm 默认仅标记,--force 删 dump+feature)
 - DECAYING / RETIRED 暂未实现
 
@@ -51,15 +51,16 @@ ops submit (新因子)     ops resubmit (新代码, version+=1)
 
 ## 各状态下因子数据分布
 
-alpha_src 是所有因子的 src 归档,不区分状态(研究员无 alpha_src 权限)。
-recycle 是给研究员看的 REJECTED 因子副本。
+alpha_src 是所有因子的 src 归档,不区分状态(ACTIVE/REJECTED/DELETED 都在里面,状态靠 state 区分)。
 
-| 状态 | alpha_src | alpha_pnl | alpha_dump | alpha_feature | recycle |
-|---|---|---|---|---|---|
-| SUBMITTED | 无(在 staging) | 无 | 无 | 无 | — |
-| ACTIVE | 有 | 有 | 有 | 有(需 ops pack) | — |
-| REJECTED(checkbias/checkpoint 失败) | 有 | 无 | 无 | 无 | 有 |
-| REJECTED(compliance/correlation 失败) | 有 | 有 | 有 | 有 | 有 |
+> recycle 已退役(2026-07):它曾是"给研究员看的 REJECTED 副本",但研究员 work tree 在 dropbox 够不着 root-owned 的本地 recycle,且其内容(src / 失败阶段 / 原因)在 alpha_src + state 里都有权威副本,故整体下线。
+
+| 状态 | alpha_src | alpha_pnl | alpha_dump | alpha_feature |
+|---|---|---|---|---|
+| SUBMITTED | 无(在 staging) | 无 | 无 | 无 |
+| ACTIVE | 有 | 有 | 有 | 有(需 ops pack) |
+| REJECTED(checkbias/checkpoint 失败) | 有 | 无 | 无 | 无 |
+| REJECTED(compliance/correlation 失败) | 有 | 有 | 有 | 有 |
 
 ## 转移时数据产物规则
 
@@ -80,7 +81,7 @@ recycle 是给研究员看的 REJECTED 因子副本。
 - resubmit 保留旧产物:作为对比基准
 - REJECTED 后两阶段失败保留完整产物:数据完整,有分析参考价值
 - REJECTED 前两阶段失败不保留:短期数据不完整,无意义
-- approve 仅适用于 correlation 失败:产物已完整,删 recycle 归档 + 翻状态即可,无需重跑
+- approve 仅适用于 correlation 失败:产物已完整,翻状态即可,无需重跑
 
 ## 版本控制
 
@@ -91,7 +92,7 @@ recycle 是给研究员看的 REJECTED 因子副本。
 
 ## 业务背景
 
-- 研究员没有 alpha_src 的读写权限,recycle 是给研究员看的副本
+- 研究员没有 alpha_src 的读写权限(recycle 曾作为给研究员看的副本,已退役)
 - 目前没有真正的生产环境,ACTIVE 只是"通过验证入库"
 - 有些手写因子质量高但被机器因子挤占(correlation 被拒),其完整产物有分析价值
 - 数据产物可再生性:src 不可再生,pnl 代价高尽量保留,dump/feature 可再生

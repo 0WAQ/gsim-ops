@@ -1,6 +1,6 @@
 """ops 进程提权 wrapper.
 
-JFS 集中运维模型下 alpha_src / staging / alpha_pnl / recycle / alpha_feature
+JFS 集中运维模型下 alpha_src / staging / alpha_pnl / alpha_feature
 都是 root-owned, wbai 用户跑写命令 (submit/check/rm/pack...) 直接 shutil.move
 会 EACCES。
 
@@ -27,7 +27,7 @@ from rich.console import Console
 _stderr = Console(stderr=True)
 
 
-# 写 alpha_src / staging / alpha_pnl / recycle / alpha_feature 的子命令
+# 写 alpha_src / staging / alpha_pnl / alpha_feature 的子命令
 WRITE_COMMANDS = {
     "submit",
     "resubmit",

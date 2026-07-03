@@ -27,7 +27,7 @@ path:
   alpha_pnl: ${storage}/alphalib/alpha_pnl
   alpha_feature: ${storage}/alphalib/alpha_feature
   staging: ${storage}/alphalib/staging
-  recycle: ${storage}/recycle
+  recycle: ${storage}/recycle   # 已退役 (2026-07),保留字段兼容
 
 # 脚本
 script:

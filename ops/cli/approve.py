@@ -22,7 +22,7 @@ Example:
 其他失败阶段是因子质量问题,不允许 approve。
 
 不重跑任何 check 阶段(dump/pnl/feature 在 correlation 失败时已保留),
-仅删 recycle 归档 + state 翻 ACTIVE。
+仅 state 翻 ACTIVE。
 """,
     )
 

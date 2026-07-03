@@ -1,7 +1,7 @@
 """Per-factor advisory lock.
 
 A factor flowing through submit → check → archive touches multiple resources
-(staging dir, alpha_src/recycle dir, state.json, meta.json). The state-store
+(staging dir, alpha_src dir, state.json, meta.json). The state-store
 fcntl lock only protects state.json itself; nothing prevents two `ops check`
 processes from picking up the same factor from staging concurrently and
 racing to move it.

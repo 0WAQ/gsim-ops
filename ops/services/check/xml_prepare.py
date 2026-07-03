@@ -86,10 +86,6 @@ def prepare_for_archive(factor: AlphaMetadata):
         ...
 
 
-def prepare_for_recycle(factor: AlphaMetadata):
-    ...
-
-
 def save_xml(factor: AlphaMetadata):
     with open(factor.xml_file, "r+") as f:
         f.write(xmltodict.unparse(factor.xml_config,

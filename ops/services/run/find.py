@@ -5,7 +5,7 @@ from ops.core.factormeta import FactorMeta
 
 
 def find_factor_dir(name: str, config: Config) -> Path | None:
-    for root in [config.alpha_src, config.staging, config.recycle]:
+    for root in [config.alpha_src, config.staging]:
         candidate = root / name
         if candidate.is_dir():
             return candidate

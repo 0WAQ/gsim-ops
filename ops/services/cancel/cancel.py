@@ -85,8 +85,9 @@ def _cancel_one(rec: FactorRecord, config: Config, store) -> None:
     name = rec.name
     staging_dir = config.staging / name
 
-    # 先删 staging,再删 state — 崩在中间留下 orphan state record,
-    # reconcile 会在下一次 ops check 启动时清掉 SUBMITTED/CHECKING 无文件因子
+    # 先删 staging,再删 state — 崩在中间留下 orphan state record(SUBMITTED、无文件)。
+    # 不再自动清理(reconcile 已下线),但 ops check 按 staging 目录扫描,该 orphan 不影响
+    # 后续流程;必要时人工 ops rm / 后续 doctor 处理。
     if staging_dir.exists():
         shutil.rmtree(staging_dir)
         info(f"    ✔ 已删除 staging/{name}/")

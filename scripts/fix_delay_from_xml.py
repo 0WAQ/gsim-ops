@@ -14,10 +14,8 @@ import xmltodict
 ROOTS = [
     Path("/tank/vault/alphalib.local/staging"),
     Path("/tank/vault/alphalib.local/alpha_src"),
-    Path("/tank/vault/alphalib.local/recycle"),
     Path("/mnt/storage/alphalib/staging"),
     Path("/mnt/storage/alphalib/alpha_src"),
-    Path("/mnt/storage/alphalib/recycle"),
 ]
 
 
@@ -41,21 +39,10 @@ def alpha_delay_from_xml(factor_dir: Path) -> int | None:
 def iter_factor_dirs(root: Path):
     if not root.exists():
         return
-    # recycle 是 recycle/{user}/{stage}/AlphaXxx, staging/alpha_src 是 root/AlphaXxx
-    if root.name == "recycle":
-        for user_dir in root.iterdir():
-            if not user_dir.is_dir():
-                continue
-            for stage_dir in user_dir.iterdir():
-                if not stage_dir.is_dir():
-                    continue
-                for fdir in stage_dir.iterdir():
-                    if fdir.is_dir() and (fdir / "meta.json").exists():
-                        yield fdir
-    else:
-        for fdir in root.iterdir():
-            if fdir.is_dir() and (fdir / "meta.json").exists():
-                yield fdir
+    # staging/alpha_src 布局: root/AlphaXxx
+    for fdir in root.iterdir():
+        if fdir.is_dir() and (fdir / "meta.json").exists():
+            yield fdir
 
 
 def main():

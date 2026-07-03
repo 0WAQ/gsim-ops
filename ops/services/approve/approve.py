@@ -3,11 +3,9 @@
 仅适用于 `last_fail_stage == "correlation"` 的 REJECTED 因子。其他失败阶段
 (checkbias/checkpoint/compliance) 是因子质量问题,不允许 approve。
 
-数据产物在 correlation 失败时已就位(check.py to_recycle 保留 dump+pnl+feature),
-approve 不重跑任何阶段,只删 recycle 归档目录 + 翻状态。
+数据产物在 correlation 失败时已就位(check.py on_reject 保留 dump+pnl+feature),
+approve 不重跑任何阶段,只翻状态。
 """
-import shutil
-
 from ops.infra.config import Config
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.infra.store import default_store
@@ -72,9 +70,6 @@ def _print_plan(targets: list[FactorRecord],
 
 def _approve_one(rec: FactorRecord, config: Config, store) -> None:
     name = rec.name
-    recycle_dir = config.recycle / rec.author / _CORRELATION / name
-    if recycle_dir.exists():
-        shutil.rmtree(recycle_dir)
 
     now = _now()
     store.transition(

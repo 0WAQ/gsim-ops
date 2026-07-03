@@ -106,7 +106,7 @@ path:
   alpha_src:                       # Factor source code (post-archive)
   alpha_dump:                      # Daily target positions per factor
   alpha_pnl:                       # Backtest results
-  recycle:                         # Failed factors destination ({user}/{stage}/AlphaXxx/)
+  recycle:                         # 已退役 (2026-07),保留字段兼容;不再有因子落此
   pnl_prod_path:                   # Gsim production PNL
   pnl_alphalib:                    # Archive PNL
 script:

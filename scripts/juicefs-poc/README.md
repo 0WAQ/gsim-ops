@@ -289,7 +289,7 @@ sudo -E bash verify.sh redis-fail   # Redis kill 注入(需 sudo)
 
 ## 权限模型
 
-**集中运维**:owner 一律 root(recycle 子目录除外),所有写都通过 sudo。group 仅作跨机一致性 label,不授予写权限。**不用 POSIX ACL**,只靠 setgid 继承组。
+**集中运维**:owner 一律 root,所有写都通过 sudo。group 仅作跨机一致性 label,不授予写权限。**不用 POSIX ACL**,只靠 setgid 继承组。
 
 | 组 | gid | 成员 | 作用 |
 |---|---|---|---|
@@ -302,19 +302,15 @@ JFS  /tank/vault/alphalib/        root:alpha-data 2755
 ├── alpha_pnl/       root:alpha-data 2755     data 读, 仅 sudo 写
 ├── alpha_feature/   root:alpha-data 2755     data 读, 仅 sudo 写
 ├── alpha_dump  →    /tank/vault/alphalib.local/alpha_dump   (symlink)
-├── staging     →    /tank/vault/alphalib.local/staging      (symlink)
-└── recycle     →    /tank/vault/alphalib.local/recycle      (symlink)
+└── staging     →    /tank/vault/alphalib.local/staging      (symlink)
 
 本地 /tank/vault/alphalib.local/   root:alpha-data 2755
 ├── staging/         root:alpha-core 2750     core 读, 仅 sudo 写
-├── alpha_dump/      root:alpha-data 2755     data 读, 仅 sudo 写
-└── recycle/         root:root       1755     sticky
-    └── <unixId>/    <unixId>:<grp>  0700     只用户自己
+└── alpha_dump/      root:alpha-data 2755     data 读, 仅 sudo 写
 ```
 
 - gid 选 59xxx(GID_MAX=60000 以下,避开 7/8/9000 常见段)
 - 所有 ops 写路径(`submit / resubmit / recheck / check / pack / rm` 等)必须 sudo 跑;Phase C 之前需要补 sudo wrapper 让 `uv run ops ...` 自动 elevate
-- `recycle` 是研究员私有,嵌套一层 unixId 由用户自己写;sticky bit 防互删
 - `alpha-core/alpha-data` 组 membership 主要用途:跨机器统一 group label(NFS / FUSE 上 gid 数字必须各机一致),并保证未来若放开 group write 位时不需要重 chown
 
 ## 验证结果
@@ -425,7 +421,7 @@ sudo bash /tmp/juicefs-poc/join.sh --meta-host <主节点 IP> --meta-port 6380  
 
 `status.sh` / `join.sh` 末尾会报 `JFS 里 symlink target != 本机 JFS_LOCAL_DIR`。
 
-JFS 里 alpha_dump / staging / recycle 是 symlink,target 是**绝对路径**(02-layout.sh 在主节点写死,例如 `/tank/vault/alphalib.local/alpha_dump`)。这个 target 跨节点共享,所有 client 必须有这个绝对路径才能解析。
+JFS 里 alpha_dump / staging 是 symlink,target 是**绝对路径**(02-layout.sh 在主节点写死,例如 `/tank/vault/alphalib.local/alpha_dump`)。这个 target 跨节点共享,所有 client 必须有这个绝对路径才能解析。
 
 **情况 A:本机 `JFS_LOCAL_DIR` 跟主节点不一致(同一个 mount root)**
 

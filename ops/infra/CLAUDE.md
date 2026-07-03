@@ -19,7 +19,7 @@ Key attributes: all `path.*` fields as `Path`, `compliance`/`correlation`/`check
 
 ## Sudo Self-Elevation (`sudo.py`)
 
-JFS 集中运维模型下 `alpha_src` / `staging` / `alpha_pnl` / `recycle` 等都是 root-owned,wbai 直接写会 EACCES。
+JFS 集中运维模型下 `alpha_src` / `staging` / `alpha_pnl` 等都是 root-owned,wbai 直接写会 EACCES。
 
 `maybe_elevate(args)`:进程入口检测 `args.sub-command ∈ WRITE_COMMANDS` (submit/resubmit/recheck/check/rm/approve/cancel/clear/pack/backfill) **且** `alpha_src.st_uid == 0` → `os.execvp('sudo -E --preserve-env=OPS_* ops <argv>')` 替换自身。read-only 命令和 legacy prod (alpha_src wbai-owned) 都 no-op。
 

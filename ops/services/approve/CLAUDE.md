@@ -14,14 +14,13 @@
    - 批量(`-u`):不匹配的归入 `Skipped` 段,不阻断
 2. apt 风格确认(`-y` 跳过)
 3. `_approve_one`:
-   - 删 `recycle/{author}/correlation/{name}/` 归档目录
    - `store.transition(name, ACTIVE, entered_at=..., last_fail_stage=None, last_fail_reason=None)`
    - `append_check(CheckRecord(passed=True, fail_reason="approved"))` 留痕
 
 ## 不做的事
 
 - 不动 `alpha_src` / `alpha_pnl` / `alpha_dump` / `alpha_feature`
-  (correlation 失败时 check.py to_recycle 已保留这些产物)
+  (correlation 失败时 check.py on_reject 已保留这些产物)
 - 不动 `version`
 - 不重跑任何 check 阶段
 - 不替换 / 不降级库内既有因子

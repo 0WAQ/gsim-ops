@@ -1,14 +1,13 @@
 """ops recheck — 原代码不变,重跑 check 流水线。
 
-把因子从其当前归宿(alpha_src / recycle)搬回 staging/<name>/、状态翻为
+把因子从 alpha_src 搬回 staging/<name>/、状态翻为
 SUBMITTED,下一次 ops check 会重跑 8 阶段流水线。version 不变。
 
 支持的来源状态:
 - ACTIVE   (默认): 源 = alpha_src/<name>/
-- REJECTED        : 源 = recycle/{user}/{stage}/<name>/
-- DELETED         : 源优先 alpha_src(soft-delete 默认保留 src),否则 recycle;
-                    若两处都没有(--force 完全清理过),则无法 recheck,
-                    需走 ops submit 重新提交
+- REJECTED        : 源 = alpha_src/<name>/(REJECTED src 与 ACTIVE 同库)
+- DELETED         : 源 = alpha_src/<name>/(soft-delete 默认保留 src);
+                    若已被 --force 完全清理,则无法 recheck,需走 ops submit 重新提交
 
 destructive 为 opt-in:
 - 默认仅搬源 + 翻状态;alpha_dump / alpha_feature / alpha_pnl 保留
@@ -58,26 +57,6 @@ def _rewrite_module_path(d: Path) -> None:
         )
 
 
-def _find_in_recycle(name: str, recycle_root: Path) -> Path | None:
-    """recycle 布局: recycle/{user}/{stage}/AlphaXxx/。返回最新一个匹配项。"""
-    if not recycle_root.exists():
-        return None
-    candidates: list[Path] = []
-    for user_dir in recycle_root.iterdir():
-        if not user_dir.is_dir():
-            continue
-        for stage_dir in user_dir.iterdir():
-            if not stage_dir.is_dir():
-                continue
-            d = stage_dir / name
-            if d.is_dir():
-                candidates.append(d)
-    if not candidates:
-        return None
-    # 多个 stage 都有(理论上不该,防御性):取 mtime 最新
-    return max(candidates, key=lambda p: p.stat().st_mtime)
-
-
 def _locate_source(rec: FactorRecord, config: Config) -> Path | None:
     """按状态定位因子源目录。返回 None 表示无法找到可搬运的源。"""
     name = rec.name
@@ -89,11 +68,8 @@ def _locate_source(rec: FactorRecord, config: Config) -> Path | None:
         return src if src.exists() else None
     if rec.status == FactorStatus.DELETED:
         # soft-delete 默认保留 alpha_src;--force 才删 dump/feature(src 仍保留)
-        # 若 src 已被外部清理,则尝试 recycle
         src = config.alpha_src / name
-        if src.exists():
-            return src
-        return _find_in_recycle(name, config.recycle)
+        return src if src.exists() else None
     return None
 
 
@@ -158,7 +134,7 @@ def _recheck_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
     config.staging.mkdir(parents=True, exist_ok=True)
     _clean_pycache(src)
 
-    # 先 move,再 transition:崩在中间由 reconcile 修
+    # 先 move,再 transition:崩在中间留 orphan(reconcile 已下线),必要时人工处理
     prev_status = rec.status.value
     shutil.move(str(src), str(dst))
     _rewrite_module_path(dst)
@@ -169,20 +145,13 @@ def _recheck_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
         removed = _purge_artifacts(name, config)
         for r in removed:
             info(f"    ✔ 已删除 {r}")
-        # REJECTED 额外清 pnl + recycle 归档
+        # REJECTED 额外清 pnl
         # alpha_pnl/<name> 是单文件,不是目录
         if rec.status == FactorStatus.REJECTED:
             pnl = config.alpha_pnl / name
             if pnl.exists():
                 pnl.unlink()
                 info(f"    ✔ 已删除 alpha_pnl/{name}")
-            # recycle/{author}/{stage}/<name>/ 归档目录:离开 REJECTED 后已无意义,
-            # 不清会留死目录(参见 approve.py 同名清理逻辑)
-            if rec.last_fail_stage:
-                recycle_dir = config.recycle / rec.author / rec.last_fail_stage / name
-                if recycle_dir.exists():
-                    shutil.rmtree(recycle_dir)
-                    info(f"    ✔ 已删除 recycle/{rec.author}/{rec.last_fail_stage}/{name}")
 
     store.transition(name, FactorStatus.SUBMITTED)
     info(f"  ✔ {name} {prev_status} → submitted")

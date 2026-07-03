@@ -26,7 +26,6 @@ from ops.core.alpha.results.checkbias import *
 from ops.utils.live_table import LiveDriver, Status, make_factor_rows
 
 from .xml_prepare import *
-from .reconcile import reconcile
 from .report import write_check_report
 from .checker.base import *
 from .checker.validate_checker import ValidateChecker
@@ -159,14 +158,14 @@ class CheckerPipeline:
             shutil.rmtree(pnl_dst)
         shutil.move(factor.pnl_file, pnl_dst)
 
-    def to_recycle(self, factor: AlphaMetadata, e: CheckFail):
-        dst_dir = self.config.recycle / factor.key.user / e.stage / factor.name
-        dst_dir.parent.mkdir(parents=True, exist_ok=True)
-        if dst_dir.exists():
-            shutil.rmtree(dst_dir)
+    def on_reject(self, factor: AlphaMetadata, e: CheckFail):
+        """因子质量失败:src 归档到 alpha_src(与 ACTIVE 同库,状态由 state 区分),
+        按失败阶段决定产物保留,最后清掉 staging 原物。不再写 recycle 目录。
+        """
         self._clean_pycache(factor.dir)
 
-        # alpha_src: 从 staging 复制一份(staging 原物随后移到 recycle 归档)
+        # alpha_src: 从 staging 复制一份(REJECTED 与 ACTIVE 的 src 都在 alpha_src,
+        # 状态靠 state 区分,不靠目录位置)
         src_dst = self.config.alpha_src / factor.name
         if src_dst.exists():
             shutil.rmtree(src_dst)
@@ -206,11 +205,8 @@ class CheckerPipeline:
                 if f.exists():
                     f.unlink()
 
-        # 归档到 recycle
-        shutil.move(factor.dir, dst_dir)
-        self._rewrite_module_path(dst_dir)
-        with open(dst_dir / "reason.txt", 'w') as f:
-            f.write(str(e))
+        # 清掉 staging 原物(src 已进 alpha_src,不再需要归档副本)
+        shutil.rmtree(factor.dir, ignore_errors=True)
 
     def _ensure_record(self, factor: AlphaMetadata, store) -> None:
         if store.get(factor.name) is not None:
@@ -361,9 +357,8 @@ class CheckerPipeline:
                     _emit_stage_done(current_stage, Status.FAILED)
                 logger.warning("check rejected factor={} stage={} reason={}",
                                factor.key, e.stage, str(e))
-                # Factor quality failure — REJECTED + recycle
-                prepare_for_recycle(factor)
-                self.to_recycle(factor, e)
+                # Factor quality failure — REJECTED (src → alpha_src)
+                self.on_reject(factor, e)
                 now = datetime.now().isoformat(timespec="seconds")
                 check.finished_at = now
                 check.passed = False
@@ -375,7 +370,7 @@ class CheckerPipeline:
                                  last_fail_stage=e.stage,
                                  last_fail_reason=str(e))
                 q.put(("done", factor.name, "fail",
-                       f"→ recycle/{e.stage}: {str(e)[:60]}", "red"))
+                       f"→ rejected/{e.stage}: {str(e)[:60]}", "red"))
                 return "fail"
 
         except Exception as e:
@@ -394,11 +389,6 @@ class CheckerPipeline:
             return "error"
 
     def run(self):
-        banner("状态校验")
-        counts = reconcile(self.config, default_store(self.config))
-        summary = ", ".join(f"{k}={v}" for k, v in counts.items() if v)
-        info(summary or "无需修复")
-
         banner("因子检测")
 
         if not self.metadatas:

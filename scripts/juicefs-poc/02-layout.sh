@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 把 alpha_dump / staging / recycle 改为指向本地 sidecar 的 symlink,
+# 把 alpha_dump / staging 改为指向本地 sidecar 的 symlink,
 # 然后应用 alpha-core / alpha-data 两组权限模型。
 # 不用 POSIX ACL,靠 setgid + umask 0002。
 
@@ -11,7 +11,7 @@ source ./config.sh
 require_sudo
 require_mountpoint "$JFS_MOUNT"
 
-LOCAL_DIRS=(alpha_dump staging recycle)
+LOCAL_DIRS=(alpha_dump staging)
 REAL_USER="${SUDO_USER:-$USER}"
 REAL_GROUP="$(id -gn "$REAL_USER")"
 
@@ -116,25 +116,6 @@ sudo chown "root:$GRP_DATA" "$JFS_LOCAL_DIR"; sudo chmod 2755 "$JFS_LOCAL_DIR"
 info "  $JFS_LOCAL_DIR  (root:$GRP_DATA 2755)"
 apply_top_dir "$JFS_LOCAL_DIR/staging"    "root:$GRP_CORE" 2750
 apply_top_dir "$JFS_LOCAL_DIR/alpha_dump" "root:$GRP_DATA" 2755
-
-# recycle: sticky 顶层, 子目录(嵌套一层 unixId)按用户单独 chown
-RECYCLE="$JFS_LOCAL_DIR/recycle"
-if [[ -d "$RECYCLE" ]]; then
-  sudo chown root:root "$RECYCLE"
-  sudo chmod 1755 "$RECYCLE"
-  sudo chmod g-s "$RECYCLE"   # 清掉早期 setgid 残留
-  info "  $RECYCLE  (root:root 1755 sticky)"
-  for sub in "$RECYCLE"/*/; do
-    [[ -d "$sub" ]] || continue
-    uid=$(basename "$sub")
-    if ! getent passwd "$uid" >/dev/null; then warn "  recycle/$uid 无系统用户"; continue; fi
-    pgrp=$(id -gn "$uid")
-    sudo chown -R "$uid:$pgrp" "$sub"
-    sudo chmod -R u=rwX,g=,o= "$sub"
-    sudo find "$sub" -type d -exec chmod g-s {} +
-    info "  $sub  ($uid:$pgrp 0700)"
-  done
-fi
 
 echo
 warn "研究员 shell 必须 umask 0002:"

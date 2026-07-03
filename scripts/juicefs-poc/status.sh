@@ -131,7 +131,7 @@ echo
 info "=== Sidecar ($JFS_LOCAL_DIR) ==="
 # ============================================================
 if [[ -d "$JFS_LOCAL_DIR" ]]; then
-  for d in alpha_dump staging recycle; do
+  for d in alpha_dump staging; do
     sym="$JFS_MOUNT/$d"
     local_d="$JFS_LOCAL_DIR/$d"
     if [[ ! -L "$sym" ]]; then

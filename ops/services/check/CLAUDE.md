@@ -8,7 +8,7 @@
 3. **Long Backtest** - Full historical backtest (20150101-20251231), pure run, no checks
 4. **Compliance** - Position limits (max 5% per stock), min stock counts (50 long, 50 short, 100 total)
 5. **Correlation** - 相关性 + 业绩门槛 (单一 stage,见下)
-6. **Archive** - Run simsummary, save metrics to index, move to library; Fail: move to recycle folder
+6. **Archive** - Run simsummary, save metrics to index, move to library; Fail: mark REJECTED (src 归档到 alpha_src)
 
 **Correlation stage 门槛** (`checker/correlation_checker.py`):
 
@@ -19,11 +19,13 @@
 | tvr% (换手) | ≤ 阈值,delay 分桶 | `correlation.tvr_d0%` (默认 60.0) / `tvr_d1%` (默认 50.0) |
 | bcorr | < 阈值 否则需打败竞品 | `correlation.corr_threshold` (默认 0.7) |
 
-`tvr` 上限按因子 `<Alpha @delay>` 选 d0/d1。任一项不达标 → `CorrelationFail` (REJECTED + recycle,日志含违反项,例 `tvr%=55.00 > 50.0 (delay=1)`)。
+`tvr` 上限按因子 `<Alpha @delay>` 选 d0/d1。任一项不达标 → `CorrelationFail` (REJECTED,日志含违反项,例 `tvr%=55.00 > 50.0 (delay=1)`)。
 
 **Failure semantics**:
 - validate / long_backtest fail → revert to SUBMITTED, factor stays in staging (environmental/config issue, retry via `ops check --retry`)
-- checkbias / checkpoint / compliance / correlation / archive fail → REJECTED, factor moved to recycle (factor quality issue, QR must fix code and re-submit)
+- checkbias / checkpoint / compliance / correlation / archive fail → REJECTED (factor quality issue, QR must fix code and re-submit)
+
+失败因子的 src 归档到 `alpha_src/`(与 ACTIVE 同库,状态靠 state 的 `status`/`last_fail_stage`/`last_fail_reason` 区分,不靠目录位置)。compliance/correlation 这类 late-stage 失败额外保留 pnl + dump(数据完整,有分析价值);checkbias/checkpoint 失败清掉 dump/feature(短期数据不完整)。staging 原物在归档后清除。**不再有 recycle 目录**(见 `on_reject`,原 `to_recycle`)。
 
 Uses `ProcessPoolExecutor` (max 20 workers) for parallel factor checking.
 
@@ -63,28 +65,12 @@ The delay value is read from the factor's XML: `<Alpha delay="0">`.
 
 `checkbias_checker.py` never mutates the factor's original `.py`. Writes the injected source (firewall code + AST-decorated factor) to `{factor}_firewall.py`, points XML's `Modules.Alpha.@module` at the temp file for the backtest, and restores XML + deletes the temp in `finally`. A crash mid-injection therefore can't leave a half-decorated `.py` that double-decorates next run. AST also guards against pre-existing `@DataFirewall` decorators just in case.
 
-## Reconciliation (`reconcile.py`)
+## State drift & crash recovery
 
-`ops check` runs a reconcile pass first. Walks every record in state.json against the filesystem (staging / alpha_src / recycle) and repairs drift caused by processes dying between a filesystem move and the matching state transition:
-
-| state status | location found in | action |
-|---|---|---|
-| SUBMITTED | staging | ok |
-| SUBMITTED | alpha_src | → ACTIVE (move done, state didn't catch up) |
-| SUBMITTED | recycle | → REJECTED |
-| SUBMITTED | nowhere | drop record |
-| CHECKING | staging | → SUBMITTED (crashed mid-check) |
-| CHECKING | alpha_src | → ACTIVE |
-| CHECKING | recycle | → REJECTED |
-| CHECKING | nowhere | drop record |
-| ACTIVE | not in alpha_src | warn (don't auto-fix — surprising) |
-| REJECTED | not in recycle | warn |
-| DELETED | staging | → SUBMITTED (re-submitted, tombstone invalidated) |
-| DELETED | alpha_src | → ACTIVE (tombstone invalidated) |
-| DELETED | recycle | → REJECTED (tombstone invalidated) |
-| DELETED | nowhere | ok |
-
-Filesystem is the source of truth; reconcile only touches state.
+reconcile 已下线(state 上共享 redis 后,per-host 本地 `staging` 视图无权裁决全局 state)。
+crash 恢复靠两点自愈:`ops check` **按 staging 目录扫描**(不看 state status),崩在半路仍在
+staging 的因子下次照样重跑,并覆盖其 `CHECKING` 状态;redis state 原子写,drift 窗口只在
+"移动文件 → 改 state" 两步之间且极小。真正需要人工介入的残留用 `ops rm` / 后续 `ops doctor` 处理。
 
 ## Concurrency
 

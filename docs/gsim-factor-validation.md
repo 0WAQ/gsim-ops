@@ -59,7 +59,7 @@
 - XML 临时指向临时文件，`finally` 块恢复 XML 并删除临时文件
 - 进程崩溃不会留下半装饰的代码
 
-**失败处理**: 状态转为 `REJECTED`，因子移到 recycle。
+**失败处理**: 状态转为 `REJECTED`，src 归档到 alpha_src(状态靠 state 区分)。
 
 ### 2. Checkpoint（断点恢复检测）
 
@@ -125,7 +125,7 @@ XML 中通过 `Constants` 控制：
 
 **本地验证**: 用户可在本地用 `run_cp.py` 跑两遍，对比 PNL 一致性。
 
-**失败处理**: 状态转为 `REJECTED`，移到 recycle。
+**失败处理**: 状态转为 `REJECTED`，src 归档到 alpha_src(状态靠 state 区分)。
 
 ### 3. Long Backtest（长回测）
 
@@ -162,7 +162,7 @@ XML 中通过 `Constants` 控制：
 - 使用 `AlphaOpRank` 排序，增加分散度
 - 使用 `AlphaOpIndNeut` 行业中性化
 
-**失败处理**: 状态转为 `REJECTED`，移到 recycle。
+**失败处理**: 状态转为 `REJECTED`，src 归档到 alpha_src(状态靠 state 区分)。
 
 ### 5. Correlation（相关性检测）
 
@@ -182,7 +182,7 @@ XML 中通过 `Constants` 控制：
 /usr/local/gsim/dataops/bcorr new_factor_pnl /mnt/storage/alphalib/alpha_pnl/
 ```
 
-**失败处理**: 状态转为 `REJECTED`，移到 recycle。
+**失败处理**: 状态转为 `REJECTED`，src 归档到 alpha_src(状态靠 state 区分)。
 
 ### 6. Archive（归档）
 
@@ -201,12 +201,12 @@ XML 中通过 `Constants` 控制：
 | 阶段 | 失败后状态 | 因子去向 |
 |-----|-----------|---------|
 | Validate | `SUBMITTED` | 留 staging（可 retry） |
-| Checkbias | `REJECTED` | 移 recycle |
-| Checkpoint | `REJECTED` | 移 recycle |
+| Checkbias | `REJECTED` | src 留 alpha_src |
+| Checkpoint | `REJECTED` | src 留 alpha_src |
 | Long Backtest | `SUBMITTED` | 留 staging（可 retry） |
-| Compliance | `REJECTED` | 移 recycle |
-| Correlation | `REJECTED` | 移 recycle |
-| Archive | `REJECTED` | 移 recycle |
+| Compliance | `REJECTED` | src 留 alpha_src |
+| Correlation | `REJECTED` | src 留 alpha_src |
+| Archive | `REJECTED` | src 留 alpha_src |
 
 设计原则：
 - **环境/配置问题** → 回退到 SUBMITTED，可 retry
@@ -242,56 +242,40 @@ XML 中通过 `Constants` 控制：
 | 空头最小持股数 | ≥ 50 | `compliance.min_short_stocks` |
 | 总最小持股数 | ≥ 100 | `compliance.min_total_stocks` |
 
-## Recycle 机制
+## REJECTED 因子归档
 
-未通过的因子进入 `/mnt/storage/recycle/{UnixId}/`，按淘汰环节分目录：
+> **recycle 已退役(2026-07)**。曾把未通过因子副本放到 `recycle/{UnixId}/{stage}/`
+> 供研究员查看,但研究员 work tree 在 dropbox 够不着 root-owned 的本地 recycle,且其内容
+> (src / 失败阶段 / 原因)在 alpha_src + state 里都有权威副本,故整体下线。
 
-```
-/mnt/storage/recycle/wbai/
-├── checkbias/
-│   └── AlphaWbaiExample1/
-│       ├── AlphaWbaiExample1.py
-│       ├── Config.Wbai.Example1.xml
-│       ├── Readme.Wbai.Example1.txt
-│       └── reason.txt
-├── checkpoint/
-├── compliance/
-└── correlation/
-```
-
-`reason.txt` 记录具体失败原因。
+未通过的因子:
+- **src** 归档到 `alpha_src/<name>/`(与 ACTIVE 同库,状态靠 state 区分)
+- **失败阶段 / 原因** 记在 state 的 `last_fail_stage` / `last_fail_reason` + `check_history`
+- compliance/correlation 这类 late-stage 失败额外保留 pnl + dump(数据完整,有分析价值);
+  checkbias/checkpoint 失败清掉 dump/feature(短期数据不完整)
 
 ### 召回处理
 
-修改后可以重新提交：
+修改后可以重新提交:
 
 ```bash
-# 从 recycle 召回 rejected 因子（重新进入 staging）
-uv run ops resubmit AlphaWbaiExample1 -s rejected
+# 原代码重跑 check(从 alpha_src 召回到 staging)
+uv run ops recheck AlphaWbaiExample1 -s rejected
 
-# 从 dropbox 重新提交
-uv run ops submit -u wbai -s 20260401 -f AlphaWbaiExample1
+# 改了代码从 dropbox 重新提交(version += 1)
+uv run ops resubmit -u wbai -s 20260401 -f AlphaWbaiExample1
 ```
 
-## State Reconciliation
+## State 漂移与崩溃恢复
 
-`ops check` 启动时会运行 reconcile 修复状态漂移（进程崩溃可能在文件移动和状态变更之间死亡）：
+reconcile 已下线。state 上共享 redis 后,per-host 本地 `staging` / `alpha_dump` 视图无权裁决
+全局 state(单机看不到别机的文件,曾导致跨机误判 / 误删)。崩溃恢复改靠两点自愈:
 
-| state | 文件位置 | 修正动作 |
-|-------|---------|---------|
-| SUBMITTED | staging | OK |
-| SUBMITTED | alpha_src | → ACTIVE |
-| SUBMITTED | recycle | → REJECTED |
-| SUBMITTED | 找不到 | 删除记录 |
-| CHECKING | staging | → SUBMITTED（中途崩溃） |
-| CHECKING | alpha_src | → ACTIVE |
-| CHECKING | recycle | → REJECTED |
-| ACTIVE | 不在 alpha_src | 警告（不自动修复） |
-| REJECTED | 不在 recycle | 警告 |
-| DELETED | staging | → SUBMITTED（重新提交） |
-| DELETED | alpha_src | → ACTIVE（tombstone 失效） |
+- `ops check` **按 staging 目录扫描**(不看 state status),崩在半路仍在 staging 的因子
+  下次照常重跑,并覆盖其 `CHECKING` 状态
+- redis state 原子写,drift 窗口只在"移动文件 → 改 state"两步之间且极小
 
-文件系统是真相之源，reconcile 只调整状态。
+真正需要人工介入的残留用 `ops rm` / 后续 `ops doctor` 处理。
 
 ## 查看检测状态
 
