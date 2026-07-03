@@ -42,3 +42,12 @@ CREATE INDEX IF NOT EXISTS ix_fd_fields ON factor_derived USING GIN (fields);
 CREATE INDEX IF NOT EXISTS ix_fd_tables ON factor_derived USING GIN (tables);
 -- 常用排序/过滤列
 CREATE INDEX IF NOT EXISTS ix_fd_author ON factor_derived (library_id, author);
+
+-- library 级元数据 (如 index_built_at: 上次全量扫盘构建 index 的时间水位,
+-- 用来跨机判断 PG 里的 index 是否比 JFS alpha_src mtime 新)
+CREATE TABLE IF NOT EXISTS derived_meta (
+    library_id TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT,
+    PRIMARY KEY (library_id, key)
+);

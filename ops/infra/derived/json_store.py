@@ -47,8 +47,23 @@ class JsonDerivedStore(DerivedStore):
         except Exception:
             return {}
 
-    def _write(self, records: dict[str, dict[str, Any]]) -> None:
-        data = {"version": DERIVED_VERSION, "records": records}
+    def _read_meta(self) -> dict[str, str]:
+        if not self.path.exists():
+            return {}
+        try:
+            with self.path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("version") != DERIVED_VERSION:
+                return {}
+            return data.get("meta", {})
+        except Exception:
+            return {}
+
+    def _write(self, records: dict[str, dict[str, Any]], meta: dict[str, str] | None = None) -> None:
+        # Preserve meta across record writes (and vice versa) — both live in one file.
+        if meta is None:
+            meta = self._read_meta()
+        data = {"version": DERIVED_VERSION, "records": records, "meta": meta}
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -113,3 +128,13 @@ class JsonDerivedStore(DerivedStore):
                 del records[name]
                 self._write(records)
             return existed
+
+    def get_meta(self, key: str) -> str | None:
+        return self._read_meta().get(key)
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self._locked():
+            records = self._read()
+            meta = self._read_meta()
+            meta[key] = value
+            self._write(records, meta)

@@ -40,6 +40,12 @@ CREATE TABLE IF NOT EXISTS factor_derived (
 CREATE INDEX IF NOT EXISTS ix_fd_fields ON factor_derived USING GIN (fields);
 CREATE INDEX IF NOT EXISTS ix_fd_tables ON factor_derived USING GIN (tables);
 CREATE INDEX IF NOT EXISTS ix_fd_author ON factor_derived (library_id, author);
+CREATE TABLE IF NOT EXISTS derived_meta (
+    library_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT,
+    PRIMARY KEY (library_id, key)
+);
 """
 
 
@@ -143,3 +149,19 @@ class PostgresDerivedStore(DerivedStore):
                 (self.lib, name),
             )
             return cur.rowcount > 0
+
+    def get_meta(self, key: str) -> str | None:
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                "SELECT value FROM derived_meta WHERE library_id = %s AND key = %s",
+                (self.lib, key),
+            ).fetchone()
+            return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self.pool.connection() as conn:
+            conn.execute(
+                "INSERT INTO derived_meta (library_id, key, value) VALUES (%s, %s, %s) "
+                "ON CONFLICT (library_id, key) DO UPDATE SET value = EXCLUDED.value",
+                (self.lib, key, value),
+            )

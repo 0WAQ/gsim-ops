@@ -1,6 +1,5 @@
 """Factor library scanner for querying factors in alphalib."""
 
-import hashlib
 import json
 import re
 import time
@@ -9,18 +8,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from ops.infra.config import Config
-from ops.infra.cache import cache_path
 from ops.core.metrics import Metrics
 
 
-INDEX_VERSION = 6   # bumped when src_path/dump_path/pnl_path moved out of cache (relative to config now)
 INDEX_MAX_AGE_SECONDS = 7 * 24 * 3600  # 7 days -- belt-and-suspenders fallback;
-                                       # primary invalidation is alpha_src mtime (see _load_index)
-
-
-def _get_cache_path(config: Config, config_path: Path) -> Path:
-    legacy_hash = hashlib.md5(str(config_path.resolve()).encode()).hexdigest()[:8]
-    return cache_path(config.library_id, "index.json", legacy_hash=legacy_hash)
+                                       # primary invalidation is alpha_src mtime
+                                       # vs the DerivedStore's index_built_at watermark
 
 
 @dataclass
@@ -82,7 +75,6 @@ class LibraryScanner:
         self.alpha_dump = config.alpha_dump
         self.alpha_pnl = config.alpha_pnl
         self.use_cache = use_cache
-        self._index_path = _get_cache_path(config, config_path)
 
     @classmethod
     def from_config_path(
@@ -143,54 +135,85 @@ class LibraryScanner:
         return None, None
 
     def _load_index(self) -> list[FactorInfo] | None:
-        if not self._index_path.exists():
-            return None
+        """Deprecated per-machine JSON index. Superseded by the DerivedStore
+        (see _load_index_from_store). Retained only as an unused reference for
+        one release; safe to delete. Always returns None so nothing reads the
+        stale ~/.cache index.json."""
+        return None
 
+    def _save_index(self, factors: list[FactorInfo]) -> None:
+        """Deprecated: index now published to the DerivedStore. No-op."""
+        return None
+
+    # --- DerivedStore-backed index (shared across machines) ------------------
+    #
+    # The index (name/author/has_pnl/dump_days/delay) lives in the derived
+    # store alongside metrics/datasources/bcorr. Freshness is a single
+    # library-level watermark `index_built_at` (epoch seconds) compared against
+    # alpha_src's mtime -- which sits on shared JFS, so all machines see the
+    # same value. Whichever machine first notices alpha_src changed pays the
+    # ~25s directory scan and republishes; every other machine then reads the
+    # index straight from Postgres (~0.1s). No per-machine JSON, no per-machine
+    # rescan.
+
+    def _store(self):
+        from ops.infra.derived import default_derived_store
+        return default_derived_store(self.config)
+
+    def _record_to_info(self, rec) -> FactorInfo:
+        name = rec.name
+        return FactorInfo(
+            name=name,
+            author=rec.author if rec.author is not None else self._parse_author(name),
+            src_path=self.alpha_src / name,
+            dump_path=self.alpha_dump / name,
+            pnl_path=self.alpha_pnl / name,
+            has_pnl=bool(rec.has_pnl),
+            dump_days=rec.dump_days or 0,
+            delay=rec.delay,
+        )
+
+    def _load_index_from_store(self) -> list[FactorInfo] | None:
+        """Fast path: read index from the store if it's fresh vs alpha_src mtime."""
         try:
-            with self._index_path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            if data.get("version") != INDEX_VERSION:
+            store = self._store()
+            built_at_raw = store.get_meta("index_built_at")
+            if not built_at_raw:
                 return None
-
-            created_at = data.get("created_at", 0)
-            # Cache is valid as long as alpha_src directory hasn't been touched
-            # since we built it. Adding or removing a factor (mkdir / rmdir at
-            # the top level) updates alpha_src's mtime, which invalidates the
-            # cache automatically. Edits inside an existing factor (changes
-            # to .py / Readme) do NOT bump alpha_src's mtime -- intentional,
-            # because the fields list/info display (name/author/has_pnl/
-            # dump_days/delay) don't depend on file contents.
-            #
-            # Falls back to a generous TTL so a fresh checkout / cold cache
-            # eventually rebuilds even if the directory is dormant.
+            built_at = float(built_at_raw)
             try:
                 src_mtime = self.alpha_src.stat().st_mtime
-                if src_mtime > created_at:
-                    return None
+                if src_mtime > built_at:
+                    return None  # alpha_src changed since last build -> stale
             except OSError:
-                # alpha_src missing -- let scan() handle it; trust the cache
-                # for now so list still works on a node where the mount
-                # is temporarily down.
-                pass
-            if time.time() - created_at > INDEX_MAX_AGE_SECONDS:
+                pass  # mount down: trust the store
+            if time.time() - built_at > INDEX_MAX_AGE_SECONDS:
+                return None  # TTL backstop (catches dump_days drift w/o mkdir)
+            recs = store.get_all()
+            if not recs:
                 return None
-
-            return [FactorInfo.from_dict(f, self.config) for f in data.get("factors", [])]
+            # Only surface factors that actually have index data (author set on
+            # scan); bcorr/metrics-only rows without an index shouldn't appear.
+            return [
+                self._record_to_info(r) for r in recs.values()
+                if r.author is not None or r.has_pnl is not None
+            ]
         except Exception:
             return None
 
-    def _save_index(self, factors: list[FactorInfo]) -> None:
+    def _publish_index(self, factors: list[FactorInfo]) -> None:
         try:
-            self._index_path.parent.mkdir(parents=True, exist_ok=True)
-            data = {
-                "version": INDEX_VERSION,
-                "created_at": time.time(),
-                "factor_count": len(factors),
-                "factors": [f.to_dict() for f in factors],
-            }
-            with self._index_path.open("w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            store = self._store()
+            store.upsert_index({
+                f.name: {
+                    "author": f.author,
+                    "has_pnl": f.has_pnl,
+                    "dump_days": f.dump_days,
+                    "delay": f.delay,
+                }
+                for f in factors
+            })
+            store.set_meta("index_built_at", repr(time.time()))
         except Exception:
             pass
 
@@ -239,20 +262,20 @@ class LibraryScanner:
 
     def scan(self, refresh: bool = False) -> list[FactorInfo]:
         if self.use_cache and not refresh:
-            cached = self._load_index()
+            cached = self._load_index_from_store()
             if cached is not None:
                 return cached
 
         factors = self._scan_directory()
 
         if self.use_cache:
-            self._save_index(factors)
+            self._publish_index(factors)
 
         return factors
 
     def get(self, name: str, use_cache: bool = True) -> FactorInfo | None:
         if use_cache and self.use_cache:
-            cached = self._load_index()
+            cached = self._load_index_from_store()
             if cached is not None:
                 for f in cached:
                     if f.name == name:

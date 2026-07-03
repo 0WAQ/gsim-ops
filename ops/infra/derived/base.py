@@ -73,3 +73,11 @@ class DerivedStore(ABC):
     @abstractmethod
     def delete(self, name: str) -> bool:
         """删一个因子的派生数据。返回是否存在过。"""
+
+    @abstractmethod
+    def get_meta(self, key: str) -> str | None:
+        """读一个 library 级元数据值 (如 index_built_at)。不存在返回 None。"""
+
+    @abstractmethod
+    def set_meta(self, key: str, value: str) -> None:
+        """写一个 library 级元数据值。"""
