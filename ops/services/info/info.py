@@ -4,8 +4,9 @@ from rich.console import Console
 from rich.tree import Tree
 
 from ops.core.library import LibraryScanner
-from ops.services.list.metrics import load_metrics
-from ops.services.list.datasource import load_datasources
+from ops.infra.config import Config
+from ops.infra.derived import default_derived_store
+from ops.services.list.metrics import _to_metrics
 
 
 _console = Console(width=shutil.get_terminal_size((140, 50)).columns)
@@ -30,8 +31,8 @@ def run_info(args):
 
     first_date, last_date = scanner.get_dump_date_range(factor.name)
     date_range = f"{first_date} ~ {last_date}" if first_date else "N/A"
-    metrics = load_metrics(args.config_path).get(factor.name)
-    ds = load_datasources(args.config_path).get(factor.name)
+    rec = default_derived_store(Config.load(args.config_path)).get(factor.name)
+    metrics = _to_metrics(rec) if rec else None
 
     tree = Tree(f"[bold cyan]Factor: {factor.name}[/]  [dim](author: {factor.author})[/]")
 
@@ -53,9 +54,9 @@ def run_info(args):
         m.add("[dim]—  (run ops list --refresh-metrics to fetch)[/]")
 
     d = tree.add("[yellow]Data Sources[/]")
-    if ds:
-        d.add(_kv("Tables:", ", ".join(ds.get("tables", []))))
-        d.add(_kv("Fields:", ", ".join(ds.get("fields", []))))
+    if rec and (rec.fields is not None or rec.tables is not None):
+        d.add(_kv("Tables:", ", ".join(rec.tables or [])))
+        d.add(_kv("Fields:", ", ".join(rec.fields or [])))
     else:
         d.add("[dim]—  (run ops list --refresh-datasources to fetch)[/]")
 

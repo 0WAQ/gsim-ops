@@ -59,13 +59,25 @@ class PostgresDerivedStore(DerivedStore):
         with self.pool.connection() as conn:
             conn.execute(_SCHEMA)
 
-    def get_all(self, author: str | None = None) -> dict[str, DerivedRecord]:
-        sql = (
-            "SELECT name, author, has_pnl, dump_days, delay, "
-            "ret, shrp, mdd, tvr, fitness, fields, tables, "
-            "max_bcorr, max_bcorr_factor "
-            "FROM factor_derived WHERE library_id = %s"
+    _COLS = (
+        "name, author, has_pnl, dump_days, delay, "
+        "ret, shrp, mdd, tvr, fitness, fields, tables, "
+        "max_bcorr, max_bcorr_factor"
+    )
+
+    @staticmethod
+    def _row_to_record(row) -> DerivedRecord:
+        (name, auth, has_pnl, dump_days, delay, ret, shrp, mdd, tvr,
+         fitness, fields, tables, max_bcorr, max_bcorr_factor) = row
+        return DerivedRecord(
+            name=name, author=auth, has_pnl=has_pnl, dump_days=dump_days,
+            delay=delay, ret=ret, shrp=shrp, mdd=mdd, tvr=tvr, fitness=fitness,
+            fields=fields, tables=tables,
+            max_bcorr=max_bcorr, max_bcorr_factor=max_bcorr_factor,
         )
+
+    def get_all(self, author: str | None = None) -> dict[str, DerivedRecord]:
+        sql = f"SELECT {self._COLS} FROM factor_derived WHERE library_id = %s"
         params: list[Any] = [self.lib]
         if author is not None:
             sql += " AND author = %s"
@@ -73,15 +85,15 @@ class PostgresDerivedStore(DerivedStore):
         out: dict[str, DerivedRecord] = {}
         with self.pool.connection() as conn:
             for row in conn.execute(sql, params):
-                (name, auth, has_pnl, dump_days, delay, ret, shrp, mdd, tvr,
-                 fitness, fields, tables, max_bcorr, max_bcorr_factor) = row
-                out[name] = DerivedRecord(
-                    name=name, author=auth, has_pnl=has_pnl, dump_days=dump_days,
-                    delay=delay, ret=ret, shrp=shrp, mdd=mdd, tvr=tvr, fitness=fitness,
-                    fields=fields, tables=tables,
-                    max_bcorr=max_bcorr, max_bcorr_factor=max_bcorr_factor,
-                )
+                rec = self._row_to_record(row)
+                out[rec.name] = rec
         return out
+
+    def get(self, name: str) -> DerivedRecord | None:
+        sql = f"SELECT {self._COLS} FROM factor_derived WHERE library_id = %s AND name = %s"
+        with self.pool.connection() as conn:
+            row = conn.execute(sql, (self.lib, name)).fetchone()
+            return self._row_to_record(row) if row else None
 
     def upsert_index(self, entries: dict[str, dict[str, Any]]) -> None:
         if not entries:

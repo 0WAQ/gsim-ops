@@ -7,12 +7,14 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 
-from ops.core.library import LibraryScanner, FactorInfo
+from ops.core.library import LibraryScanner
 from ops.core.state import FactorStatus, FactorRecord
+from ops.infra.config import Config
 from ops.infra.store import default_store
-from .metrics import load_metrics, refresh_metrics, merge_metrics
-from .datasource import load_datasources, refresh_datasources, merge_datasources
-from .bcorr import load_bcorr, refresh_bcorr, merge_bcorr
+from ops.infra.derived import default_derived_store, DerivedRecord
+from .metrics import refresh_metrics
+from .datasource import refresh_datasources
+from .bcorr import refresh_bcorr
 
 
 DASH = "—"
@@ -34,17 +36,16 @@ def _fmt(v, prec=2):
     return f"{v:.{prec}f}" if v is not None else DASH
 
 
-def _metric(f: FactorInfo, name: str):
-    return _fmt(getattr(f.metrics, name)) if f.metrics else DASH
+def _metric(r: DerivedRecord, name: str):
+    return _fmt(getattr(r, name))
 
 
-def _bcorr(f: FactorInfo):
-    v = f.bcorr.get("max_bcorr") if f.bcorr else None
-    return _fmt(v)
+def _bcorr(r: DerivedRecord):
+    return _fmt(r.max_bcorr)
 
 
-def _datasource(f: FactorInfo, key):
-    return ", ".join(f.datasources.get(key, [])) if f.datasources else ""
+def _datasource(r: DerivedRecord, key: str):
+    return ", ".join(getattr(r, key) or [])
 
 
 def _fail_stage(rec: FactorRecord):
@@ -53,32 +54,32 @@ def _fail_stage(rec: FactorRecord):
     return ""
 
 
-# (header, justify, extras, getter(factor, record) -> str)
+# (header, justify, extras, getter(record, state_record) -> str)
 _BASE_COLS = [
-    ("name",    "left",  {"no_wrap": True, "max_width": 36, "overflow": "ellipsis"}, lambda f, r: f.name),
-    ("author",  "left",  {},                lambda f, r: f.author),
-    ("delay",   "right", {},                lambda f, r: str(f.delay) if f.delay is not None else "?"),
-    ("ret%",    "right", {},                lambda f, r: _metric(f, "ret")),
-    ("shrp",    "right", {},                lambda f, r: _metric(f, "shrp")),
-    ("mdd%",    "right", {},                lambda f, r: _metric(f, "mdd")),
-    ("tvr%",    "right", {},                lambda f, r: _metric(f, "tvr")),
-    ("fitness", "right", {},                lambda f, r: _metric(f, "fitness")),
-    ("bcorr",   "right", {},                lambda f, r: _bcorr(f)),
+    ("name",    "left",  {"no_wrap": True, "max_width": 36, "overflow": "ellipsis"}, lambda r, s: r.name),
+    ("author",  "left",  {},                lambda r, s: r.author or ""),
+    ("delay",   "right", {},                lambda r, s: str(r.delay) if r.delay is not None else "?"),
+    ("ret%",    "right", {},                lambda r, s: _metric(r, "ret")),
+    ("shrp",    "right", {},                lambda r, s: _metric(r, "shrp")),
+    ("mdd%",    "right", {},                lambda r, s: _metric(r, "mdd")),
+    ("tvr%",    "right", {},                lambda r, s: _metric(r, "tvr")),
+    ("fitness", "right", {},                lambda r, s: _metric(r, "fitness")),
+    ("bcorr",   "right", {},                lambda r, s: _bcorr(r)),
 ]
-_FAIL_COL   = ("fail_stage", "left", {},                    lambda f, r: _fail_stage(r))
-_TABLES_COL = ("tables",     "left", {"overflow": "fold"},  lambda f, r: _datasource(f, "tables"))
-_FIELDS_COL = ("fields",     "left", {"overflow": "fold"},  lambda f, r: _datasource(f, "fields"))
+_FAIL_COL   = ("fail_stage", "left", {},                    lambda r, s: _fail_stage(s))
+_TABLES_COL = ("tables",     "left", {"overflow": "fold"},  lambda r, s: _datasource(r, "tables"))
+_FIELDS_COL = ("fields",     "left", {"overflow": "fold"},  lambda r, s: _datasource(r, "fields"))
 
 
-def print_table(factors: list[FactorInfo], records: dict[str, FactorRecord],
+def print_table(records: list[DerivedRecord], state_records: dict[str, FactorRecord],
                 show_tables=False, show_fields=False):
-    if not factors:
+    if not records:
         _console.print("[yellow]No factors found.[/]")
         return
 
     has_rejected = any(
-        (rec := records.get(f.name)) and rec.status == FactorStatus.REJECTED
-        for f in factors
+        (rec := state_records.get(r.name)) and rec.status == FactorStatus.REJECTED
+        for r in records
     )
 
     cols = list(_BASE_COLS)
@@ -90,40 +91,64 @@ def print_table(factors: list[FactorInfo], records: dict[str, FactorRecord],
     for header, justify, extras, _ in cols:
         table.add_column(header, justify=justify, **extras)
 
-    for f in factors:
-        rec = records.get(f.name)
+    for r in records:
+        rec = state_records.get(r.name)
         style = _STATUS_STYLE.get(rec.status, "") if rec else ""
-        table.add_row(*(get(f, rec) for _, _, _, get in cols), style=style)
+        table.add_row(*(get(r, rec) for _, _, _, get in cols), style=style)
 
     _console.print(table)
-    _console.print(f"Total: {len(factors)} factors")
+    _console.print(f"Total: {len(records)} factors")
 
 
-def print_json(factors: list[FactorInfo]):
-    data = [f.to_dict() for f in factors]
+def _record_json(r: DerivedRecord) -> dict:
+    # Preserve the historical FactorInfo.to_dict() shape: metrics/datasources/
+    # bcorr are nested dicts (or null when the group was never computed).
+    metrics = None
+    if r.ret is not None or r.shrp is not None or r.fitness is not None:
+        metrics = {"ret%": r.ret, "tvr%": r.tvr, "shrp": r.shrp, "mdd%": r.mdd, "fitness": r.fitness}
+    datasources = None
+    if r.fields is not None or r.tables is not None:
+        datasources = {"fields": r.fields or [], "tables": r.tables or []}
+    bcorr = None
+    if r.max_bcorr is not None:
+        bcorr = {"max_bcorr": r.max_bcorr, "max_bcorr_factor": r.max_bcorr_factor}
+    return {
+        "name": r.name,
+        "author": r.author,
+        "has_pnl": r.has_pnl,
+        "dump_days": r.dump_days,
+        "delay": r.delay,
+        "metrics": metrics,
+        "datasources": datasources,
+        "bcorr": bcorr,
+    }
+
+
+def print_json(records: list[DerivedRecord]):
+    data = [_record_json(r) for r in records]
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
 SORT_KEYS = {
-    "ret": lambda f: f.metrics.ret if f.metrics else float("-inf"),
-    "shrp": lambda f: f.metrics.shrp if f.metrics else float("-inf"),
-    "mdd": lambda f: f.metrics.mdd if f.metrics else float("-inf"),
-    "tvr": lambda f: f.metrics.tvr if f.metrics else float("-inf"),
-    "fitness": lambda f: f.metrics.fitness if f.metrics else float("-inf"),
-    "dump_days": lambda f: f.dump_days,
-    "delay": lambda f: f.delay if f.delay is not None else float("-inf"),
-    "bcorr": lambda f: abs(f.bcorr["max_bcorr"]) if f.bcorr and f.bcorr.get("max_bcorr") is not None else float("-inf"),
+    "ret": lambda r: r.ret if r.ret is not None else float("-inf"),
+    "shrp": lambda r: r.shrp if r.shrp is not None else float("-inf"),
+    "mdd": lambda r: r.mdd if r.mdd is not None else float("-inf"),
+    "tvr": lambda r: r.tvr if r.tvr is not None else float("-inf"),
+    "fitness": lambda r: r.fitness if r.fitness is not None else float("-inf"),
+    "dump_days": lambda r: r.dump_days or 0,
+    "delay": lambda r: r.delay if r.delay is not None else float("-inf"),
+    "bcorr": lambda r: abs(r.max_bcorr) if r.max_bcorr is not None else float("-inf"),
 }
 
 METRIC_GETTERS = {
-    "ret": lambda f: f.metrics.ret if f.metrics else None,
-    "shrp": lambda f: f.metrics.shrp if f.metrics else None,
-    "mdd": lambda f: f.metrics.mdd if f.metrics else None,
-    "tvr": lambda f: f.metrics.tvr if f.metrics else None,
-    "fitness": lambda f: f.metrics.fitness if f.metrics else None,
-    "dump_days": lambda f: float(f.dump_days),
-    "delay": lambda f: float(f.delay) if f.delay is not None else None,
-    "bcorr": lambda f: abs(f.bcorr["max_bcorr"]) if f.bcorr and f.bcorr.get("max_bcorr") is not None else None,
+    "ret": lambda r: r.ret,
+    "shrp": lambda r: r.shrp,
+    "mdd": lambda r: r.mdd,
+    "tvr": lambda r: r.tvr,
+    "fitness": lambda r: r.fitness,
+    "dump_days": lambda r: float(r.dump_days) if r.dump_days is not None else None,
+    "delay": lambda r: float(r.delay) if r.delay is not None else None,
+    "bcorr": lambda r: abs(r.max_bcorr) if r.max_bcorr is not None else None,
 }
 
 _FILTER_PATTERN = re.compile(r"^(\w+)([><=!]+)(.+)$")
@@ -153,66 +178,72 @@ def parse_filters(filter_str: str) -> list[tuple[str, str, str]] | None:
     return filters
 
 
-def apply_filters(factors: list[FactorInfo], filters: list[tuple[str, str, str]]) -> list[FactorInfo]:
-    result = factors
+def apply_filters(records: list[DerivedRecord], filters: list[tuple[str, str, str]]) -> list[DerivedRecord]:
+    result = records
     for key, op, value in filters:
         if key == "tables":
             result = [
-                f for f in result
-                if f.datasources and any(fnmatch.fnmatch(t, value) for t in f.datasources.get("tables", []))
+                r for r in result
+                if r.tables and any(fnmatch.fnmatch(t, value) for t in r.tables)
             ]
         elif key == "field":
-            result = [f for f in result if f.datasources and value in f.datasources.get("fields", [])]
+            result = [r for r in result if r.fields and value in r.fields]
         elif key in METRIC_GETTERS:
             threshold = float(value)
             getter = METRIC_GETTERS[key]
             if op == ">":
-                result = [f for f in result if (v := getter(f)) is not None and v > threshold]
+                result = [r for r in result if (v := getter(r)) is not None and v > threshold]
             elif op == ">=":
-                result = [f for f in result if (v := getter(f)) is not None and v >= threshold]
+                result = [r for r in result if (v := getter(r)) is not None and v >= threshold]
             elif op == "<":
-                result = [f for f in result if (v := getter(f)) is not None and v < threshold]
+                result = [r for r in result if (v := getter(r)) is not None and v < threshold]
             elif op == "<=":
-                result = [f for f in result if (v := getter(f)) is not None and v <= threshold]
+                result = [r for r in result if (v := getter(r)) is not None and v <= threshold]
             elif op == "=":
-                result = [f for f in result if (v := getter(f)) is not None and v == threshold]
+                result = [r for r in result if (v := getter(r)) is not None and v == threshold]
     return result
 
 
 def run_list(args):
-    scanner = LibraryScanner.from_config_path(args.config_path)
-    factors = scanner.scan(refresh=args.refresh)
-    records = {r.name: r for r in default_store(scanner.config).list()}
-    statuses = {name: r.status for name, r in records.items()}
+    config = Config.load(args.config_path)
 
-    if args.user:
-        factors = scanner.filter_by_author(factors, args.user)
+    # Ensure the index (author/has_pnl/dump_days/delay) is fresh in the store.
+    # scan() rebuilds from the filesystem only when alpha_src changed; otherwise
+    # it's a no-op read. We ignore its return -- the store is the source now.
+    LibraryScanner.from_config_path(args.config_path).scan(refresh=args.refresh)
+
+    store = default_derived_store(config)
+    state_records = {r.name: r for r in default_store(config).list()}
+
+    # get_all may surface orphan rows (e.g. a factor removed from alpha_src but
+    # still carrying a stale bcorr value). The index scan sets author on every
+    # live factor, so author is None marks a row with no index -> not in the
+    # library. Filter those out to match the old scan()-based listing.
+    records = sorted(
+        (r for r in store.get_all(author=args.user).values() if r.author is not None),
+        key=lambda r: r.name,
+    )
 
     if args.status:
-        factors = [f for f in factors if statuses.get(f.name) == args.status]
+        records = [r for r in records
+                   if (s := state_records.get(r.name)) and s.status == args.status]
     else:
-        factors = [f for f in factors if statuses.get(f.name) != FactorStatus.DELETED]
+        records = [r for r in records
+                   if not (s := state_records.get(r.name)) or s.status != FactorStatus.DELETED]
 
-    if args.refresh_metrics:
-        metrics = refresh_metrics(factors, scanner.config, args.config_path)
-    else:
-        metrics = load_metrics(args.config_path)
-
-    factors = merge_metrics(factors, metrics)
-
-    if args.refresh_datasources:
-        datasources = refresh_datasources(factors, scanner.config, args.config_path)
-    else:
-        datasources = load_datasources(args.config_path)
-
-    factors = merge_datasources(factors, datasources)
-
-    if args.refresh_bcorr:
-        bcorr = refresh_bcorr(factors, scanner.config, args.config_path)
-    else:
-        bcorr = load_bcorr(args.config_path)
-
-    factors = merge_bcorr(factors, bcorr)
+    # Refresh derived groups for the (already filtered) set, then re-read those
+    # rows so the refreshed values show. Matches old behavior: refresh operated
+    # on the filtered factors, not the whole library.
+    if args.refresh_metrics or args.refresh_datasources or args.refresh_bcorr:
+        names = [r.name for r in records]
+        if args.refresh_metrics:
+            refresh_metrics(names, config, args.config_path)
+        if args.refresh_datasources:
+            refresh_datasources(names, config, args.config_path)
+        if args.refresh_bcorr:
+            refresh_bcorr(names, config, args.config_path)
+        refreshed = store.get_all()
+        records = [refreshed[r.name] for r in records if r.name in refreshed]
 
     if args.filter_by is not None:
         if not args.filter_by.strip():
@@ -221,16 +252,16 @@ def run_list(args):
         filters = parse_filters(args.filter_by)
         if filters is None:
             return
-        factors = apply_filters(factors, filters)
+        records = apply_filters(records, filters)
 
     if args.sort_by and args.sort_by in SORT_KEYS:
-        factors.sort(key=SORT_KEYS[args.sort_by], reverse=True)
+        records.sort(key=SORT_KEYS[args.sort_by], reverse=True)
 
     if args.n is not None:
-        factors = factors[:args.n]
+        records = records[:args.n]
 
     if args.format == "json":
-        print_json(factors)
+        print_json(records)
     else:
-        print_table(factors, records,
+        print_table(records, state_records,
                     show_tables=args.show_tables, show_fields=args.show_fields)

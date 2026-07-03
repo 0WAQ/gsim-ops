@@ -82,6 +82,10 @@ class JsonDerivedStore(DerivedStore):
             out[name] = DerivedRecord(**d)
         return out
 
+    def get(self, name: str) -> DerivedRecord | None:
+        d = self._read().get(name)
+        return DerivedRecord(**d) if d else None
+
     def _merge(self, name: str, updates: dict[str, Any]) -> None:
         with self._locked():
             records = self._read()

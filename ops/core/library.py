@@ -5,10 +5,8 @@ import re
 import time
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Any
 
 from ops.infra.config import Config
-from ops.core.metrics import Metrics
 
 
 INDEX_MAX_AGE_SECONDS = 7 * 24 * 3600  # 7 days -- belt-and-suspenders fallback;
@@ -18,6 +16,13 @@ INDEX_MAX_AGE_SECONDS = 7 * 24 * 3600  # 7 days -- belt-and-suspenders fallback;
 
 @dataclass
 class FactorInfo:
+    """A factor as seen on the filesystem: identity + paths + index fields.
+
+    This is the *scan* product -- what a directory walk produces and what the
+    index group of the DerivedStore persists. Derived values (metrics /
+    datasources / bcorr) are NOT here; read those from the DerivedStore
+    directly (DerivedRecord). Paths are reconstructed from the live Config,
+    never persisted (they depend on the node's mount root)."""
     name: str
     author: str
     src_path: Path
@@ -26,44 +31,6 @@ class FactorInfo:
     has_pnl: bool
     dump_days: int
     delay: int | None = None
-    metrics: Metrics | None = None
-    datasources: dict | None = None
-    bcorr: dict | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        # Path fields are intentionally NOT serialized -- they're absolute paths
-        # that depend on the current node's mount root. A cache built on the
-        # master (e.g. /tank/vault/alphalib/...) is wrong on a client node
-        # where the JuiceFS mount lives at /storage/vault/alphalib/...
-        # Reconstruct from the live Config at load time.
-        return {
-            "name": self.name,
-            "author": self.author,
-            "has_pnl": self.has_pnl,
-            "dump_days": self.dump_days,
-            "delay": self.delay,
-            "metrics": self.metrics.to_dict() if self.metrics else None,
-            "datasources": self.datasources,
-            "bcorr": self.bcorr,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any], config: Config) -> "FactorInfo":
-        metrics_data = data.get("metrics")
-        name = data["name"]
-        return cls(
-            name=name,
-            author=data["author"],
-            src_path=config.alpha_src / name,
-            dump_path=config.alpha_dump / name,
-            pnl_path=config.alpha_pnl / name,
-            has_pnl=data["has_pnl"],
-            dump_days=data["dump_days"],
-            delay=data.get("delay"),
-            metrics=Metrics.from_dict(metrics_data) if metrics_data else None,
-            datasources=data.get("datasources"),
-            bcorr=data.get("bcorr"),
-        )
 
 
 class LibraryScanner:
@@ -133,17 +100,6 @@ class LibraryScanner:
         except Exception:
             pass
         return None, None
-
-    def _load_index(self) -> list[FactorInfo] | None:
-        """Deprecated per-machine JSON index. Superseded by the DerivedStore
-        (see _load_index_from_store). Retained only as an unused reference for
-        one release; safe to delete. Always returns None so nothing reads the
-        stale ~/.cache index.json."""
-        return None
-
-    def _save_index(self, factors: list[FactorInfo]) -> None:
-        """Deprecated: index now published to the DerivedStore. No-op."""
-        return None
 
     # --- DerivedStore-backed index (shared across machines) ------------------
     #

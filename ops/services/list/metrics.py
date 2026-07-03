@@ -1,6 +1,5 @@
 from pathlib import Path
 
-from ops.core.library import FactorInfo
 from ops.core.metrics import Metrics
 from ops.infra.config import Config
 from ops.infra.derived import default_derived_store
@@ -34,24 +33,19 @@ def load_metrics(config_path: Path) -> dict[str, Metrics]:
 
 
 def refresh_metrics(
-    factors: list[FactorInfo], config: Config, config_path: Path
+    names: list[str], config: Config, config_path: Path
 ) -> dict[str, Metrics]:
+    """Recompute metrics for the given factor names (runs simsummary), write to
+    the store. Paths are rebuilt from config. Skips factors with no pnl."""
     store = _store(config_path)
-    for factor in factors:
-        if not factor.has_pnl:
+    for name in names:
+        pnl_path = config.alpha_pnl / name
+        if not pnl_path.exists():
             continue
-        result = Runner.run_simsummary(factor.pnl_path, config)
+        result = Runner.run_simsummary(pnl_path, config)
         if result:
-            store.upsert_metrics(factor.name, _metrics_payload(result))
+            store.upsert_metrics(name, _metrics_payload(result))
     return load_metrics(config_path)
-
-
-def merge_metrics(
-    factors: list[FactorInfo], metrics: dict[str, Metrics]
-) -> list[FactorInfo]:
-    for factor in factors:
-        factor.metrics = metrics.get(factor.name)
-    return factors
 
 
 def update_metrics(config_path: Path, name: str, m: Metrics) -> None:

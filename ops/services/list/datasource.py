@@ -1,7 +1,6 @@
 import ast
 from pathlib import Path
 
-from ops.core.library import FactorInfo
 from ops.infra.config import Config
 from ops.infra.derived import default_derived_store
 
@@ -68,25 +67,19 @@ def load_datasources(config_path: Path) -> dict[str, dict]:
 
 
 def refresh_datasources(
-    factors: list[FactorInfo], config: Config, config_path: Path
+    names: list[str], config: Config, config_path: Path
 ) -> dict[str, dict]:
+    """Re-parse getData() calls for the given factor names (AST), resolve to
+    tables via npy index, write to the store. Paths rebuilt from config."""
     npy_index = _build_npy_index(config.nio_data_path)
     store = _store(config_path)
 
-    for factor in factors:
-        py_files = list(factor.src_path.glob("*.py"))
+    for name in names:
+        py_files = list((config.alpha_src / name).glob("*.py"))
         if not py_files:
             continue
         fields = parse_datasources(py_files[0])
         tables = resolve_tables(fields, npy_index)
-        store.upsert_datasources(factor.name, fields, tables)
+        store.upsert_datasources(name, fields, tables)
 
     return load_datasources(config_path)
-
-
-def merge_datasources(
-    factors: list[FactorInfo], datasources: dict[str, dict]
-) -> list[FactorInfo]:
-    for factor in factors:
-        factor.datasources = datasources.get(factor.name)
-    return factors

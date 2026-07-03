@@ -136,11 +136,11 @@ def run_health(args):
         need_ds = any(i.category == "missing-datasources" for i in issues)
         if need_metrics:
             _console.print("[cyan]Refreshing metrics...[/]")
-            metrics = refresh_metrics(factors, scanner.config, args.config_path)
+            metrics = refresh_metrics([f.name for f in factors], scanner.config, args.config_path)
             fixed_msgs.append("metrics refreshed")
         if need_ds:
             _console.print("[cyan]Refreshing datasources...[/]")
-            datasources = refresh_datasources(factors, scanner.config, args.config_path)
+            datasources = refresh_datasources([f.name for f in factors], scanner.config, args.config_path)
             fixed_msgs.append("datasources refreshed")
         if need_metrics or need_ds:
             issues = [i for i in issues if i.category not in ("missing-metrics", "missing-datasources")]

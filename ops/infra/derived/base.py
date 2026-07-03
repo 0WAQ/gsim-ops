@@ -55,6 +55,10 @@ class DerivedStore(ABC):
         """读全库派生数据,返回 {name: DerivedRecord}。author 给定则只返回该作者。"""
 
     @abstractmethod
+    def get(self, name: str) -> DerivedRecord | None:
+        """读单个因子的派生数据。不存在返回 None。"""
+
+    @abstractmethod
     def upsert_index(self, entries: dict[str, dict[str, Any]]) -> None:
         """批量写 index 组。entries: {name: {author, has_pnl, dump_days, delay}}。"""
 
