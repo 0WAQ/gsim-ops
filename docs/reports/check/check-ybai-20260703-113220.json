@@ -1,0 +1,1070 @@
+{
+  "version": 1,
+  "generated_at": "2026-07-03T11:32:20",
+  "library_id": "alphalib-juicefs",
+  "filter": {
+    "user": "ybai",
+    "factor": null
+  },
+  "summary": {
+    "total": 73,
+    "pass": 5,
+    "fail": 9,
+    "error": 59,
+    "locked": 0
+  },
+  "factors": [
+    {
+      "name": "AlphaYbai0612CancelProxy",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:24:11",
+        "finished_at": "2026-07-03T11:24:13",
+        "passed": false,
+        "failed_stage": "validate",
+        "fail_reason": "Traceback (most recent call last):\n  File \"/usr/local/gsim/run_cp.py\", line 23, in <module>\n    dr.handle(Config(mod_cfg))\n  File \"gsim/data/DataRegistry.py\", line 75, in gsim.data.DataRegistry.handle\n  File \"/usr/local/gsim/dm_src/DmgrWbai_L2_yq_212_5min.py\", line 222, in initialize\n    self.addData(self.avg_bid_price, 'yq_212_5min.avg_bid_price', 4636, 5484, 49)\n  File \"gsim/data/dmgr_base.py\", line 206, in gsim.data.dmgr_base.DataManagerMapped.addData\n  File \"/usr/local/gsim/gsim/utils/NioData.py\", line 76, in load\n    raise ValueError('File %s does not exist!' % filename)\nValueError: File /datasvc/data/cc_2025/cn_equity_feature_5min/yq_212_5min/yq_212_5min.avg_bid_price.npy does not exist!\n"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0612ITProxy",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:23:53",
+        "finished_at": "2026-07-03T11:28:12",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0615TimeCutAmpVol",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:26",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0617IntradayRSI",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:14:45",
+        "finished_at": "2026-07-03T11:20:26",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0617OrderClusterProxy",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:23:21",
+        "finished_at": "2026-07-03T11:25:28",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0617TraderStructureRet",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:24:09",
+        "finished_at": "2026-07-03T11:24:11",
+        "passed": false,
+        "failed_stage": "validate",
+        "fail_reason": "Traceback (most recent call last):\n  File \"/usr/local/gsim/run_cp.py\", line 23, in <module>\n    dr.handle(Config(mod_cfg))\n  File \"gsim/data/DataRegistry.py\", line 75, in gsim.data.DataRegistry.handle\n  File \"/usr/local/gsim/dm_src/DmgrWbai_L2_yq_212_5min.py\", line 222, in initialize\n    self.addData(self.avg_bid_price, 'yq_212_5min.avg_bid_price', 4636, 5484, 49)\n  File \"gsim/data/dmgr_base.py\", line 206, in gsim.data.dmgr_base.DataManagerMapped.addData\n  File \"/usr/local/gsim/gsim/utils/NioData.py\", line 76, in load\n    raise ValueError('File %s does not exist!' % filename)\nValueError: File /datasvc/data/cc_2025/cn_equity_feature_5min/yq_212_5min/yq_212_5min.avg_bid_price.npy does not exist!\n"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0617TrendFundBehaviorProxy",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:16",
+        "finished_at": "2026-07-03T11:30:28",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0622HerdingEffect",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:28",
+        "finished_at": "2026-07-03T11:30:23",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0623DarkFlowLiquidityElastic",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:27:20",
+        "finished_at": "2026-07-03T11:30:13",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0623DarkFlowLiquidityFull",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:23:51",
+        "finished_at": "2026-07-03T11:27:20",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0623FollowRush5m",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:26",
+        "finished_at": "2026-07-03T11:25:07",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0624LongShortGameVolPos",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:25:08",
+        "finished_at": "2026-07-03T11:32:18",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0624SynergyEffect5m",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:26",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0624VolFairVPM18",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:26",
+        "finished_at": "2026-07-03T11:24:56",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0625DaiZhuErJiu5m",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:21:01",
+        "finished_at": "2026-07-03T11:23:56",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0625ModerateRiskVolLogRankD5",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:16:23",
+        "finished_at": "2026-07-03T11:20:25",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0625SmartMoneyQ10Rev",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:51",
+        "finished_at": "2026-07-03T11:21:00",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0625TideStrongAfternoonL30R1",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:51",
+        "finished_at": "2026-07-03T11:20:26",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0625VolRebuildLateMean",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:17:04",
+        "finished_at": "2026-07-03T11:20:33",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0626IntradayVolumeDist20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:26",
+        "finished_at": "2026-07-03T11:24:47",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0626RHyperSkew21",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:16",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0626RHyperTail21",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:27:51",
+        "finished_at": "2026-07-03T11:30:25",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai0626RSkew21",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:25:41",
+        "finished_at": "2026-07-03T11:29:15",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260612CancelProxy",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:14:43",
+        "finished_at": "2026-07-03T11:14:45",
+        "passed": false,
+        "failed_stage": "validate",
+        "fail_reason": "Traceback (most recent call last):\n  File \"/usr/local/gsim/run_cp.py\", line 23, in <module>\n    dr.handle(Config(mod_cfg))\n  File \"gsim/data/DataRegistry.py\", line 75, in gsim.data.DataRegistry.handle\n  File \"/usr/local/gsim/dm_src/DmgrWbai_L2_yq_212_5min.py\", line 222, in initialize\n    self.addData(self.avg_bid_price, 'yq_212_5min.avg_bid_price', 4636, 5484, 49)\n  File \"gsim/data/dmgr_base.py\", line 206, in gsim.data.dmgr_base.DataManagerMapped.addData\n  File \"/usr/local/gsim/gsim/utils/NioData.py\", line 76, in load\n    raise ValueError('File %s does not exist!' % filename)\nValueError: File /datasvc/data/cc_2025/cn_equity_feature_5min/yq_212_5min/yq_212_5min.avg_bid_price.npy does not exist!\n"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260612ITProxy",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:26:47",
+        "finished_at": "2026-07-03T11:30:23",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260615TimeCutAmpVol",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:26",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260617IntradayRSI",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:17:05",
+        "finished_at": "2026-07-03T11:20:26",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260617OrderClusterProxy",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:18:39",
+        "finished_at": "2026-07-03T11:20:37",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260617TraderStructureRet",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:33",
+        "finished_at": "2026-07-03T11:20:35",
+        "passed": false,
+        "failed_stage": "validate",
+        "fail_reason": "Traceback (most recent call last):\n  File \"/usr/local/gsim/run_cp.py\", line 23, in <module>\n    dr.handle(Config(mod_cfg))\n  File \"gsim/data/DataRegistry.py\", line 75, in gsim.data.DataRegistry.handle\n  File \"/usr/local/gsim/dm_src/DmgrWbai_L2_yq_212_5min.py\", line 222, in initialize\n    self.addData(self.avg_bid_price, 'yq_212_5min.avg_bid_price', 4636, 5484, 49)\n  File \"gsim/data/dmgr_base.py\", line 206, in gsim.data.dmgr_base.DataManagerMapped.addData\n  File \"/usr/local/gsim/gsim/utils/NioData.py\", line 76, in load\n    raise ValueError('File %s does not exist!' % filename)\nValueError: File /datasvc/data/cc_2025/cn_equity_feature_5min/yq_212_5min/yq_212_5min.avg_bid_price.npy does not exist!\n"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260617TrendFundBehaviorProxy",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:23:57",
+        "finished_at": "2026-07-03T11:31:09",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260622HerdingEffect",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:24:13",
+        "finished_at": "2026-07-03T11:31:27",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260623DarkFlowLiquidityElastic",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:24:47",
+        "finished_at": "2026-07-03T11:28:44",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260623DarkFlowLiquidityFull",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:27",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260623FollowRush5m",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:26",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260624LongShortGameVolPos",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:26",
+        "finished_at": "2026-07-03T11:29:01",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260624SynergyEffect5m",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:14:37",
+        "finished_at": "2026-07-03T11:20:25",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260624VolFairVPM18",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:26",
+        "finished_at": "2026-07-03T11:24:09",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260625DaiZhuErJiu5m",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:26",
+        "finished_at": "2026-07-03T11:23:52",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260625ModerateRiskVolLogRankD5",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:26",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260625SmartMoneyQ10Rev",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:51",
+        "finished_at": "2026-07-03T11:21:00",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260625TideStrongAfternoonL30R1",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:25:36",
+        "finished_at": "2026-07-03T11:28:41",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260625VolRebuildLateMean",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:24:57",
+        "finished_at": "2026-07-03T11:29:45",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260626AsymVolatility14",
+      "author": "ybai",
+      "status": "active",
+      "outcome": "pass",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:17:04",
+        "passed": true,
+        "failed_stage": null,
+        "fail_reason": null
+      },
+      "metrics": {
+        "ret%": 12.49,
+        "tvr%": 10.99,
+        "shrp": 3.0,
+        "mdd%": 10.92,
+        "fitness": 3.2
+      }
+    },
+    {
+      "name": "AlphaYbai20260626ForecastFundReportAllF70D5",
+      "author": "ybai",
+      "status": "rejected",
+      "outcome": "fail",
+      "check": {
+        "started_at": "2026-07-03T11:20:26",
+        "finished_at": "2026-07-03T11:25:35",
+        "passed": false,
+        "failed_stage": "correlation",
+        "fail_reason": "bcorr=0.86583, ret=13.94%, shrp=2.8, mdd=9.86%, tvr=6.22%, fitness=4.19"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260626HTAlpha13",
+      "author": "ybai",
+      "status": "rejected",
+      "outcome": "fail",
+      "check": {
+        "started_at": "2026-07-03T11:25:26",
+        "finished_at": "2026-07-03T11:26:47",
+        "passed": false,
+        "failed_stage": "checkpoint",
+        "fail_reason": ""
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260626HTAlpha16",
+      "author": "ybai",
+      "status": "rejected",
+      "outcome": "fail",
+      "check": {
+        "started_at": "2026-07-03T11:16:23",
+        "finished_at": "2026-07-03T11:17:04",
+        "passed": false,
+        "failed_stage": "checkpoint",
+        "fail_reason": ""
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260626HTAlpha44",
+      "author": "ybai",
+      "status": "rejected",
+      "outcome": "fail",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:14:43",
+        "passed": false,
+        "failed_stage": "checkpoint",
+        "fail_reason": ""
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260626HTAlpha55",
+      "author": "ybai",
+      "status": "rejected",
+      "outcome": "fail",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:14:37",
+        "passed": false,
+        "failed_stage": "checkpoint",
+        "fail_reason": ""
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260626IntradayVolumeDist20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:28",
+        "finished_at": "2026-07-03T11:24:47",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260626RHyperSkew21",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:25:09",
+        "finished_at": "2026-07-03T11:28:57",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260626RHyperTail21",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:37",
+        "finished_at": "2026-07-03T11:25:09",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260626RSkew21",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:24:47",
+        "finished_at": "2026-07-03T11:28:40",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260629CTNetSellAftL20A80",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:26",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260629GammaBias20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:24:23",
+        "finished_at": "2026-07-03T11:27:50",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260629IASTimeOnlyAllD3",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:25:28",
+        "finished_at": "2026-07-03T11:28:05",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260629IlliqBlend20",
+      "author": "ybai",
+      "status": "rejected",
+      "outcome": "fail",
+      "check": {
+        "started_at": "2026-07-03T11:26:15",
+        "finished_at": "2026-07-03T11:29:59",
+        "passed": false,
+        "failed_stage": "correlation",
+        "fail_reason": "shrp=1.35 <= 2.0 | ret=15.54%, shrp=1.35, mdd=20.79%, tvr=10.92%, fitness=1.61"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai20260629ResidTailBlend20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:16",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0630_EarningsSeasonFundamental",
+      "author": "ybai",
+      "status": "rejected",
+      "outcome": "fail",
+      "check": {
+        "started_at": "2026-07-03T11:20:16",
+        "finished_at": "2026-07-03T11:23:21",
+        "passed": false,
+        "failed_stage": "correlation",
+        "fail_reason": "bcorr=0.82226, ret=11.43%, shrp=2.21, mdd=10.72%, tvr=4.05%, fitness=3.71"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0630_EarningsSurpriseSUE",
+      "author": "ybai",
+      "status": "active",
+      "outcome": "pass",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:16:23",
+        "passed": true,
+        "failed_stage": null,
+        "fail_reason": null
+      },
+      "metrics": {
+        "ret%": 11.01,
+        "tvr%": 4.56,
+        "shrp": 2.71,
+        "mdd%": 8.64,
+        "fitness": 4.2
+      }
+    },
+    {
+      "name": "AlphaYbai_0630_IdealReversalLate20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:35",
+        "finished_at": "2026-07-03T11:24:22",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0630_IntradayVVOLAM20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:26",
+        "finished_at": "2026-07-03T11:23:50",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0630_PLSLatentT180D3",
+      "author": "ybai",
+      "status": "active",
+      "outcome": "pass",
+      "check": {
+        "started_at": "2026-07-03T11:20:28",
+        "finished_at": "2026-07-03T11:25:41",
+        "passed": true,
+        "failed_stage": null,
+        "fail_reason": null
+      },
+      "metrics": {
+        "ret%": 19.3,
+        "tvr%": 8.29,
+        "shrp": 2.15,
+        "mdd%": 22.54,
+        "fitness": 3.27
+      }
+    },
+    {
+      "name": "AlphaYbai_0630_SUESURBlendNoRetD5",
+      "author": "ybai",
+      "status": "rejected",
+      "outcome": "fail",
+      "check": {
+        "started_at": "2026-07-03T11:16:46",
+        "finished_at": "2026-07-03T11:18:39",
+        "passed": false,
+        "failed_stage": "correlation",
+        "fail_reason": "bcorr=0.98932, ret=10.41%, shrp=2.43, mdd=9.54%, tvr=2.64%, fitness=4.82"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0630_StateReversalIRevD1",
+      "author": "ybai",
+      "status": "rejected",
+      "outcome": "fail",
+      "check": {
+        "started_at": "2026-07-03T11:26:05",
+        "finished_at": "2026-07-03T11:28:36",
+        "passed": false,
+        "failed_stage": "correlation",
+        "fail_reason": "shrp=1.78 <= 2.0 | ret=14.14%, shrp=1.78, mdd=13.81%, tvr=30.47%, fitness=1.21"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0701_CJIdioRateL21D3",
+      "author": "ybai",
+      "status": "active",
+      "outcome": "pass",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:16:23",
+        "passed": true,
+        "failed_stage": null,
+        "fail_reason": null
+      },
+      "metrics": {
+        "ret%": 16.24,
+        "tvr%": 15.44,
+        "shrp": 2.01,
+        "mdd%": 24.87,
+        "fitness": 2.06
+      }
+    },
+    {
+      "name": "AlphaYbai_0701_OpenVolIndustryShock20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:51",
+        "finished_at": "2026-07-03T11:16:46",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0702_ARPP5D20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:27",
+        "finished_at": "2026-07-03T11:25:00",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0702_BETCAGRStd",
+      "author": "ybai",
+      "status": "active",
+      "outcome": "pass",
+      "check": {
+        "started_at": "2026-07-03T11:20:26",
+        "finished_at": "2026-07-03T11:25:26",
+        "passed": true,
+        "failed_stage": null,
+        "fail_reason": null
+      },
+      "metrics": {
+        "ret%": 11.98,
+        "tvr%": 5.96,
+        "shrp": 2.61,
+        "mdd%": 10.64,
+        "fitness": 3.7
+      }
+    },
+    {
+      "name": "AlphaYbai_0702_HFVolVolAmpL5D2RN",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:27",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0702_HFVolVolVolume20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:25:00",
+        "finished_at": "2026-07-03T11:29:52",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0702_UID20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:20:26",
+        "finished_at": "2026-07-03T11:26:15",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0702_UIDDeVolL10D3",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:12:52",
+        "finished_at": "2026-07-03T11:20:27",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    },
+    {
+      "name": "AlphaYbai_0702_VolPeakCount20",
+      "author": "ybai",
+      "status": "submitted",
+      "outcome": "error",
+      "check": {
+        "started_at": "2026-07-03T11:21:00",
+        "finished_at": "2026-07-03T11:26:05",
+        "passed": null,
+        "failed_stage": "compliance",
+        "fail_reason": "持仓全空"
+      },
+      "metrics": null
+    }
+  ]
+}
