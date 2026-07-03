@@ -19,6 +19,8 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 |------|---------|
 | `core/state.py` | `FactorStatus` enum, `CheckRecord`, `FactorRecord` |
 | `core/factormeta.py` | `FactorMeta` dataclass + `META_VERSION` + load/save |
+| `infra/store/pg_store.py` | Postgres state backend (真相源 since 2026-07-04), `SELECT FOR UPDATE` + check_history JSONB |
+| `infra/store/redis_store.py` | Redis state backend (回退; 实例仍是 JFS metadata 后端) |
 | `infra/store/json_store.py` | JSON state backend, fcntl cross-process lock, atomic write |
 | `infra/lock.py` | Per-factor advisory fcntl lock (`factor_lock(name)` / `FactorLocked`) |
 

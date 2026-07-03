@@ -195,7 +195,8 @@ AlphaXxx/
 - **colorama** - Terminal colors
 - **tqdm** - Progress bars
 - **pyyaml** - Config parsing
-- **redis** - State backend (Sentinel-aware client, see `ops/infra/store/redis_store.py`)
+- **redis** - JFS metadata 后端 + 旧 state backend (Sentinel-aware client, `ops/infra/store/redis_store.py`; state 2026-07-04 已迁 PG, redis 仅作回退 + JFS)
+- **psycopg** - Postgres client (state + derived 真相源, `ops/infra/store/pg_store.py` / `ops/infra/derived/pg_store.py`)
 - **boto3** - S3 object storage (only used by legacy `ops sync`,JFS 上线后不再走主路径)
 
 ## Known Technical Debt (Deferred)
@@ -216,11 +217,11 @@ AlphaXxx/
 - 2026-06-04 ops state 进 Redis (`config.juicefs.yaml` 切 Redis backend)
 - 2026-06-05 Redis Sentinel HA (3-node sentinel, 9.12s failover)
 - 2026-06-05 JFS 上线 + 默认 config 切 JFS (`config.yaml` = JFS, `config.prod-legacy.yaml` 回退)
-- 2026-07-04 Phase G: 派生层 (index/metrics/datasources/bcorr) 迁 Postgres (server-160 docker, host 15432), per-machine JSON 缓存退役; 读写数据流重构 (DerivedRecord 取代 FactorInfo god-object)。branch `feat/derived-postgres`, 部署 `scripts/postgres/`
+- 2026-07-04 Phase G: 派生层 (index/metrics/datasources/bcorr) 迁 Postgres (server-160 docker, host 15432), per-machine JSON 缓存退役; 读写数据流重构 (DerivedRecord 取代 FactorInfo god-object); **state (因子生命周期) 也迁 Postgres, PG 成唯一真相源** (state + derived 同库)。branch `feat/derived-postgres`, 部署 `scripts/postgres/`。**注意: 承载旧 state 的 Redis 同时是 JFS metadata 后端, 不可停 (停进程=挂因子库); ops 只是不再用它存 state。**
 
 **仍在路上**:
 - Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/resubmit/recheck` 走 `git add/commit`
 - Phase E: `.state` merge 逻辑简化(其实在 Redis 后大部分逻辑已不需要)
 - Phase F: checkpoint 落地(按设计原则放 JFS / 本地 SSD)
-- Phase G 剩余: 反查命令 `ops query --field/--table` (查询下推 SQL, GIN 已建) / PG 密码正规化 (挪 /etc root-only + 分发 150/144) / 150/144 部署 (uv tool install 带 psycopg) / 分支合 main
+- Phase G 剩余: 反查命令 `ops query --field/--table` (查询下推 SQL, GIN 已建) / refresh_* 从 list 独立成 ops refresh / PG 密码正规化 (挪 /etc root-only + 分发 150/144) / 150/144 部署 (uv tool install 带 psycopg) / 分支合 main / 验稳后清 Redis 残留 state key (只 DEL state:*, 绝不 FLUSHDB — Redis 还扛 JFS)
 - Phase C 上线后剩余: 写入重试 wrapper / sync deprecation warning / sudo NOPASSWD wrapper / MinIO key rotation / alpha_dump 退役

@@ -11,9 +11,10 @@ Supports `${var_name}` variable substitution from the `vars:` block in YAML, ove
 Key attributes: all `path.*` fields as `Path`, `compliance`/`correlation`/`checkpoint` dicts, `sync_remote`, `library_id`, S3 credentials.
 
 **State backend (`state.*` in yaml)**:
-- `state.backend: json | redis` (default `json`)
-- For `redis`: `state.redis.url`, `state.redis.password` (literal) or `state.redis.password_env` (env var name) or **`state.redis.password_file` + `state.redis.password_key`** (file containing `KEY=value`, used as last resort)
-- 三层 fallback 顺序见 `config.py` 注释。`config.prod-legacy.yaml` 用 json,`config.yaml`(2026-06-05 上线默认)用 redis-sentinel。
+- `state.backend: json | redis | postgres` (default `json`;`config.yaml` 2026-07-04 起用 `postgres`)
+- For `postgres`: `state.postgres.{host,port,dbname,user}` + password (literal / `password_env` / `password_file`+`password_key`),复用 `_build_pg_conninfo`。真相源,factor_state 表。
+- For `redis`(回退): `state.redis.url` + password 三层 fallback。**注意 redis 仍是 JFS metadata 后端,不可停**。
+- 三层 fallback 顺序见 `config.py` 注释。`config.prod-legacy.yaml` 用 json,`config.yaml` 用 postgres(state)+ postgres(derived)。
 
 `config.prod-legacy.yaml` 是上线前的 prod (S3 sync 模型),保留作紧急回退。
 
@@ -59,18 +60,22 @@ Per-factor advisory fcntl lock. Serializes all ops mutations on a single factor 
 
 ## Store (`store/`)
 
-两个后端,通过 `state.backend` 切换。`default_store(config)` 根据 backend 返回对应实现。
+三个后端,通过 `state.backend` 切换。`default_store(config)` 根据 backend 返回对应实现。
 
-### `redis_store.py` (default since 2026-06-05)
+### `pg_store.py` (default since 2026-07-04, 真相源)
 
-`RedisStateStore` — 支持两种 URL scheme:
+`PostgresStateStore` — 因子生命周期真相源,从 Redis 迁入。`factor_state` 表 (library_id,name) 主键,check_history 存 JSONB 列。原子性用 PG 事务 + `SELECT ... FOR UPDATE` 行级锁替代 Redis 的 WATCH/MULTI/EXEC(transition/append_check 锁行读改写,天然串行,无应用层重试)。时间戳列 TIMESTAMPTZ,读写边界做 ISO string ↔ 本地 tz 转换(`_ts_in`/`_ts_out`,与 Redis `_now()` 格式一致 —— naive datetime 必须打本地 tz 再入库,否则 PG 当 UTC 偏 8h)。连接池/UPSERT 范式同 `derived/pg_store.py`。迁移工具 `ops/tools/state_to_pg.py`。
+
+### `redis_store.py` (回退, 且仍是 JFS metadata 后端)
+
+`RedisStateStore` — state 2026-07-04 已迁 PG,此后 redis 仅作 state 回退。**但承载它的 Redis 实例 (`...:26380/mymaster/0` sentinel) 同时是 JuiceFS `/tank/vault/alphalib` 的 metadata 后端,进程不可停**。两种 URL scheme:
 
 - `redis://host:port/db` — 直连单实例(legacy / 单机部署)
 - `redis-sentinel://h1:p1,h2:p2,h3:p3/service_name/db` — Sentinel-aware,自动 failover
 
 Sentinel 路径构造 `redis.sentinel.Sentinel(...).master_for(service, ...)`,每次 connection 重新 resolve master。`protocol=2` 强制经典 AUTH(redis-py 8.x `from_url` 不 honor protocol=2,直接用 `redis.Redis()` ctor 避雷,见 commit fc4d8f8)。
 
-Schema 跟 `JsonStateStore` 1:1 映射:`state-meta:<lib>` / `state-index:<lib>` set / `state:<lib>:<name>` hash / `state-checks:<lib>:<name>` list。WATCH/MULTI/EXEC 做 read-modify-write,append_check 原子。
+Schema:`state-meta:<lib>` / `state-index:<lib>` set / `state:<lib>:<name>` hash / `state-checks:<lib>:<name>` list。WATCH/MULTI/EXEC 做 read-modify-write,append_check 原子。
 
 ### `json_store.py` (legacy fallback)
 
