@@ -60,6 +60,7 @@ checker:
     min_total_stocks: 100
     min_long_stocks: 50
     min_short_stocks: 50
+    check_window: 762   # 只校验最近 N 个交易日 (约三年),规避早期数据暖机期
   checkpoint:
     enabled: true
   correlation:

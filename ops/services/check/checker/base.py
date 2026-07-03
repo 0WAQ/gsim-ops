@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from ops.core.alpha.metadata import AlphaMetadata
+from ops.core.alpha.results.base import Result
 
 
 class CheckFail(Exception):
@@ -30,5 +31,5 @@ class CheckSkip(Exception):
 
 class Checker(ABC):
     @abstractmethod
-    def check(self, factor: AlphaMetadata) -> None:
+    def check(self, factor: AlphaMetadata) -> Result | None:
         ...
