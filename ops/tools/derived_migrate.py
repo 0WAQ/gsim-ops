@@ -17,8 +17,8 @@ the store's group-wise upsert methods, so partial caches migrate cleanly
 (a factor present only in metrics.json still lands, datasources left null).
 
 This is a convenience/accelerator only — the derived layer is fully
-rebuildable from JFS via `ops list --refresh-metrics --refresh-datasources
---refresh-bcorr`. If a cache is missing or stale, prefer a rebuild.
+rebuildable from JFS via `ops refresh` (metrics/datasources/bcorr). If a
+cache is missing or stale, prefer a rebuild.
 """
 import argparse
 import json

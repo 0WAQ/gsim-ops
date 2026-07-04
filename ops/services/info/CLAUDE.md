@@ -15,4 +15,4 @@
 - `LibraryScanner.get_dump_date_range(name)` — dump 日期范围
 - `load_metrics` / `load_datasources` — 缓存的 metrics 和数据源
 
-如果 metrics/datasources 缺失，提示用户运行 `--refresh-metrics` / `--refresh-datasources`。
+如果 metrics/datasources 缺失，提示用户运行 `ops refresh --metrics` / `ops refresh --datasources`。

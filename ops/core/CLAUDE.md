@@ -29,8 +29,8 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 Metrics (ret%, shrp, mdd%, tvr%, fitness) are obtained via `simsummary` and stored in the DerivedStore (`infra/derived/`, Postgres or json fallback), keyed by `(library_id, name)`.
 
 **Two update paths**:
-- **Batch**: `ops list --refresh-metrics` — runs simsummary on the listed factors with PNL files, upserts the metrics group
-- **Incremental**: `ops check` — after a factor passes all checks and before archiving, runs simsummary and upserts via `update_metrics()`
+- **Incremental (主路径)**: `ops check` — 因子通过所有检查后、archive 入库前,`_persist_derived` 跑 simsummary 并落库 metrics(连同 datasources/bcorr 三组一次性写)。入库即完整。
+- **Batch (运维/legacy)**: `ops refresh [--metrics]` — 对指定因子(或全库)重跑 simsummary upsert metrics。用于补 REJECTED / backfill 旧因子 / 派生库重建,不是常规路径。
 
 **simsummary output columns** (whitespace-separated):
 ```

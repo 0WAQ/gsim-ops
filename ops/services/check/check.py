@@ -8,8 +8,13 @@ from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner
 from ops.infra.store import default_store
+from ops.infra.derived import default_derived_store
 from ops.infra.lock import factor_lock, FactorLocked
-from ops.services.list.metrics import update_metrics
+from ops.services.list.datasource import (
+    parse_datasources,
+    resolve_tables,
+    _build_npy_index,
+)
 from ops.utils.printer import *
 from ops.utils.printer import _console as _printer_console
 from ops.utils.log import logger, STDERR_SINK_ID
@@ -140,6 +145,40 @@ class CheckerPipeline:
                 xmltodict.unparse(cfg, pretty=True, encoding="utf-8", full_document=False),
                 encoding="utf-8",
             )
+
+    def _persist_derived(self, factor: AlphaMetadata, metrics, corr_result) -> None:
+        """入库前把四组派生数据里的三组落库(index 由 LibraryScanner 扫盘 publish):
+        - metrics: simsummary 结果
+        - datasources: AST parse getData() + npy index 解析出的 fields/tables
+        - bcorr: correlation stage 已算出的 max_bcorr(零额外计算,只是之前被丢弃)
+
+        必须在 to_lib 之前调 —— datasources 依赖 factor.py_file(此时仍在 staging)。
+        派生库丢了不致命(可 ops refresh 重建),故各组独立 try,互不阻断入库。
+        """
+        store = default_derived_store(self.config)
+
+        if metrics:
+            try:
+                store.upsert_metrics(factor.name, {
+                    "ret": metrics.ret, "shrp": metrics.shrp, "mdd": metrics.mdd,
+                    "tvr": metrics.tvr, "fitness": metrics.fitness,
+                })
+            except Exception:
+                logger.exception("persist metrics failed factor={}", factor.name)
+
+        try:
+            fields = parse_datasources(factor.py_file)
+            tables = resolve_tables(fields, _build_npy_index(self.config.nio_data_path))
+            store.upsert_datasources(factor.name, fields, tables)
+        except Exception:
+            logger.exception("persist datasources failed factor={}", factor.name)
+
+        if corr_result is not None and corr_result.max_bcorr is not None:
+            try:
+                store.upsert_bcorr(factor.name, corr_result.max_bcorr,
+                                   corr_result.max_bcorr_factor)
+            except Exception:
+                logger.exception("persist bcorr failed factor={}", factor.name)
 
     def to_lib(self, factor: AlphaMetadata):
         self._clean_pycache(factor.dir)
@@ -316,15 +355,15 @@ class CheckerPipeline:
             # 5. Correlation — correlation against library
             _emit_stage_start("correlation")
             prepare_for_correlation(factor)
-            self.correlation_checker.check(factor)
+            corr_result = self.correlation_checker.check(factor)
             _emit_stage_done("correlation", Status.PASSED)
 
-            # 6. Archive — simsummary + move to lib (no live column; folded into outcome)
+            # 6. Archive — simsummary + persist derived + move to lib
+            #    (no live column; folded into outcome)
             metrics = Runner.run_simsummary(factor.pnl_file, self.config)
+            self._persist_derived(factor, metrics, corr_result)
             prepare_for_archive(factor)
             self.to_lib(factor)
-            if metrics:
-                update_metrics(self.config_path, factor.name, metrics)
 
             now = datetime.now().isoformat(timespec="seconds")
             check.finished_at = now

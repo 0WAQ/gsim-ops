@@ -17,7 +17,6 @@ Example:
     ops list              # List all factors
     ops list -u wbai      # List factors by author
     ops list --refresh    # Force refresh index cache
-    ops list --refresh-metrics  # Refresh metrics from simsummary
     ops list --sort shrp  # Sort by Sharpe ratio
     ops list --format json
 """,
@@ -51,21 +50,6 @@ Example:
         "-r",
         action="store_true",
         help="Force refresh index cache",
-    )
-    parser.add_argument(
-        "--refresh-metrics",
-        action="store_true",
-        help="Refresh metrics by running simsummary on all factors",
-    )
-    parser.add_argument(
-        "--refresh-datasources",
-        action="store_true",
-        help="Refresh data sources by parsing factor code",
-    )
-    parser.add_argument(
-        "--refresh-bcorr",
-        action="store_true",
-        help="Refresh max bcorr against alphalib + prod by running bcorr",
     )
     parser.add_argument(
         "--show-tables",

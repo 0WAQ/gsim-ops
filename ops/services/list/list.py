@@ -12,9 +12,6 @@ from ops.core.state import FactorStatus, FactorRecord
 from ops.infra.config import Config
 from ops.infra.store import default_store
 from ops.infra.derived import default_derived_store, DerivedRecord
-from .metrics import refresh_metrics
-from .datasource import refresh_datasources
-from .bcorr import refresh_bcorr
 
 
 DASH = "—"
@@ -254,20 +251,6 @@ def run_list(args):
     if args.status:
         records = [r for r in records
                    if (s := state_records.get(r.name)) and s.status == args.status]
-
-    # Refresh derived groups for the (already filtered) set, then re-read those
-    # rows so the refreshed values show. Matches old behavior: refresh operated
-    # on the filtered factors, not the whole library.
-    if args.refresh_metrics or args.refresh_datasources or args.refresh_bcorr:
-        names = [r.name for r in records]
-        if args.refresh_metrics:
-            refresh_metrics(names, config, args.config_path)
-        if args.refresh_datasources:
-            refresh_datasources(names, config, args.config_path)
-        if args.refresh_bcorr:
-            refresh_bcorr(names, config, args.config_path)
-        refreshed = store.get_all()
-        records = [refreshed[r.name] for r in records if r.name in refreshed]
 
     if filters is not None:
         records = apply_filters(records, filters)

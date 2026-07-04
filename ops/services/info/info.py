@@ -51,13 +51,13 @@ def run_info(args):
         for label, attr in _METRIC_KEYS:
             m.add(_kv(label, f"{getattr(metrics, attr):.2f}"))
     else:
-        m.add("[dim]—  (run ops list --refresh-metrics to fetch)[/]")
+        m.add("[dim]—  (run ops refresh --metrics to fetch)[/]")
 
     d = tree.add("[yellow]Data Sources[/]")
     if rec and (rec.fields is not None or rec.tables is not None):
         d.add(_kv("Tables:", ", ".join(rec.tables or [])))
         d.add(_kv("Fields:", ", ".join(rec.fields or [])))
     else:
-        d.add("[dim]—  (run ops list --refresh-datasources to fetch)[/]")
+        d.add("[dim]—  (run ops refresh --datasources to fetch)[/]")
 
     _console.print(tree)
