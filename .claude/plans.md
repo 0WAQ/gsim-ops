@@ -432,4 +432,69 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
    - 简单版: cron 每 5min `redis-cli INFO clients` 的 `connected_clients` 超阈值 (如 40000) 发飞书。
    - 复用 `ops/infra/notify/feishu_send.py`。
 
+
+## 派生层 fs 惯性收尾 (fs→pg 迁移遗留, Partially Done)
+
+**背景**: 派生层 (index/metrics/datasources/bcorr) + state 已迁 Postgres (Phase G, 2026-07-04),
+但读写路径还带着 fs 时代 "扫全表 → 内存过滤 / 查询时懒算+缓存" 的惯性。同库 (state + derived
+都在 `ops` 库, host 15432),很多 "分开读再内存合并" 现在其实能下推 SQL 或 JOIN。
+
+本轮(commit `bbc5462`)已完成 **第 5 条**: check 归档补写 datasources+bcorr,四组入库即完整;
+`--refresh-*` 独立成 `ops refresh`。剩下 4 条按性价比排序如下。
+
+### 1. `ops list` 把全表拉进内存再 Python 过滤/排序/截断 (纯收益,改动集中)
+
+现状 (`ops/services/list/list.py`):
+- 已下推 SQL: `field=` / `tables=` (走 GIN),见 `_pushdown_params` + `pg_store.get_all`。
+- **仍内存跑**: `--sort-by` (list.py 的 `SORT_KEYS`,sorted 全表)、`-n` limit (切片 `records[:args.n]`)、
+  `--status` (state 过滤)、metrics 阈值 (`ret>30` 等,`apply_filters`)。
+- 典型浪费: `ops list --sort-by ret -n 10` 把整库读回来只为 10 行。db 时代 `ORDER BY ret DESC LIMIT 10` 一句够。
+
+改法: 把 sort/limit/metrics 阈值下推到 `DerivedStore.get_all` (加 `sort_by` / `limit` / metric 比较参数)。
+- pg_store: 拼 `ORDER BY <col> DESC NULLS LAST LIMIT n` + metrics 阈值 `WHERE ret > %s`。
+- json_store: 保持内存实现同语义 (回退后端)。
+- `apply_filters` / `SORT_KEYS` 仍全量兜底,保证下推只是预筛,结果逐位等价 (跟现有 field/tables 下推同范式)。
+- **注意**: NULL 排序方向 —— 现在 `SORT_KEYS` 把 None 当 `-inf` 排最后,SQL 要 `NULLS LAST` 对齐。
+
+### 2. state + derived 分两次读 + Python 按 name 合并 → 一条 JOIN (纯收益)
+
+现状: `list.py:235` `default_store(config).list()` 读 state,`list.py:246` `store.get_all()` 读 derived,
+同一个 PG 库却在 Python 里按 name merge。`--status` 过滤 (来自 state 表) 更该在 SQL 里做。
+这是上个 session 干掉 FactorInfo god-object 后残留的最后一处内存合并。
+
+改法: 让 derived get_all 支持按 state 过滤,或新增一个跨表读接口 `factor_derived JOIN factor_state
+USING (library_id, name)`,一次查回 DerivedRecord + status/last_fail_stage。
+- 权衡: 会打破 store/ 与 derived/ 的后端隔离 (JOIN 需要两表同库同后端)。json 回退后端下二者是两个独立文件,JOIN 不成立 —— 需保留 "两次读+内存合并" 作为 json 后端路径,只在 pg 后端走 JOIN。
+- 这条改动会牵动 `default_store` / `default_derived_store` 的边界,**先想清楚抽象再动手**,别为一次 JOIN 把两层耦死。可能值得单独一个 session。
+
+### 3. `load_metrics` / `load_bcorr` / `load_datasources` 各自 get_all 扫全库 (顺手)
+
+现状: `health.py:116-117` 一次跑要 `load_metrics` + `load_datasources` 两次全表扫描拼 dict
+(各自 `_store().get_all()`,metrics.py:28 / datasource.py:62 / bcorr.py:20)。
+health 的 `missing-metrics` / `missing-datasources` 本质是 SQL 谓词
+(`SELECT name FROM factor_derived WHERE has_pnl AND ret IS NULL`)。
+
+改法: health 复用第 2 条的单次 JOIN 读 (一次拿全 factor + 四组派生 + state),内存里判缺失;
+或给 DerivedStore 加 `missing_metrics()` / `missing_datasources()` 谓词查询。优先级低 (health 非热路径),
+建议**跟第 2 条一起做** (JOIN 到手后顺手改),不单独排期。
+
+### 4. `LibraryScanner` 的 index_built_at 水位 + alpha_src mtime 比对 (最伤筋动骨,压后)
+
+现状 (`ops/core/library.py`): 整套 "扫 alpha_src 目录 → walk 算 dump_days → publish index →
+比 mtime 判新鲜" 是 fs-scan-and-cache 范式。db 真相源下,index 本该由 submit/check/rm 这些
+**知道因子何时变化的命令增量维护**,而不是 list 时按需全盘重扫。
+
+复杂点:
+- `dump_days` 依赖 alpha_dump (本地 sidecar,**不在 JFS/PG**),必须扫盘。所以 index 无法完全脱离 fs ——
+  要拆成 "src 侧字段 (author/delay/has_pnl,可事件驱动写 PG)" vs "dump_days (仍需扫本地 sidecar)"。
+- 事件驱动改造要在 submit/check/rm/restage/cancel 每个写路径插 index upsert,面广。
+- **建议最后做**,且先决定 dump_days 是否还要留在 index 里 (alpha_dump 退役 roadmap 一旦推进,这条自然简化)。
+
+### 排期建议
+
+1 (list 下推) 独立、纯收益、改动集中 → **下个 session 首选**。
+2+3 (JOIN + health) 绑一起,需先想清 pg/json 后端抽象 → 第二个 session。
+4 (index 事件驱动) 面广且与 alpha_dump 退役耦合 → 压后,等 alpha_dump 方向明朗再动。
+
+
 **触发条件**: 共生事故再发 → 做 1+2; 否则 1 (连接池上限) 随下次 JFS 维护窗口顺手做,3 可独立先上。
