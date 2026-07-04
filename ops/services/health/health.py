@@ -8,8 +8,8 @@ from rich.rule import Rule
 from rich import box
 
 from ops.core.library import LibraryScanner, FactorInfo
-from ops.services.list.metrics import load_metrics, refresh_metrics
-from ops.services.list.datasource import load_datasources, refresh_datasources
+from ops.services.list.metrics import refresh_metrics
+from ops.services.list.datasource import refresh_datasources
 
 
 _console = Console(width=shutil.get_terminal_size((140, 50)).columns)
@@ -80,6 +80,22 @@ def _check_missing_datasources(
     ]
 
 
+def _load_derived_maps(config) -> tuple[dict, dict]:
+    """One derived read -> (metrics_present, datasources) maps keyed by name.
+    Replaces the old load_metrics + load_datasources (two full-table scans) with
+    a single get_all: health only needs presence (metrics) + fields/tables
+    (datasources), both live on the same DerivedRecord."""
+    from ops.infra.derived import default_derived_store
+    metrics: dict[str, bool] = {}
+    datasources: dict[str, dict] = {}
+    for name, rec in default_derived_store(config).get_all().items():
+        if rec.ret is not None or rec.shrp is not None or rec.fitness is not None:
+            metrics[name] = True
+        if rec.fields is not None or rec.tables is not None:
+            datasources[name] = {"fields": rec.fields or [], "tables": rec.tables or []}
+    return metrics, datasources
+
+
 def _check_unresolved_tables(datasources: dict) -> list[Issue]:
     issues: list[Issue] = []
     for name, ds in datasources.items():
@@ -113,8 +129,7 @@ def run_health(args):
     if args.user:
         factors = scanner.filter_by_author(factors, args.user)
 
-    metrics = load_metrics(args.config_path)
-    datasources = load_datasources(args.config_path)
+    metrics, datasources = _load_derived_maps(scanner.config)
 
     issues: list[Issue] = []
     if not args.user:

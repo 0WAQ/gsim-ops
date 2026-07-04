@@ -8,10 +8,10 @@ from rich.table import Table
 from rich import box
 
 from ops.core.library import LibraryScanner
-from ops.core.state import FactorStatus, FactorRecord
+from ops.core.state import FactorStatus
 from ops.infra.config import Config
-from ops.infra.store import default_store
-from ops.infra.derived import default_derived_store, DerivedRecord
+from ops.infra.query import query_factors, FactorRow
+from ops.infra.derived import DerivedRecord
 from ops.infra.derived.base import metric_get, sort_key, _SORTABLE_KEYS
 
 
@@ -45,39 +45,35 @@ def _datasource(r: DerivedRecord, key: str):
     return ", ".join(getattr(r, key) or [])
 
 
-def _fail_stage(rec: FactorRecord):
-    if rec and rec.status == FactorStatus.REJECTED and rec.last_fail_stage:
-        return rec.last_fail_stage
+def _fail_stage(row: FactorRow):
+    if row.status == FactorStatus.REJECTED and row.last_fail_stage:
+        return row.last_fail_stage
     return ""
 
 
-# (header, justify, extras, getter(record, state_record) -> str)
+# (header, justify, extras, getter(row: FactorRow) -> str)
 _BASE_COLS = [
-    ("name",    "left",  {"no_wrap": True, "max_width": 36, "overflow": "ellipsis"}, lambda r, s: r.name),
-    ("author",  "left",  {},                lambda r, s: r.author or ""),
-    ("delay",   "right", {},                lambda r, s: str(r.delay) if r.delay is not None else "?"),
-    ("ret%",    "right", {},                lambda r, s: _metric(r, "ret")),
-    ("shrp",    "right", {},                lambda r, s: _metric(r, "shrp")),
-    ("mdd%",    "right", {},                lambda r, s: _metric(r, "mdd")),
-    ("tvr%",    "right", {},                lambda r, s: _metric(r, "tvr")),
-    ("fitness", "right", {},                lambda r, s: _metric(r, "fitness")),
-    ("bcorr",   "right", {},                lambda r, s: _bcorr(r)),
+    ("name",    "left",  {"no_wrap": True, "max_width": 36, "overflow": "ellipsis"}, lambda x: x.derived.name),
+    ("author",  "left",  {},                lambda x: x.derived.author or ""),
+    ("delay",   "right", {},                lambda x: str(x.derived.delay) if x.derived.delay is not None else "?"),
+    ("ret%",    "right", {},                lambda x: _metric(x.derived, "ret")),
+    ("shrp",    "right", {},                lambda x: _metric(x.derived, "shrp")),
+    ("mdd%",    "right", {},                lambda x: _metric(x.derived, "mdd")),
+    ("tvr%",    "right", {},                lambda x: _metric(x.derived, "tvr")),
+    ("fitness", "right", {},                lambda x: _metric(x.derived, "fitness")),
+    ("bcorr",   "right", {},                lambda x: _bcorr(x.derived)),
 ]
-_FAIL_COL   = ("fail_stage", "left", {},                    lambda r, s: _fail_stage(s))
-_TABLES_COL = ("tables",     "left", {"overflow": "fold"},  lambda r, s: _datasource(r, "tables"))
-_FIELDS_COL = ("fields",     "left", {"overflow": "fold"},  lambda r, s: _datasource(r, "fields"))
+_FAIL_COL   = ("fail_stage", "left", {},                    lambda x: _fail_stage(x))
+_TABLES_COL = ("tables",     "left", {"overflow": "fold"},  lambda x: _datasource(x.derived, "tables"))
+_FIELDS_COL = ("fields",     "left", {"overflow": "fold"},  lambda x: _datasource(x.derived, "fields"))
 
 
-def print_table(records: list[DerivedRecord], state_records: dict[str, FactorRecord],
-                show_tables=False, show_fields=False):
-    if not records:
+def print_table(rows: list[FactorRow], show_tables=False, show_fields=False):
+    if not rows:
         _console.print("[yellow]No factors found.[/]")
         return
 
-    has_rejected = any(
-        (rec := state_records.get(r.name)) and rec.status == FactorStatus.REJECTED
-        for r in records
-    )
+    has_rejected = any(x.status == FactorStatus.REJECTED for x in rows)
 
     cols = list(_BASE_COLS)
     if has_rejected: cols.append(_FAIL_COL)
@@ -88,13 +84,12 @@ def print_table(records: list[DerivedRecord], state_records: dict[str, FactorRec
     for header, justify, extras, _ in cols:
         table.add_column(header, justify=justify, **extras)
 
-    for r in records:
-        rec = state_records.get(r.name)
-        style = _STATUS_STYLE.get(rec.status, "") if rec else ""
-        table.add_row(*(get(r, rec) for _, _, _, get in cols), style=style)
+    for x in rows:
+        style = _STATUS_STYLE.get(x.status, "") if x.status else ""
+        table.add_row(*(get(x) for _, _, _, get in cols), style=style)
 
     _console.print(table)
-    _console.print(f"Total: {len(records)} factors")
+    _console.print(f"Total: {len(rows)} factors")
 
 
 def _record_json(r: DerivedRecord) -> dict:
@@ -121,8 +116,8 @@ def _record_json(r: DerivedRecord) -> dict:
     }
 
 
-def print_json(records: list[DerivedRecord]):
-    data = [_record_json(r) for r in records]
+def print_json(rows: list[FactorRow]):
+    data = [_record_json(x.derived) for x in rows]
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
@@ -153,28 +148,28 @@ def parse_filters(filter_str: str) -> list[tuple[str, str, str]] | None:
     return filters
 
 
-def apply_filters(records: list[DerivedRecord], filters: list[tuple[str, str, str]]) -> list[DerivedRecord]:
-    result = records
+def apply_filters(rows: list[FactorRow], filters: list[tuple[str, str, str]]) -> list[FactorRow]:
+    result = rows
     for key, op, value in filters:
         if key == "tables":
             result = [
-                r for r in result
-                if r.tables and any(fnmatch.fnmatch(t, value) for t in r.tables)
+                x for x in result
+                if x.derived.tables and any(fnmatch.fnmatch(t, value) for t in x.derived.tables)
             ]
         elif key == "field":
-            result = [r for r in result if r.fields and value in r.fields]
+            result = [x for x in result if x.derived.fields and value in x.derived.fields]
         elif key in _SORTABLE_KEYS:
             threshold = float(value)
             if op == ">":
-                result = [r for r in result if (v := metric_get(r, key)) is not None and v > threshold]
+                result = [x for x in result if (v := metric_get(x.derived, key)) is not None and v > threshold]
             elif op == ">=":
-                result = [r for r in result if (v := metric_get(r, key)) is not None and v >= threshold]
+                result = [x for x in result if (v := metric_get(x.derived, key)) is not None and v >= threshold]
             elif op == "<":
-                result = [r for r in result if (v := metric_get(r, key)) is not None and v < threshold]
+                result = [x for x in result if (v := metric_get(x.derived, key)) is not None and v < threshold]
             elif op == "<=":
-                result = [r for r in result if (v := metric_get(r, key)) is not None and v <= threshold]
+                result = [x for x in result if (v := metric_get(x.derived, key)) is not None and v <= threshold]
             elif op == "=":
-                result = [r for r in result if (v := metric_get(r, key)) is not None and v == threshold]
+                result = [x for x in result if (v := metric_get(x.derived, key)) is not None and v == threshold]
     return result
 
 
@@ -222,58 +217,38 @@ def run_list(args):
     metric_pd = _metric_pushdown(filters) if filters else []
     sort_pd = args.sort_by if args.sort_by in _SORTABLE_KEYS else None
 
-    # limit 下推 gate:limit 减少行数,不是纯预筛。只有当 SQL 结果集 == 最终结果集
-    # 时才能下推,否则 SQL 之后的 Python 过滤会把行数砍到 < n。因此仅当:
-    #   - 无 --status (state 表过滤,本轮不 JOIN 下推);
-    #   - 无 field=/tables= 过滤 (field 精确、tables LIKE 近似,后者仍需内存兜底,
-    #     且两者都可能被同类第二条件二次过滤)。
-    # 命中时 SQL 已按 sort_pd 排序 + author IS NOT NULL,limit 后即最终结果。
-    # metric 阈值下推是精确的 (与 apply_filters 逐位等价),不影响 gate。
-    can_push_limit = args.status is None and field_pd is None and table_pd is None
-    limit_pd = args.n if can_push_limit else None
-
-    store = default_derived_store(config)
-    state_records = {r.name: r for r in default_store(config).list()}
-
-    # A derived row exists per factor, but `author` is only set by the index
-    # scan (of alpha_src). So `author is not None` == "has an index group" ==
-    # "lives in alpha_src" -- this is the list's factor set, unchanged from the
-    # old scan()-driven listing. Rows with metrics/bcorr but no index (e.g. a
-    # factor dropped from alpha_src leaving a stale bcorr) are correctly
-    # excluded (has_index=True pushes this into SQL). State (now the
-    # authoritative existence source in PG) may diverge from this set
-    # (staging-only submits, un-backfilled dirs); that drift is a health-check
-    # concern, deliberately not surfaced here.
+    # query_factors 联合读 derived + state:pg 同库走一条 LEFT JOIN (author/
+    # has_index/field/tables/metrics/status/sort/limit 全下推 SQL),json/跨库回退
+    # 走两次读 + 内存合并。limit 下推 gate 由 coordinator 按后端判定 (见 query.py),
+    # 调用方无需关心。下面仍全量跑一遍 filter/status/sort/[:n],故下推纯为预筛,
+    # 结果与不下推逐位等价。
     #
-    # get_all pushes author/has_index/field/tables/metrics/sort/limit into SQL
-    # (or the json backend's in-memory mirror). Everything below still runs the
-    # full filter/sort/limit set as a fallback, so a partial/absent pushdown is
-    # a pure pre-filter -- results are bit-for-bit identical either way.
-    records = list(
-        store.get_all(
-            author=args.user, has_index=True,
-            field=field_pd, table_glob=table_pd,
-            metrics=metric_pd, sort_by=sort_pd, limit=limit_pd,
-        ).values()
+    # has_index=True == author 非空 == 有 index 组 == 在 alpha_src (list 的因子集,
+    # 与旧 scan() 驱动的列表一致)。state (PG 里的存在性真相源) 可能与此集偏离
+    # (staging-only submit / 未 backfill 目录),那属 health 关注,此处刻意不暴露。
+    rows = query_factors(
+        config,
+        author=args.user, field=field_pd, table_glob=table_pd,
+        has_index=True, metrics=metric_pd,
+        status=args.status, sort_by=sort_pd, n=args.n,
     )
-    # 兜底基线:默认 name ASC (get_all 不带 sort_by 时的顺序),下方 sort/filter 再叠加。
-    records.sort(key=lambda r: r.name)
+    # 兜底基线:默认 name ASC (JOIN 不带 sort_by 时的顺序),下方 sort/filter 再叠加。
+    rows.sort(key=lambda x: x.derived.name)
 
     if args.status:
-        records = [r for r in records
-                   if (s := state_records.get(r.name)) and s.status == args.status]
+        rows = [x for x in rows if x.status is not None and x.status.value == args.status]
 
     if filters is not None:
-        records = apply_filters(records, filters)
+        rows = apply_filters(rows, filters)
 
     if args.sort_by and args.sort_by in _SORTABLE_KEYS:
-        records.sort(key=lambda r: sort_key(r, args.sort_by), reverse=True)
+        rows.sort(key=lambda x: sort_key(x.derived, args.sort_by), reverse=True)
 
     if args.n is not None:
-        records = records[:args.n]
+        rows = rows[:args.n]
 
     if args.format == "json":
-        print_json(records)
+        print_json(rows)
     else:
-        print_table(records, state_records,
+        print_table(rows,
                     show_tables=args.show_tables, show_fields=args.show_fields)

@@ -12,7 +12,8 @@ postgres 生产),让 `ops list` 查询不扫盘、跨机一致。
 - 键一律 (library_id, name);一个因子一行 (postgres 后端是 factor_derived 宽表)。
 - 四组 (index/metrics/datasources/bcorr) 各自独立 upsert,互不覆盖 —— check 只更 metrics
   时不该抹掉 datasources。
-- 读只有一个入口 get_all(),返回 {name: DerivedRecord};上层 (list.py) 内存 merge/filter。
+- 读入口 get_all(),返回 {name: DerivedRecord};上层 (list.py) 内存 merge/filter。
+  pg 后端另有 join_state()(LEFT JOIN factor_state),供 ops/infra/query.py 的联合读用。
 - 健壮性铁律: 整表可从 JFS rebuild,后端丢了不致命。
 """
 from abc import ABC, abstractmethod
@@ -104,7 +105,7 @@ class DerivedStore(ABC):
           - metrics: [(key, op, threshold)],key ∈ _SORTABLE_KEYS,op ∈ > >= < <= =
             (!= 不下推,调用方剔除)。语义与 metric_get + 比较一致 (None 行排除)。
           - sort_by: _SORTABLE_KEYS 之一,降序 (语义同 sort_key,None 排最后,name 二级序)。
-          - limit: 只在结果集 == 最终结果集时由调用方传入 (见 list.py 的 gate),否则 None。
+          - limit: 只在结果集 == 最终结果集时由调用方传入 (gate 见 ops/infra/query.py),否则 None。
         """
 
 

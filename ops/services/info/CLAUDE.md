@@ -13,6 +13,6 @@
 
 - `LibraryScanner.get(name)` — 因子基本信息
 - `LibraryScanner.get_dump_date_range(name)` — dump 日期范围
-- `load_metrics` / `load_datasources` — 缓存的 metrics 和数据源
+- `default_derived_store(config).get(name)` — 单条 `DerivedRecord`,一次读回 metrics + 数据源(fields/tables)
 
 如果 metrics/datasources 缺失，提示用户运行 `ops refresh --metrics` / `ops refresh --datasources`。
