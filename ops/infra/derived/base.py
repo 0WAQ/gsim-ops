@@ -47,6 +47,35 @@ class DerivedRecord:
     max_bcorr_factor: str | None = None
 
 
+# 可过滤/排序的数值键 -> 从 DerivedRecord 取值的 Python 真相源。
+# metric_get / sort_key 是内存侧唯一实现,list.py (过滤/兜底排序) 与
+# json_store (回退后端下推) 都复用,pg_store 的 SQL 表达式 (_METRIC_EXPR)
+# 必须逐键镜像这里的语义,三处不能 drift。
+_SORTABLE_KEYS = ("ret", "shrp", "mdd", "tvr", "fitness", "dump_days", "delay", "bcorr")
+
+
+def metric_get(rec: "DerivedRecord", key: str) -> float | None:
+    """取 rec 的数值键用于阈值比较。None 表示该组未算过 (比较里应排除该行)。
+    bcorr 用 abs(max_bcorr);dump_days/delay 转 float。"""
+    if key == "bcorr":
+        return abs(rec.max_bcorr) if rec.max_bcorr is not None else None
+    if key == "dump_days":
+        return float(rec.dump_days) if rec.dump_days is not None else None
+    if key == "delay":
+        return float(rec.delay) if rec.delay is not None else None
+    v = getattr(rec, key, None)
+    return float(v) if v is not None else None
+
+
+def sort_key(rec: "DerivedRecord", key: str) -> float:
+    """降序排序键。None 语义:dump_days None->0 (与旧 `dump_days or 0` 一致),
+    其余 None->-inf (排最后)。bcorr 用 abs。"""
+    if key == "dump_days":
+        return float(rec.dump_days or 0)
+    v = metric_get(rec, key)
+    return v if v is not None else float("-inf")
+
+
 class DerivedStore(ABC):
     """派生数据后端契约。四组各自 upsert,一个 get_all 读全库。"""
 
@@ -57,6 +86,10 @@ class DerivedStore(ABC):
         *,
         field: str | None = None,
         table_glob: str | None = None,
+        has_index: bool = False,
+        metrics: list[tuple[str, str, float]] | None = None,
+        sort_by: str | None = None,
+        limit: int | None = None,
     ) -> dict[str, DerivedRecord]:
         """读全库派生数据,返回 {name: DerivedRecord}。author 给定则只返回该作者。
 
@@ -64,7 +97,16 @@ class DerivedStore(ABC):
           - field: 只返回 fields 数组含此值 (精确匹配) 的因子;
           - table_glob: 只返回 tables 数组任一元素 fnmatch 匹配此 glob 的因子。
         二者都为 None 时行为与无参一致。下推只做预筛缩小行集,上层仍会用
-        apply_filters 全量兜底,故结果与不下推逐位等价 (下推纯为性能)。"""
+        apply_filters 全量兜底,故结果与不下推逐位等价 (下推纯为性能)。
+
+        其余下推参数 (list.py 的排序/过滤/截断),同样是预筛,上层保留全量兜底:
+          - has_index: True 只返回 author 非空的行 (即有 index 组 / 在 alpha_src)。
+          - metrics: [(key, op, threshold)],key ∈ _SORTABLE_KEYS,op ∈ > >= < <= =
+            (!= 不下推,调用方剔除)。语义与 metric_get + 比较一致 (None 行排除)。
+          - sort_by: _SORTABLE_KEYS 之一,降序 (语义同 sort_key,None 排最后,name 二级序)。
+          - limit: 只在结果集 == 最终结果集时由调用方传入 (见 list.py 的 gate),否则 None。
+        """
+
 
     @abstractmethod
     def get(self, name: str) -> DerivedRecord | None:

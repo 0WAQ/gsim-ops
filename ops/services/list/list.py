@@ -12,6 +12,7 @@ from ops.core.state import FactorStatus, FactorRecord
 from ops.infra.config import Config
 from ops.infra.store import default_store
 from ops.infra.derived import default_derived_store, DerivedRecord
+from ops.infra.derived.base import metric_get, sort_key, _SORTABLE_KEYS
 
 
 DASH = "—"
@@ -125,30 +126,8 @@ def print_json(records: list[DerivedRecord]):
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
-SORT_KEYS = {
-    "ret": lambda r: r.ret if r.ret is not None else float("-inf"),
-    "shrp": lambda r: r.shrp if r.shrp is not None else float("-inf"),
-    "mdd": lambda r: r.mdd if r.mdd is not None else float("-inf"),
-    "tvr": lambda r: r.tvr if r.tvr is not None else float("-inf"),
-    "fitness": lambda r: r.fitness if r.fitness is not None else float("-inf"),
-    "dump_days": lambda r: r.dump_days or 0,
-    "delay": lambda r: r.delay if r.delay is not None else float("-inf"),
-    "bcorr": lambda r: abs(r.max_bcorr) if r.max_bcorr is not None else float("-inf"),
-}
-
-METRIC_GETTERS = {
-    "ret": lambda r: r.ret,
-    "shrp": lambda r: r.shrp,
-    "mdd": lambda r: r.mdd,
-    "tvr": lambda r: r.tvr,
-    "fitness": lambda r: r.fitness,
-    "dump_days": lambda r: float(r.dump_days) if r.dump_days is not None else None,
-    "delay": lambda r: float(r.delay) if r.delay is not None else None,
-    "bcorr": lambda r: abs(r.max_bcorr) if r.max_bcorr is not None else None,
-}
-
 _FILTER_PATTERN = re.compile(r"^(\w+)([><=!]+)(.+)$")
-FILTER_KEYS = {"tables", "field"} | set(METRIC_GETTERS.keys())
+FILTER_KEYS = {"tables", "field"} | set(_SORTABLE_KEYS)
 
 
 def parse_filters(filter_str: str) -> list[tuple[str, str, str]] | None:
@@ -184,19 +163,18 @@ def apply_filters(records: list[DerivedRecord], filters: list[tuple[str, str, st
             ]
         elif key == "field":
             result = [r for r in result if r.fields and value in r.fields]
-        elif key in METRIC_GETTERS:
+        elif key in _SORTABLE_KEYS:
             threshold = float(value)
-            getter = METRIC_GETTERS[key]
             if op == ">":
-                result = [r for r in result if (v := getter(r)) is not None and v > threshold]
+                result = [r for r in result if (v := metric_get(r, key)) is not None and v > threshold]
             elif op == ">=":
-                result = [r for r in result if (v := getter(r)) is not None and v >= threshold]
+                result = [r for r in result if (v := metric_get(r, key)) is not None and v >= threshold]
             elif op == "<":
-                result = [r for r in result if (v := getter(r)) is not None and v < threshold]
+                result = [r for r in result if (v := metric_get(r, key)) is not None and v < threshold]
             elif op == "<=":
-                result = [r for r in result if (v := getter(r)) is not None and v <= threshold]
+                result = [r for r in result if (v := metric_get(r, key)) is not None and v <= threshold]
             elif op == "=":
-                result = [r for r in result if (v := getter(r)) is not None and v == threshold]
+                result = [r for r in result if (v := metric_get(r, key)) is not None and v == threshold]
     return result
 
 
@@ -207,6 +185,17 @@ def _pushdown_params(filters: list[tuple[str, str, str]]) -> tuple[str | None, s
     field = next((v for k, _, v in filters if k == "field"), None)
     table_glob = next((v for k, _, v in filters if k == "tables"), None)
     return field, table_glob
+
+
+def _metric_pushdown(filters: list[tuple[str, str, str]]) -> list[tuple[str, str, float]]:
+    """把 metric 阈值条件 (ret>30 等) 转成 get_all 的下推参数。
+    `!=` 不下推 (apply_filters 未实现,现状静默忽略),剔除以保持逐位等价;
+    apply_filters 仍全量兜底,故下推纯为预筛。"""
+    out: list[tuple[str, str, float]] = []
+    for key, op, value in filters:
+        if key in _SORTABLE_KEYS and op != "!=":
+            out.append((key, op, float(value)))
+    return out
 
 
 def run_list(args):
@@ -230,6 +219,18 @@ def run_list(args):
             return
 
     field_pd, table_pd = _pushdown_params(filters) if filters else (None, None)
+    metric_pd = _metric_pushdown(filters) if filters else []
+    sort_pd = args.sort_by if args.sort_by in _SORTABLE_KEYS else None
+
+    # limit 下推 gate:limit 减少行数,不是纯预筛。只有当 SQL 结果集 == 最终结果集
+    # 时才能下推,否则 SQL 之后的 Python 过滤会把行数砍到 < n。因此仅当:
+    #   - 无 --status (state 表过滤,本轮不 JOIN 下推);
+    #   - 无 field=/tables= 过滤 (field 精确、tables LIKE 近似,后者仍需内存兜底,
+    #     且两者都可能被同类第二条件二次过滤)。
+    # 命中时 SQL 已按 sort_pd 排序 + author IS NOT NULL,limit 后即最终结果。
+    # metric 阈值下推是精确的 (与 apply_filters 逐位等价),不影响 gate。
+    can_push_limit = args.status is None and field_pd is None and table_pd is None
+    limit_pd = args.n if can_push_limit else None
 
     store = default_derived_store(config)
     state_records = {r.name: r for r in default_store(config).list()}
@@ -239,14 +240,24 @@ def run_list(args):
     # "lives in alpha_src" -- this is the list's factor set, unchanged from the
     # old scan()-driven listing. Rows with metrics/bcorr but no index (e.g. a
     # factor dropped from alpha_src leaving a stale bcorr) are correctly
-    # excluded. State (now the authoritative existence source in PG) may diverge
-    # from this set (staging-only submits, un-backfilled dirs); that drift is a
-    # health-check concern, deliberately not surfaced here.
-    records = sorted(
-        (r for r in store.get_all(author=args.user, field=field_pd, table_glob=table_pd).values()
-         if r.author is not None),
-        key=lambda r: r.name,
+    # excluded (has_index=True pushes this into SQL). State (now the
+    # authoritative existence source in PG) may diverge from this set
+    # (staging-only submits, un-backfilled dirs); that drift is a health-check
+    # concern, deliberately not surfaced here.
+    #
+    # get_all pushes author/has_index/field/tables/metrics/sort/limit into SQL
+    # (or the json backend's in-memory mirror). Everything below still runs the
+    # full filter/sort/limit set as a fallback, so a partial/absent pushdown is
+    # a pure pre-filter -- results are bit-for-bit identical either way.
+    records = list(
+        store.get_all(
+            author=args.user, has_index=True,
+            field=field_pd, table_glob=table_pd,
+            metrics=metric_pd, sort_by=sort_pd, limit=limit_pd,
+        ).values()
     )
+    # 兜底基线:默认 name ASC (get_all 不带 sort_by 时的顺序),下方 sort/filter 再叠加。
+    records.sort(key=lambda r: r.name)
 
     if args.status:
         records = [r for r in records
@@ -255,8 +266,8 @@ def run_list(args):
     if filters is not None:
         records = apply_filters(records, filters)
 
-    if args.sort_by and args.sort_by in SORT_KEYS:
-        records.sort(key=SORT_KEYS[args.sort_by], reverse=True)
+    if args.sort_by and args.sort_by in _SORTABLE_KEYS:
+        records.sort(key=lambda r: sort_key(r, args.sort_by), reverse=True)
 
     if args.n is not None:
         records = records[:args.n]

@@ -207,7 +207,7 @@ AlphaXxx/
 - **Feishu credentials hardcoded**: `infra/notify/feishu_send.py` — move to config/env later
 - **`core/alpha/metadata.py` has I/O**: `_modify_always()`, `save()`, `get_v2npy_files()` — extract to services/infra
 - **`ops sync` 在 JFS 上线后是 legacy fallback**: 仅对 `config.prod-legacy.yaml` 有意义,后续整体退役;`ops/services/sync/CLAUDE.md` 有 deprecation 标注
-- **派生层 (index/metrics/datasources/bcorr) 已迁 Postgres** (2026-07-04, branch `feat/derived-postgres`): 原 per-machine `~/.cache/ops/lib/<lib>/*.json` → 共享 PG (server-160 docker, host 15432), 三机一致 + 查询不扫盘。抽象层 `ops/infra/derived/` (DerivedStore, 仿 store/), 默认 postgres 可回退 json。读写数据流已重构 (读侧走 DerivedRecord, 不再 FactorInfo god-object + merge)。datasource 反查 (`field=`/`tables=`) 已下推 SQL (field 走 GIN, tables 走 LIKE); metrics 阈值仍内存跑。部署见 `scripts/postgres/README.md`
+- **派生层 (index/metrics/datasources/bcorr) 已迁 Postgres** (2026-07-04, branch `feat/derived-postgres`): 原 per-machine `~/.cache/ops/lib/<lib>/*.json` → 共享 PG (server-160 docker, host 15432), 三机一致 + 查询不扫盘。抽象层 `ops/infra/derived/` (DerivedStore, 仿 store/), 默认 postgres 可回退 json。读写数据流已重构 (读侧走 DerivedRecord, 不再 FactorInfo god-object + merge)。datasource 反查 (`field=`/`tables=`) + metrics 阈值 (`ret>30`) + `--sort-by` + `-n` 均已下推 SQL (field 走 GIN, tables/sort 走表达式, limit 带 gate)。部署见 `scripts/postgres/README.md`
 
 ## Plans & Roadmap
 

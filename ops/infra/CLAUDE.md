@@ -43,9 +43,9 @@ All ops state/cache files live under `~/.cache/ops/`.
 派生层 (index/metrics/datasources/bcorr) 的存储抽象,替代原 per-machine
 `~/.cache/ops/lib/<lib>/*.json`。三机共享 + 查询不扫盘。范式与 `store/` 一致。
 
-- `base.py` — `DerivedStore` ABC + `DerivedRecord` dataclass(一个因子的四组派生数据合一,扁平字段)。方法:`get_all(author=None)` / `get(name)` / `upsert_index/metrics/datasources/bcorr` / `get_meta/set_meta` / `delete`
-- `pg_store.py` — `PostgresDerivedStore`,单张 `factor_derived` 宽表 (library_id, name) 主键,四组独立 UPSERT,GIN(fields/tables) 反查索引;`derived_meta` 表存 `index_built_at` 水位;psycopg3 连接池
-- `json_store.py` — `JsonDerivedStore`,单文件 `derived.json`,fcntl 锁 + 原子写,回退用
+- `base.py` — `DerivedStore` ABC + `DerivedRecord` dataclass(一个因子的四组派生数据合一,扁平字段)。方法:`get_all(...)` / `get(name)` / `upsert_index/metrics/datasources/bcorr` / `get_meta/set_meta` / `delete`。`get_all` 除 `author` 外带一组关键字下推参:`field` / `table_glob`(datasource 反查)、`has_index`(只留 author 非空即在 alpha_src)、`metrics`([(key,op,threshold)])、`sort_by`、`limit`,全部有向后兼容默认值,纯预筛(上层仍全量兜底,结果逐位等价)。另导出数值键取值/排序的**单一 Python 真相源** `metric_get(rec,key)` / `sort_key(rec,key)` + `_SORTABLE_KEYS`,供 list.py 内存兜底 + json 后端复用;pg 后端 SQL 表达式须逐键镜像,三处不能 drift
+- `pg_store.py` — `PostgresDerivedStore`,单张 `factor_derived` 宽表 (library_id, name) 主键,四组独立 UPSERT,GIN(fields/tables) 反查索引;`derived_meta` 表存 `index_built_at` 水位;psycopg3 连接池。`get_all` 把 `has_index`/`field`/`tables`/`metrics`/`sort_by`/`limit` 拼成 WHERE/ORDER BY/LIMIT 下推 SQL,metric 键的 SQL 表达式在 `_METRIC_EXPR`(镜像 base.metric_get,如 `bcorr → abs(max_bcorr)`)、op 白名单 `_SQL_OPS`
+- `json_store.py` — `JsonDerivedStore`,单文件 `derived.json`,fcntl 锁 + 原子写,回退用;`get_all` 的下推参在内存里镜像同语义(复用 `base.metric_get`/`sort_key`,`_passes_metrics` + `_OP_FUNCS`)
 - `__init__.py` — `default_derived_store(config)` 按 `config.derived_backend` 分发 (json 默认 / postgres)
 - **读写分离**:读侧 (list/info/health) 直接消费 `DerivedRecord`;写侧 `refresh_*`(services/list/)收 names 生产派生数据。index 由 `LibraryScanner.scan()` 扫盘后 publish,新鲜度靠 alpha_src mtime vs `index_built_at` 水位跨机判定
 - 迁移工具 `ops/tools/derived_migrate.py`;部署 `scripts/postgres/README.md`

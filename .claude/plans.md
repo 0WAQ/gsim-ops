@@ -440,21 +440,17 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 都在 `ops` 库, host 15432),很多 "分开读再内存合并" 现在其实能下推 SQL 或 JOIN。
 
 本轮(commit `bbc5462`)已完成 **第 5 条**: check 归档补写 datasources+bcorr,四组入库即完整;
-`--refresh-*` 独立成 `ops refresh`。剩下 4 条按性价比排序如下。
+`--refresh-*` 独立成 `ops refresh`。之后 **第 1 条已完成** (`ops list` sort/limit/metrics 阈值下推 SQL,
+见 `ops/services/list/CLAUDE.md` "SQL 下推" 段 + `ops/infra/derived/base.py:metric_get`/`sort_key`)。
+剩下 3 条按性价比排序如下。
 
-### 1. `ops list` 把全表拉进内存再 Python 过滤/排序/截断 (纯收益,改动集中)
+### ~~1. `ops list` 把全表拉进内存再 Python 过滤/排序/截断~~ ✅ 已完成
 
-现状 (`ops/services/list/list.py`):
-- 已下推 SQL: `field=` / `tables=` (走 GIN),见 `_pushdown_params` + `pg_store.get_all`。
-- **仍内存跑**: `--sort-by` (list.py 的 `SORT_KEYS`,sorted 全表)、`-n` limit (切片 `records[:args.n]`)、
-  `--status` (state 过滤)、metrics 阈值 (`ret>30` 等,`apply_filters`)。
-- 典型浪费: `ops list --sort-by ret -n 10` 把整库读回来只为 10 行。db 时代 `ORDER BY ret DESC LIMIT 10` 一句够。
-
-改法: 把 sort/limit/metrics 阈值下推到 `DerivedStore.get_all` (加 `sort_by` / `limit` / metric 比较参数)。
-- pg_store: 拼 `ORDER BY <col> DESC NULLS LAST LIMIT n` + metrics 阈值 `WHERE ret > %s`。
-- json_store: 保持内存实现同语义 (回退后端)。
-- `apply_filters` / `SORT_KEYS` 仍全量兜底,保证下推只是预筛,结果逐位等价 (跟现有 field/tables 下推同范式)。
-- **注意**: NULL 排序方向 —— 现在 `SORT_KEYS` 把 None 当 `-inf` 排最后,SQL 要 `NULLS LAST` 对齐。
+sort / metrics 阈值 / limit 已下推 `DerivedStore.get_all` (pg 拼 `WHERE/ORDER BY/LIMIT`,
+json 内存镜像同语义)。`has_index=True` 下推 `author IS NOT NULL`;limit 有 `can_push_limit`
+gate (无 status/field/tables 时才下推,否则内存 `[:n]` 兜底);`!=` 不下推 (apply_filters 未实现);
+数值键真相源统一到 `base.metric_get`/`sort_key`,pg 的 `_METRIC_EXPR` 逐键镜像。等价性已硬校验
+(top-n == full head,7593 行 PG + json 单测)。
 
 ### 2. state + derived 分两次读 + Python 按 name 合并 → 一条 JOIN (纯收益)
 
@@ -492,8 +488,8 @@ health 的 `missing-metrics` / `missing-datasources` 本质是 SQL 谓词
 
 ### 排期建议
 
-1 (list 下推) 独立、纯收益、改动集中 → **下个 session 首选**。
-2+3 (JOIN + health) 绑一起,需先想清 pg/json 后端抽象 → 第二个 session。
+~~1 (list 下推)~~ ✅ 已完成。
+2+3 (JOIN + health) 绑一起,需先想清 pg/json 后端抽象 → **下个 session 首选**。
 4 (index 事件驱动) 面广且与 alpha_dump 退役耦合 → 压后,等 alpha_dump 方向明朗再动。
 
 
