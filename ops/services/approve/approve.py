@@ -1,7 +1,14 @@
-"""ops approve — 人工审批 correlation 失败因子,REJECTED → ACTIVE。
+"""ops approve — 因子库多样性 / 数据覆盖的人工豁免,REJECTED → ACTIVE。
 
-仅适用于 `last_fail_stage == "correlation"` 的 REJECTED 因子。其他失败阶段
-(checkbias/checkpoint/compliance) 是因子质量问题,不允许 approve。
+自动流水线只优化业绩 + 低相关,盲区是**不看数据使用覆盖**:一个用了库里稀缺
+数据的因子,若和某老因子相关、业绩又不占优,correlation stage 必拒且无自动路径可救
+——哪怕它正是库最需要的(扩数据覆盖多样性)。approve 是对抗这个盲区的唯一人工闸:
+人判定某因子对覆盖有独立价值,明知它相关/业绩不占优仍放行。详见 CLAUDE.md。
+
+仅适用于 `last_fail_stage == "correlation"` 的 REJECTED 因子;其他阶段
+(checkbias/checkpoint/compliance)是质量/正确性问题,不属豁免范畴。放行宽度是
+整个 correlation stage(业绩门槛 + 相关性)——为覆盖保留因子本就可能接受它业绩差
+一点,是有意的宽度。
 
 数据产物在 correlation 失败时已就位(check.py on_reject 保留 dump+pnl+feature),
 approve 不重跑任何阶段,只翻状态。

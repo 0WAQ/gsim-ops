@@ -66,7 +66,7 @@ uv run ops restage AlphaXxx -s rejected   # 召回 rejected 因子
 uv run ops restage AlphaXxx --purge  # 同时清除 dump + feature(保留 src/pnl)
 uv run ops restage -u wbai           # 批量:wbai 所有 active 因子(apt 风格确认)
 uv run ops restage -u wbai -y        # 批量,跳过确认
-uv run ops approve AlphaXxx          # 人工通过 correlation 失败因子 (REJECTED → ACTIVE)
+uv run ops approve AlphaXxx          # 多样性豁免:放行 correlation-rejected 因子 (REJECTED → ACTIVE)
 uv run ops approve -u wbai           # 批量:wbai 所有 correlation-rejected 因子
 uv run ops approve -u wbai -y        # 批量,跳过确认
 uv run ops cancel AlphaXxx           # 撤回未入库的 submitted 因子(删 staging + 硬删 state)
@@ -98,7 +98,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 |------------|---------|--------|
 | `submit` | Copy new factors from dropbox to staging, generate `meta.json`, mark SUBMITTED. `--overwrite`: 已入库同名因子改提新代码,version += 1(默认跳过) | `ops/services/submit/` |
 | `restage` | Recall ACTIVE/REJECTED factor back to staging for re-check (code unchanged; doesn't run check itself) | `ops/services/restage/` |
-| `approve` | 人工审批 correlation 失败因子,REJECTED → ACTIVE(不重跑 check) | `ops/services/approve/` |
+| `approve` | 多样性豁免:放行 correlation-rejected 因子(为数据覆盖,非质量),REJECTED → ACTIVE(不重跑 check) | `ops/services/approve/` |
 | `cancel` | 撤回未入库的 SUBMITTED 因子(删 staging + 硬删 state record) | `ops/services/cancel/` |
 | `clear` | 清理 staging 孤儿(state 无 record 的目录,submit parse 失败留下) | `ops/services/clear/` |
 | `combo` | QR combo 端到端代测(predict+backtest, 占位符注入, 无状态) | `ops/services/combo/` |
