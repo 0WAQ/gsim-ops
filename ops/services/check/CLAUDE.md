@@ -35,6 +35,8 @@ Uses `ProcessPoolExecutor` (max 20 workers) for parallel factor checking.
 
 Checkers inherit from `Checker` ABC in `checker/base.py`. Failures raise `CheckFail`; skippable issues raise `CheckSkip`.
 
+`CheckerPipeline.__init__` 收一个可选 `checkers: dict[str, Checker] | None`(依赖注入):不传时照旧 new 真的 gsim-backed checker(生产行为不变),测试注入 fake checker 在指定 stage 抛 `CheckFail`/`CheckSkip`/`Exception` 来验路由,不碰 gsim。路由/自愈/锁的单测见 `tests/test_check_routing.py` + `tests/test_check_scan.py`。
+
 ## Checkbias DataFirewall (`checker/firewall.py`)
 
 Uses AST to inject `@DataFirewall(delay=X, data_attrs={...})` decorator onto the factor's `generate` method.

@@ -82,7 +82,11 @@ uv run ops combo run <dir> --start 20250102 --end 20251231          # combo 端�
 uv run ops combo run <dir> --start 20241210 --end 20241231 --predict-start 20241201 --stats simple  # 留 warmup, 单 stats
 ```
 
-No test suite exists. Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
+Test suite in `tests/` (pytest, dev group). Covers the check pipeline's control flow
+(routing outcomes, on_reject artifact policy, scan/self-heal/lock) + state/derived PG
+storage. `uv sync --group dev && uv run pytest -m "not slow"`. PG tests need an isolated
+`ops_test` db (auto-skip if unreachable); see `tests/README.md`. Python 3.10+ required
+(see `.python-version`). Package manager is **uv** (not pip).
 
 ```bash
 uv sync          # Install dependencies

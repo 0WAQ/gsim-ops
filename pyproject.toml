@@ -32,5 +32,23 @@ dependencies = [
 [project.scripts]
 ops = "ops.main:main"
 
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = [
+    # psycopg ConnectionPool.__del__ 在 GC 时试图 join 自己的 worker 线程,
+    # 短命 store pool (每测新建) 触发无害的 unraisable 噪音。生产是长命进程不涉及。
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
+markers = [
+    "pg: 需要可达的 ops_test Postgres 库 (host 10.9.100.160:15432); 库不可达时自动 skip",
+    "slow: 真跑 gsim 的端到端冒烟 (手动, 不随默认 suite)",
+]
+
 [tool.setuptools.packages.find]
 include = ["ops*"]

@@ -53,7 +53,8 @@ class CheckerPipeline:
                  users: list[str] | None,
                  config_path: Path,
                  factor: str | None = None,
-                 retry: bool = False):
+                 retry: bool = False,
+                 checkers: dict[str, "Checker"] | None = None):
 
         self.config = Config.load(config_path)
         self.config_path = config_path
@@ -73,12 +74,17 @@ class CheckerPipeline:
         for md in self.metadatas:
             prepare_for_initial(md, self.config)
 
-        self.validate_checker = ValidateChecker(config=self.config)
-        self.checkbias_checker = CheckbiasChecker(config=self.config)
-        self.checkpoint_checker = CheckpointChecker(config=self.config)
-        self.long_backtest_checker = LongBacktestChecker(config=self.config)
-        self.compliance_checker = ComplianceChecker(config=self.config)
-        self.correlation_checker = CorrelationChecker(config=self.config)
+        # Checkers are dependency-injected: pass `checkers` to substitute fakes
+        # in tests. Unset (production) → construct the real gsim-backed checkers,
+        # behavior unchanged.
+        checkers = checkers or {}
+        self.validate_checker = checkers.get("validate") or ValidateChecker(config=self.config)
+        self.checkbias_checker = checkers.get("checkbias") or CheckbiasChecker(config=self.config)
+        self.checkpoint_checker = checkers.get("checkpoint") or CheckpointChecker(config=self.config)
+        self.long_backtest_checker = checkers.get("long_backtest") or LongBacktestChecker(config=self.config)
+        self.compliance_checker = checkers.get("compliance") or ComplianceChecker(config=self.config)
+        self.correlation_checker = checkers.get("correlation") or CorrelationChecker(config=self.config)
+
 
     def _scan_factors(self, users: list[str] | None,
                       factor_name: str | None = None) -> list[AlphaMetadata]:
