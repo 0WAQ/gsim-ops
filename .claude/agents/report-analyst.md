@@ -36,7 +36,7 @@ grep -a "factor=<user>/" ~/.cache/ops/logs/ops.log | sed 's/\x1b\[[0-9;]*m//g'
 ```
 
 - `check retryable failure ... stage=X` → outcome `error` (留 staging, 环境类)
-- `check rejected ... stage=X reason=...` → outcome `fail` (进 recycle, 质量类)
+- `check rejected ... stage=X reason=...` → outcome `fail` (src 归档 alpha_src, 质量类)
 - fail_reason 在 `reason=` 之后;若是 `reason=Traceback`,真正异常在紧随其后几十行的
   traceback 末行(`grep -aA30` 抓窗口,取 `\w+Error/\w+Exception` 行)。
 - ops.log 带 ANSI,先 `sed 's/\x1b\[[0-9;]*m//g'` 去色再解析。
@@ -72,7 +72,7 @@ feedback. Read it from the JSON, never from terminal scrollback (that is truncat
 | outcome | meaning | whose problem | next step |
 |---|---|---|---|
 | `pass`   | 入库,status active | — | — |
-| `fail`   | REJECTED,进 recycle | **因子质量问题(QR)** | QR 改代码后 `ops submit --overwrite`(新代码)或 `ops restage -s rejected`(原代码重跑) |
+| `fail`   | REJECTED，src 归档 alpha_src | **因子质量问题(QR)** | QR 改代码后 `ops submit --overwrite`(新代码)或 `ops restage -s rejected`(原代码重跑) |
 | `error`  | 留在 staging | **环境/框架问题,不是 QR 的锅** | ops 侧 `ops restage` / `ops check --retry` |
 | `locked` | 被其他进程占用,跳过 | — | 重跑即可 |
 
@@ -117,7 +117,7 @@ N 个因子,X 个卡在 validate 没跑起来,Y 个跑完被打回。
 - <根因归类A>(N 个):<一句话原因> 代表因子 AlphaXxx...
 - <根因归类B>(N 个):...
 
-跑完被打回的(Y 个,改代码 resubmit):
+跑完被打回的(Y 个,改代码 submit --overwrite):
 - compliance 单票超 5%(N 个):AlphaXxx 6.99%,AlphaYyy 5.25%... 加 cap 压持仓
 - correlation 换手超限(N 个):AlphaXxx tvr 60.59% > 50%@delay=1
 - checkbias 前视(N 个):AlphaXxx

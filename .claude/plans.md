@@ -134,7 +134,7 @@ Factor lifecycle: `提交(submitted) → 验证中(checking) → 入库(active) 
 
 **Phase 1: 状态管理 + submit/status/backfill + 一致性** ✅ done
 
-Implemented `ops submit` / `ops status` / `ops backfill`, state tracking in `CheckerPipeline`, `meta.json` per factor as identity card, per-factor advisory lock (`infra/lock.py`), and reconcile pass at check startup. See the Factor Lifecycle section in `CLAUDE.md`.
+Implemented `ops submit` / `ops status` / `ops backfill`, state tracking in `CheckerPipeline`, `meta.json` per factor as identity card, per-factor advisory lock (`infra/lock.py`)。（原 reconcile pass at check startup 已下线 2026-07：crash-mid-check 由下次 `ops check` 扫 staging 自愈，无对账。）See the Factor Lifecycle section in `CLAUDE.md`.
 
 **Phase 2: 因子质量监控** — Rolling IC/IR, coverage, autocorrelation, correlation drift. SQLite replaces JSON store. `ops monitor` command (cron). Threshold alerts via Feishu.
 

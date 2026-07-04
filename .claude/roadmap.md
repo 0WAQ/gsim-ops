@@ -1,6 +1,6 @@
 # Roadmap
 
-Feature checklist. Done items are kept for reference. See `docs/plans.md` for detailed design of unstarted items.
+Feature checklist. Done items are kept for reference. See `.claude/plans.md` for detailed design of unstarted items.
 
 ## Factor Storage & Management
 - [x] `ops list` - List all factors (filter by author)
@@ -18,12 +18,12 @@ Feature checklist. Done items are kept for reference. See `docs/plans.md` for de
 - [x] `ops status` - Query factor lifecycle state
 - [x] `ops backfill` - One-shot meta.json + ACTIVE state for legacy factors
 - [x] Per-factor advisory lock (concurrent submit/check safety)
-- [x] State ↔ filesystem reconcile on check startup
+- [x] ~~State ↔ filesystem reconcile on check startup~~ (reconcile 已下线 2026-07；crash-mid-check 由下次 `ops check` 扫 staging 自愈，无对账)
 - [x] `ops pack` - Aggregate alpha_dump → alpha_feature (batch + incremental from check)
-- [x] `ops sync` - Cross-server library sync via rclone (data + state, stable library_id replaces hash cache keys)
-- [x] `ops rm` - Soft-delete a factor (DELETED tombstone; `--force` drops local dump+feature)
-- [ ] `ops sync gc` - Reclaim remote files for DELETED factors (opt-in, separate from push/pull)
-- [ ] `ops factor` namespace consolidating add/rm/check/run/info/list (see `docs/plans.md`)
+- [x] `ops sync` - Cross-server library sync via S3/boto3 (data + state, stable library_id replaces hash cache keys)
+- [x] `ops rm` - Hard-delete a factor (src/pnl/dump/feature + state 行 + derived 行，不可逆，无墓碑；仅 `-y` 跳过确认，无 `--force`)
+- [ ] ~~`ops sync gc` - Reclaim remote files for DELETED factors~~ (SUPERSEDED 2026-07-04：soft-delete/DELETED 模型已废弃，`ops rm` 改硬删，无墓碑可回收)
+- [ ] `ops factor` namespace consolidating add/rm/check/run/info/list (see `.claude/plans.md`)
 - [ ] Daily incremental pack path (`ops pack --date YYYYMMDD`,设计已完成暂缓实施 — 详见 `.claude/plans.md` "ops pack Incremental Mode")
 - [ ] Alphalib storage backend migration (single JuiceFS mount + Redis metadata; Git runs on top of JuiceFS — see `.claude/plans.md`)
 - [ ] Factor registry, versioning, tags/categories

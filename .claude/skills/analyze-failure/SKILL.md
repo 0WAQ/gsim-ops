@@ -15,7 +15,7 @@ Deep-dive into why a factor was rejected by the check pipeline.
    - Review `check_history` for patterns (always fails at same stage?)
 
 2. **Locate factor files**
-   - Check if factor is in `recycle/{user}/{stage}/` (expected for REJECTED)
+   - REJECTED 因子的 src 归档在 `alpha_src/<name>/`（靠 state 的 status/last_fail_stage 区分，无 recycle 目录）
    - If in `staging/`, it's a validate/long_backtest failure (retriable)
    - Read the factor's `.py` and `.xml` files
 
@@ -52,9 +52,9 @@ Deep-dive into why a factor was rejected by the check pipeline.
    - simsummary failed or file move error
    - Check if PNL directory exists and is readable
 
-4. **Reconciliation check**
-   - If state and filesystem location mismatch, explain reconcile would fix it
-   - Show the reconcile table from `ops/services/check/CLAUDE.md`
+4. **Crash-mid-check self-heal**
+   - reconcile 已下线，无 state/filesystem 对账。若因子 check 中途崩溃（state 停在 CHECKING），
+     下一次 `ops check` 扫 staging 时自动重跑，无需仲裁。
 
 5. **Actionable recommendations**
    - If retriable (validate/long_backtest): `ops check --retry`
@@ -76,9 +76,8 @@ Fix:
   Change to self.close[di-1] or self.close[:di]
   
 Next steps:
-  1. Fix the code in recycle/wbai/checkbias/AlphaXxx/
-  2. ops restage AlphaXxx -s rejected
-  3. ops check
+  1. QR 改代码后经 dropbox 重新 submit（`ops submit --overwrite`），或 `ops restage AlphaXxx -s rejected` 原代码重跑
+  2. ops check
 ```
 
 ## Usage

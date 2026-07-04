@@ -20,7 +20,7 @@ The check pipeline runs 8 stages sequentially per factor:
 ## Failure semantics
 
 - **validate / long_backtest fail** → SUBMITTED (stays in staging, retriable)
-- **checkbias / checkpoint / compliance / correlation / archive fail** → REJECTED (moved to recycle)
+- **checkbias / checkpoint / compliance / correlation / archive fail** → REJECTED (src 归档到 alpha_src，状态靠 state 区分，无 recycle 目录)
 
 ## Your debugging process
 
@@ -31,9 +31,9 @@ The check pipeline runs 8 stages sequentially per factor:
    Note: last_fail_stage, last_fail_reason, check_history
 
 2. **Locate factor files**
-   - SUBMITTED/staging: `/mnt/storage/alphalib/staging/<name>/`
-   - ACTIVE: `/mnt/storage/alphalib/alpha_src/<name>/`
-   - REJECTED: `/mnt/storage/alphalib/recycle/{user}/{stage}/<name>/`
+   - SUBMITTED/staging: `/tank/vault/alphalib/staging/<name>/`（144 上是 `/storage/vault/alphalib/`）
+   - ACTIVE: `/tank/vault/alphalib/alpha_src/<name>/`
+   - REJECTED: `/tank/vault/alphalib/alpha_src/<name>/`（src 同样归档在 alpha_src，靠 state 的 status/last_fail_stage 区分，无 recycle 目录）
 
 3. **Stage-specific diagnosis**
 
@@ -70,8 +70,9 @@ The check pipeline runs 8 stages sequentially per factor:
    - File move permission issue
    - Disk space
 
-4. **Reconciliation check**
-   If state and filesystem don't match, explain what reconcile would do.
+4. **Crash-mid-check self-heal**
+   reconcile 已下线。若因子在 check 中途崩溃（state 停在 CHECKING，staging 目录还在），
+   下一次 `ops check` 扫 staging 时会自动重跑该因子，无需仲裁。无 state/filesystem 对账逻辑。
 
 ## Output format
 
