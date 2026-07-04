@@ -128,7 +128,7 @@ def run_cancel(args) -> None:
     ok = fail = locked = 0
     for rec in targets:
         try:
-            with factor_lock(rec.name):
+            with factor_lock(rec.name, config):
                 _cancel_one(rec, config, store)
                 ok += 1
         except FactorLocked:

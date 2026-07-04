@@ -122,7 +122,7 @@ def run_approve(args) -> None:
     ok = fail = locked = 0
     for rec in targets:
         try:
-            with factor_lock(rec.name):
+            with factor_lock(rec.name, config):
                 _approve_one(rec, config, store)
                 info(f"  ✔ {rec.name} rejected → active")
                 ok += 1

@@ -220,10 +220,10 @@ def _is_packed(name: str, alpha_feature: Path) -> bool:
 
 def _pack_worker(name: str, alpha_dump: Path, alpha_feature: Path,
                  date_to_idx: dict[int, int], shape: tuple[int, int],
-                 delay: int, verify: bool) -> tuple[str, str, str]:
+                 delay: int, verify: bool, config: Config) -> tuple[str, str, str]:
     """Returns (name, status, msg). status in {ok, locked, failed}."""
     try:
-        with factor_lock(name):
+        with factor_lock(name, config):
             pack_one(name, alpha_dump, alpha_feature, date_to_idx, shape, delay, verify=verify)
         return (name, "ok", "")
     except FactorLocked:
@@ -298,7 +298,7 @@ def run_pack(args):
     workers = max(1, min(workers, len(candidates)))
     with ProcessPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_pack_worker, n, config.alpha_dump, config.alpha_feature,
-                               date_to_idx, shape, _read_delay(n, config.alpha_src), verify)
+                               date_to_idx, shape, _read_delay(n, config.alpha_src), verify, config)
                    for n in candidates]
         total = len(futures)
         for i, fut in enumerate(as_completed(futures), 1):

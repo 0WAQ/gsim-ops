@@ -118,7 +118,7 @@ def run_clear(args) -> None:
     ok = fail = locked = 0
     for d in targets:
         try:
-            with factor_lock(d.name):
+            with factor_lock(d.name, config):
                 _clear_one(d)
                 ok += 1
         except FactorLocked:

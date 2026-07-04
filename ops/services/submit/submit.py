@@ -187,7 +187,7 @@ def run_submit(args):
         staged: Path | None = None
         result = "fail"
         try:
-            with factor_lock(name):
+            with factor_lock(name, config):
                 staged = _copy_one_to_staging(config, src)
                 result = submit_one(staged, submitted_by, config, store,
                                     overwrite=overwrite, npy_index=npy_index)

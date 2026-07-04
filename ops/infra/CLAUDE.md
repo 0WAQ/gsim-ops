@@ -35,7 +35,7 @@ All ops state/cache files live under `~/.cache/ops/`.
 - New layout: `~/.cache/ops/lib/<library_id>/<filename>`
 - `cache_path(library_id, filename, legacy_hash=...)` resolves path + one-shot migrates legacy files
 - `library_cache_dir(library_id)` returns the dir, ensuring it exists
-- Locks stay at `~/.cache/ops/locks/` — fcntl, per-machine, never synced
+- Locks at `~/.cache/ops/locks/` — fcntl, per-machine(**仅 json/redis 回退后端用**;postgres 后端走跨机 PG advisory lock,见 `lock.py`)
 - Index/metrics/datasources/bcorr **已迁 Postgres**(2026-07-04, 见 `derived/`)。`cache.py` 现仅剩 json 回退后端的 `derived.json` + locks 用;PG 后端下不再写这些缓存。
 
 ## Derived (`derived/`)
@@ -52,11 +52,13 @@ All ops state/cache files live under `~/.cache/ops/`.
 
 ## Lock (`lock.py`)
 
-Per-factor advisory fcntl lock. Serializes all ops mutations on a single factor across processes.
+Per-factor advisory lock. Serializes all ops mutations on a single factor. **两个后端,按 `config.state_backend` 选**:
 
-- Lock files at `~/.cache/ops/locks/{factor_name}.lock`
-- Non-blocking: `FactorLocked` raised immediately if contended (no queueing)
-- Usage: `with factor_lock(name): ...`
+- **postgres**(生产):PG session-level advisory lock (`pg_try_advisory_lock(hashtext(lib), hashtext(name))`),**跨机**。state 在共享 PG、staging 在共享 JFS,三机都能 `ops check` 同一 staging —— per-machine 文件锁挡不住跨机并发,PG advisory lock 能(PG 是三机唯一强一致存储)。用**专用连接**(非 state pool)持有整个临界区;session 级锁在**连接断开时自动释放**(机器崩溃/SIGKILL/断电),无死锁残留。
+- **json / redis / 无 conninfo**:回退 per-machine `fcntl` 文件锁 `~/.cache/ops/locks/{name}.lock`(单机 json 正确;redis-state 退役中,本就 fcntl)。
+
+- Non-blocking(两后端一致):`FactorLocked` raised immediately if contended (no queueing)
+- Usage: `with factor_lock(name, config): ...`(config 选后端 + 提供 conninfo)
 
 ## Store (`store/`)
 

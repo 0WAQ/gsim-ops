@@ -54,7 +54,7 @@ def run_one(factor_dir: Path, config: Config,
     progress(f"{bar} running ", name)
 
     try:
-        with factor_lock(name):
+        with factor_lock(name, config):
             return _run_one_locked(factor_dir, config, start_date, end_date)
     except FactorLocked:
         warn(f"  ⚠  {name} 已被另一个进程占用,跳过")

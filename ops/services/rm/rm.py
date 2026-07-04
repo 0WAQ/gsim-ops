@@ -63,7 +63,7 @@ def run_rm(args) -> None:
             return
 
     try:
-        with factor_lock(name):
+        with factor_lock(name, config):
             # 数据产物: dump + feature
             for r in _purge_artifacts(name, config):
                 info(f"  ✔ 已删除 {r}")

@@ -185,7 +185,7 @@ def run_restage(args) -> None:
     ok = fail = locked = 0
     for rec in runnable:
         try:
-            with factor_lock(rec.name):
+            with factor_lock(rec.name, config):
                 _restage_one(rec, sources[rec.name], config, store, purge=args.purge)
                 ok += 1
         except FactorLocked:

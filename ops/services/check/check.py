@@ -255,7 +255,7 @@ class CheckerPipeline:
         parent for counter accumulation.
         """
         try:
-            with factor_lock(factor.name):
+            with factor_lock(factor.name, self.config):
                 return self._run_one_locked(factor, q)
         except FactorLocked:
             q.put(("done", factor.name, "locked", "🔒 已被另一个进程占用", "yellow"))
