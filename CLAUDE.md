@@ -100,7 +100,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `restage` | Recall ACTIVE/REJECTED factor back to staging for re-check (code unchanged; doesn't run check itself) | `ops/services/restage/` |
 | `approve` | 多样性豁免:放行 correlation-rejected 因子(为数据覆盖,非质量),REJECTED → ACTIVE(不重跑 check) | `ops/services/approve/` |
 | `cancel` | 撤回未入库的 SUBMITTED 因子(删 staging + 硬删 state record) | `ops/services/cancel/` |
-| `clear` | 清理 staging 孤儿(state 无 record 的目录,submit parse 失败留下) | `ops/services/clear/` |
+| `clear` | 清理 staging 孤儿(state 无 record 的目录,进程非正常终止的 crash residue) | `ops/services/clear/` |
 | `combo` | QR combo 端到端代测(predict+backtest, 占位符注入, 无状态) | `ops/services/combo/` |
 | `check` | 7-stage validation pipeline (runs in-place on staging) | `ops/services/check/` |
 | `run` | Run backtest on factors in library | `ops/services/run/` |
@@ -112,7 +112,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
 | `sync` | Push/pull factor library (data + state) across servers via S3 | `ops/cli/sync.py` + `ops/services/sync/` |
 
-Removed subcommands: `cp`, `scp`, `compiler`.
+Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwrite`), `recheck`(改名 `restage`)。
 
 ### Design Principles
 
@@ -215,9 +215,11 @@ AlphaXxx/
 - 2026-06-05 Redis Sentinel HA (3-node sentinel, 9.12s failover)
 - 2026-06-05 JFS 上线 + 默认 config 切 JFS (`config.yaml` = JFS, `config.prod-legacy.yaml` 回退)
 - 2026-07-04 Phase G: 派生层 (index/metrics/datasources/bcorr) 迁 Postgres (server-160 docker, host 15432), per-machine JSON 缓存退役; 读写数据流重构 (DerivedRecord 取代 FactorInfo god-object); **state (因子生命周期) 也迁 Postgres, PG 成唯一真相源** (state + derived 同库)。branch `feat/derived-postgres`, 部署 `scripts/postgres/`。**注意: 承载旧 state 的 Redis 同时是 JFS metadata 后端, 不可停 (停进程=挂因子库); ops 只是不再用它存 state。**
+- 2026-07-04 `factor_lock` 迁跨机 PG advisory lock (branch 同上): 原 per-machine fcntl 挡不住三机并发 check 同一因子 (state 共享 PG + staging 共享 JFS)。postgres 后端走 `pg_try_advisory_lock` (专用连接, session 级, 连接断开自动释放, 无死锁残留); json/redis 回退仍 fcntl。签名 `factor_lock(name, config)`。见 `ops/infra/lock.py` + memory [[project_factor_lock_cross_machine]]。
+- 2026-07-04 CLI 子命令重审 (branch 同上): submit 吸收 resubmit (`--overwrite` 覆盖已入库因子, 默认跳过); recheck 改名 restage (名副其实, 只召回 staging 不跑 check); rm 改彻底硬删 + 移除 DELETED 状态/deleted_at 列 (因子要么存在要么删除, 删除不是状态); approve 正名为"数据覆盖多样性人工豁免"。见 memory [[project_cli_command_redesign]]。
 
 **仍在路上**:
-- Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/restage` 走 `git add/commit`
+- Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/restage` 走 `git add/commit`(串行化复用现有 `factor_lock`,已是跨机 PG advisory lock)
 - Phase E: `.state` merge 逻辑简化(其实在 Redis 后大部分逻辑已不需要)
 - Phase F: checkpoint 落地(按设计原则放 JFS / 本地 SSD)
 - Phase G 剩余: ~~反查命令 `ops query --field/--table`~~ (已改造 `ops list --filter-by field=/tables=` 下推 SQL 吃 GIN, 未新增命令) / refresh_* 从 list 独立成 ops refresh / PG 密码正规化 (挪 /etc root-only + 分发 150/144) / 150/144 部署 (uv tool install 带 psycopg) / 分支合 main / 验稳后清 Redis 残留 state key (只 DEL state:*, 绝不 FLUSHDB — Redis 还扛 JFS)
