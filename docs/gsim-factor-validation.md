@@ -215,7 +215,7 @@ XML 中通过 `Constants` 控制：
 ## 并发与隔离
 
 - 使用 `ProcessPoolExecutor`（最多 20 workers）并行检测多个因子
-- 每个因子操作前获取 `~/.cache/ops/locks/{name}.lock` 的非阻塞 fcntl 锁
+- 每个因子操作前获取非阻塞 advisory 锁(`factor_lock(name, config)`):postgres 后端为**跨机 PG advisory lock**(防三机并发 check 同一因子),json/redis 回退为 `~/.cache/ops/locks/{name}.lock` fcntl 锁
 - 锁竞争时直接跳过（不排队），避免重复检查
 
 ## 入库标准

@@ -153,7 +153,7 @@ Implemented `ops submit` / `ops status` / `ops backfill`, state tracking in `Che
 
 **Why deferred**: cosmetic UX cleanup, no functional gap. Do once after the next round of feature work settles.
 
-## `ops factor` Namespace + Cross-Machine Soft-Delete (Not Started)
+## `ops factor` Namespace (Not Started) — soft-delete 部分已废弃见下
 
 The CLI surface has grown flat: `submit / check / list / info / health / pack / sync / rm / status / backfill`. The factor-lifecycle ones (`submit`, `check`, `rm`, `info`, `list`, `status`, `backfill`) all act on a single factor (or a query over factors) and naturally belong under one namespace. Plan: introduce `ops factor <verb>` as the canonical home, keep flat aliases for back-compat during transition.
 
@@ -172,25 +172,14 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 
 **Why**: discoverability (`ops factor --help` enumerates everything one can do *to* a factor), and prepares the codebase for similar groupings later (`ops dataset ...`, `ops job ...`).
 
-**Soft-delete model** (already partially landed via `ops rm`):
+**~~Soft-delete model~~ (SUPERSEDED 2026-07-04)**: 原计划让 `ops rm` 打 `FactorStatus.DELETED` tombstone + `ops sync gc` 回收。**已废弃并反向实现**:DELETED 状态 + `deleted_at` 已从代码彻底移除,`ops rm` 现在是**彻底硬删**(src/pnl/dump/feature + state 行 + derived 行,不可逆,无墓碑)。设计哲学:因子要么存在(active/rejected/未来 decay)要么被删除,删除不是一种状态。`ops sync gc` 也不再需要(sync 整体退役中)。
 
-- `FactorStatus.DELETED` is a tombstone, not a record removal. Files default to staying on disk; `--force` removes local dump + feature only (src/pnl always kept, mirroring the rejected-factor retention rule).
-- The tombstone propagates to other machines via `ops sync push` state merge — receivers will hide the factor from `list` / `health` automatically because those filter `status == DELETED` by default.
-- **`ops sync push` does NOT issue `rclone delete` for DELETED factors.** State merge alone is the sync mechanism. Remote files stay until a future `ops sync gc` (separate, opt-in) reclaims them.
-- `ops sync pull` does not auto-clean local files of newly-DELETED-on-remote factors either. Same reasoning: keep destructive ops out of routine sync; require explicit `gc`.
-
-**`ops sync gc` (deferred)**:
-- Walks `factor_state.json`, finds `status == DELETED` records older than some threshold (e.g. 30d), enumerates their remote `alpha_dump/<name>/`, `alpha_feature/<name>.v[12].npy`, and (with extra flag) `alpha_src/<name>/` + `alpha_pnl/<name>`, deletes via `rclone delete`.
-- Default-dry-run; explicit `--apply` to actually purge.
-- Updates manifest to drop the entries so subsequent push doesn't re-stat them.
-
-**Execution waves** (when picked up):
+**Execution waves** (when picked up — 仅剩 namespace 部分):
 | Wave | Description |
 |---|---|
 | 1 | Add `ops factor` parent parser; register existing subcommands as both flat (legacy) and nested (`factor X`). |
 | 2 | Implement `ops factor run` (re-run + re-pack one factor in place). |
-| 3 | Add `ops sync gc` with dry-run/apply. |
-| 4 | Drop the flat aliases (one-shot deprecation, after team is on the new shape). |
+| 3 | Drop the flat aliases (one-shot deprecation, after team is on the new shape). |
 
 ## Alphalib Storage Backend Migration (Not Started)
 

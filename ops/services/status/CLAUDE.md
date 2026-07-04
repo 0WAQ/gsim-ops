@@ -9,4 +9,4 @@
 
 ## 数据源
 
-直接读 `default_store()` (JsonStateStore)，不涉及文件系统扫描。
+直接读 `default_store(config)`(按 `state_backend` 分发,生产为 PostgresStateStore),不涉及文件系统扫描。
