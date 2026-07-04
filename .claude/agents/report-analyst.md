@@ -72,7 +72,7 @@ feedback. Read it from the JSON, never from terminal scrollback (that is truncat
 | outcome | meaning | whose problem | next step |
 |---|---|---|---|
 | `pass`   | 入库,status active | — | — |
-| `fail`   | REJECTED,进 recycle | **因子质量问题(QR)** | QR 改代码,`ops resubmit <name> -s rejected` |
+| `fail`   | REJECTED,进 recycle | **因子质量问题(QR)** | QR 改代码后 `ops submit --overwrite`(新代码)或 `ops recheck -s rejected`(原代码重跑) |
 | `error`  | 留在 staging | **环境/框架问题,不是 QR 的锅** | ops 侧 `ops recheck` / `ops check --retry` |
 | `locked` | 被其他进程占用,跳过 | — | 重跑即可 |
 

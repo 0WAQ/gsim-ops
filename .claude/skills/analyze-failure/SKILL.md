@@ -59,7 +59,7 @@ Deep-dive into why a factor was rejected by the check pipeline.
 5. **Actionable recommendations**
    - If retriable (validate/long_backtest): `ops check --retry`
    - If factor quality issue: specific code changes needed
-   - If need to resubmit: `ops resubmit <name> -s rejected`
+   - If need to recall a rejected factor for re-check: `ops recheck <name> -s rejected`
 
 ## Output format
 
@@ -77,7 +77,7 @@ Fix:
   
 Next steps:
   1. Fix the code in recycle/wbai/checkbias/AlphaXxx/
-  2. ops resubmit AlphaXxx -s rejected
+  2. ops recheck AlphaXxx -s rejected
   3. ops check
 ```
 

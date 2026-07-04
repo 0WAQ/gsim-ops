@@ -16,8 +16,8 @@
 
 | 命令 | 语义 | 前置条件 | 来源 | version |
 |---|---|---|---|---|
-| `ops submit` | 新因子入系统 | 因子名不存在于 state | dropbox | = 1 |
-| `ops resubmit` | 已有因子提交新代码 | 因子名已存在于 state | dropbox | += 1 |
+| `ops submit` | 新因子入系统 (默认跳过已入库) | 因子名不存在于 state | dropbox | = 1 |
+| `ops submit --overwrite` | 已有因子提交新代码 | 因子名已存在于 state | dropbox | += 1 |
 | `ops recheck` | 原代码不变,重跑 check | ACTIVE 或 REJECTED | alpha_src | 不变 |
 | `ops approve` | 人工通过 correlation 失败因子 | REJECTED 且 last_fail_stage=correlation | — | 不变 |
 | `ops cancel` | 撤回未入库的 SUBMITTED 因子 (删 staging + 硬删 state record) | SUBMITTED (或 CHECKING + `--force`) | — | — |
@@ -27,7 +27,7 @@
 ## 状态转移图
 
 ```
-ops submit (新因子)     ops resubmit (新代码, version+=1)
+ops submit (新因子)     ops submit --overwrite (新代码, version+=1)
     │                       │
     ▼                       ▼
          ┌───────────┐
@@ -73,12 +73,12 @@ alpha_src 是所有因子的 src 归档,不区分状态(ACTIVE/REJECTED/DELETED 
 | recheck (ACTIVE→SUBMITTED) | 保留(拷贝到 staging) | 保留 | 保留 | 保留 |
 | recheck (REJECTED→SUBMITTED) | 保留(拷贝到 staging) | 清掉 | 清掉 | 清掉 |
 | approve (REJECTED→ACTIVE, 仅 correlation 失败) | 保留 | 保留 | 保留 | 保留 |
-| resubmit (新代码, version+=1) | 新代码到 staging,旧 src 保留 | 保留 | 保留 | 保留 |
+| submit --overwrite (新代码, version+=1) | 新代码到 staging,旧 src 保留 | 保留 | 保留 | 保留 |
 
 规则说明:
 - ACTIVE recheck 保留产物:不暂停生产
 - REJECTED recheck 清掉产物:无生产顾虑,check 会重新产出
-- resubmit 保留旧产物:作为对比基准
+- submit --overwrite 保留旧产物:作为对比基准
 - REJECTED 后两阶段失败保留完整产物:数据完整,有分析参考价值
 - REJECTED 前两阶段失败不保留:短期数据不完整,无意义
 - approve 仅适用于 correlation 失败:产物已完整,翻状态即可,无需重跑

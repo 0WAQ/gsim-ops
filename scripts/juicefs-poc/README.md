@@ -310,7 +310,7 @@ JFS  /tank/vault/alphalib/        root:alpha-data 2755
 ```
 
 - gid 选 59xxx(GID_MAX=60000 以下,避开 7/8/9000 常见段)
-- 所有 ops 写路径(`submit / resubmit / recheck / check / pack / rm` 等)必须 sudo 跑;Phase C 之前需要补 sudo wrapper 让 `uv run ops ...` 自动 elevate
+- 所有 ops 写路径(`submit / recheck / check / pack / rm` 等)必须 sudo 跑;Phase C 之前需要补 sudo wrapper 让 `uv run ops ...` 自动 elevate
 - `alpha-core/alpha-data` 组 membership 主要用途:跨机器统一 group label(NFS / FUSE 上 gid 数字必须各机一致),并保证未来若放开 group write 位时不需要重 chown
 
 ## 验证结果

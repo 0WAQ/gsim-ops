@@ -60,14 +60,23 @@ def _copy_one_to_staging(config: Config, src: Path) -> Path:
 
 
 def copy_to_staging(config: Config, factor_dirs: list[Path]) -> list[Path]:
-    """Batch wrapper kept for resubmit. New submit code path uses _copy_one_to_staging
-    so it can interleave copy + lock + parse atomically per factor.
+    """Batch wrapper over _copy_one_to_staging. Kept as a public helper; submit
+    itself interleaves copy + lock + parse per factor instead.
     """
     return [_copy_one_to_staging(config, src) for src in factor_dirs]
 
 
 def submit_one(staging_dir: Path, submitted_by: str, config: Config,
-               store: StateStore, npy_index: dict | None = None) -> bool:
+               store: StateStore, overwrite: bool = False,
+               npy_index: dict | None = None) -> str:
+    """Submit one factor from staging into state. Returns "pass" | "skip" | "fail".
+
+    New factor (no state record)     -> put, version=1.
+    Existing factor + overwrite=True -> transition to SUBMITTED, version += 1
+                                        (new code from dropbox; old alpha_src kept).
+    Existing factor + overwrite=False -> "skip" (defensive; run_submit normally
+                                        filters these out before copy).
+    """
     submitted_at = datetime.now().isoformat(timespec="seconds")
 
     py_files = sorted(staging_dir.glob("*.py"))
@@ -76,7 +85,7 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
         error(f"  ✘  {staging_dir.name} 文件数不合规: "
               f".py={[p.name for p in py_files]}, .xml={[x.name for x in xml_files]} "
               f"(各需恰好 1 个,请清理多余文件后重提)")
-        return False
+        return "fail"
 
     try:
         normalize_factor_xml(staging_dir)
@@ -85,36 +94,48 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
                             npy_index=npy_index)
     except SyntaxError as e:
         error(f"  ✘  {staging_dir.name} syntax error: {e}")
-        return False
+        return "fail"
     except Exception as e:
         error(f"  ✘  {staging_dir.name} parse failed: {e}")
-        return False
+        return "fail"
 
     if meta.discovery_method not in ("automated", "manual"):
         error(f"  ✘  {staging_dir.name} discovery_method 缺失或非法: "
               f"{meta.discovery_method!r}(须为 automated / manual,请在 "
               f"<Description discovery_method=...> 补全)")
-        return False
+        return "fail"
+
+    # Authoritative existence check under the caller's factor_lock.
+    rec = store.get(meta.name)
+    if rec is not None and not overwrite:
+        return "skip"
 
     meta_path = staging_dir / META_FILENAME
     meta.save(meta_path)
 
-    record = FactorRecord(
-        name=meta.name,
-        author=meta.author or submitted_by,
-        status=FactorStatus.SUBMITTED,
-        updated_at=submitted_at,
-        submitted_at=submitted_at,
-        submitted_by=submitted_by,
-    )
-    store.put(record)
+    if rec is None:
+        store.put(FactorRecord(
+            name=meta.name,
+            author=meta.author or submitted_by,
+            status=FactorStatus.SUBMITTED,
+            updated_at=submitted_at,
+            submitted_at=submitted_at,
+            submitted_by=submitted_by,
+        ))
+        info(f"  ✔  {meta.name} → submitted (version=1)")
+    else:
+        new_version = rec.version + 1
+        store.transition(meta.name, FactorStatus.SUBMITTED,
+                         submitted_at=submitted_at,
+                         submitted_by=submitted_by,
+                         version=new_version)
+        info(f"  ✔  {meta.name} → submitted (version={new_version},覆盖新代码)")
 
     if meta.author and meta.author != submitted_by:
         warn(f"  ⚠  {meta.name}: 推断 author={meta.author!r} 与 submitter={submitted_by!r} 不一致,"
              f"后续 -u 过滤按 author,可能漏掉本因子")
 
-    info(f"  ✔  {meta.name} → {meta_path}")
-    return True
+    return "pass"
 
 
 
@@ -123,6 +144,7 @@ def run_submit(args):
     start: str = args.start_date
     end: str = args.end_date or start
     factor_name: str | None = args.factor_name
+    overwrite: bool = args.overwrite
     config_path: Path = args.config_path
 
     config = Config.load(config_path)
@@ -136,20 +158,22 @@ def run_submit(args):
         bottom()
         return
 
-    # 先过滤已入库的因子,避免无意义的 copy + 锁开销(锁内会再 re-check)
+    # 默认只提交新因子: 已入库的静默跳过 (--overwrite 才覆盖成新代码 version+1)。
+    # 这里先粗过滤省掉 copy + 锁开销; submit_one 在锁内还会按 overwrite 权威判定。
     to_process: list[tuple[str, Path]] = []
     skipped = 0
     for user, src in found:
         existing = store.get(src.name)
-        if existing is not None:
-            error(f"  ✘  {src.name} 已存在于 state 中"
-                  f"(status={existing.status.value}),请用 ops resubmit 提交新代码")
+        if existing is not None and not overwrite:
+            info(f"  ⤼  {src.name} 已入库 (status={existing.status.value}),跳过")
             skipped += 1
             continue
         to_process.append((user, src))
 
     if not to_process:
         warn("没有可提交的因子")
+        if skipped > 0:
+            warn(f"⤼ 跳过 : {skipped:>4}  (已入库,--overwrite 覆盖成新代码)")
         bottom()
         return
 
@@ -161,34 +185,30 @@ def run_submit(args):
         name = src.name
         progress("submitting ", name)
         staged: Path | None = None
+        result = "fail"
         try:
             with factor_lock(name):
-                # 锁内 re-check, 关闭 filter→copy→lock 之间的并发窗口
-                existing = store.get(name)
-                if existing is not None:
-                    warn(f"  ⚠  {name} 已被并发 submit 抢先入库 "
-                         f"(status={existing.status.value}),跳过")
-                    skipped += 1
-                    continue
                 staged = _copy_one_to_staging(config, src)
-                ok = submit_one(staged, submitted_by, config, store,
-                                npy_index=npy_index)
-                if not ok:
-                    # parse / 文件数不合规等可控失败: 回滚 staging,
-                    # 避免留下 orphan 等下次被静默覆盖
+                result = submit_one(staged, submitted_by, config, store,
+                                    overwrite=overwrite, npy_index=npy_index)
+                if result != "pass":
+                    # skip (并发下已入库且非 overwrite) / fail (parse / 文件数不合规):
+                    # 回滚 staging,避免留下 orphan 等下次被静默覆盖
                     shutil.rmtree(staged, ignore_errors=True)
         except FactorLocked:
             warn(f"  ⚠  {name} 已被另一个进程占用,跳过")
-            ok = False
+            result = "fail"
         except Exception as e:
             # meta.save / store.put / copytree 等不可控异常: 同样回滚
             error(f"  ✘  {name} 提交异常: {e}")
             if staged is not None:
                 shutil.rmtree(staged, ignore_errors=True)
-            ok = False
+            result = "fail"
 
-        if ok:
+        if result == "pass":
             passed += 1
+        elif result == "skip":
+            skipped += 1
         else:
             failed += 1
 
@@ -197,5 +217,5 @@ def run_submit(args):
     if failed > 0:
         error(f"✘ 失败 : {failed:>4}")
     if skipped > 0:
-        warn(f"⤼ 跳过 : {skipped:>4}  (已入库,请用 ops resubmit)")
+        warn(f"⤼ 跳过 : {skipped:>4}  (已入库,--overwrite 覆盖成新代码)")
     bottom()

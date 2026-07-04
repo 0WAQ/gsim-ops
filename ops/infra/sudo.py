@@ -30,7 +30,6 @@ _stderr = Console(stderr=True)
 # 写 alpha_src / staging / alpha_pnl / alpha_feature 的子命令
 WRITE_COMMANDS = {
     "submit",
-    "resubmit",
     "recheck",
     "check",
     "rm",

@@ -4,7 +4,7 @@ Soft-delete a factor.
 
 ## 默认行为
 
-Flip state to DELETED (tombstone). 磁盘文件完全不动。因子可通过 `ops resubmit -s deleted` 恢复。
+Flip state to DELETED (tombstone). 磁盘文件完全不动。因子可通过 `ops recheck -s deleted` 恢复。
 
 ## --force
 

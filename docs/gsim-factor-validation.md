@@ -263,7 +263,7 @@ XML 中通过 `Constants` 控制：
 uv run ops recheck AlphaWbaiExample1 -s rejected
 
 # 改了代码从 dropbox 重新提交(version += 1)
-uv run ops resubmit -u wbai -s 20260401 -f AlphaWbaiExample1
+uv run ops submit -u wbai -s 20260401 -f AlphaWbaiExample1 --overwrite
 ```
 
 ## State 漂移与崩溃恢复

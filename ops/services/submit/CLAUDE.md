@@ -24,7 +24,7 @@ staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
     │  ops check   → 7-stage pipeline run
     ├── pass ──► alpha_src/AlphaXxx/                  state=ACTIVE
     │                │  ops recheck   (原代码不变,重跑 check;--purge 顺带清 dump/feature)
-    │                │  ops resubmit  (从 dropbox 提交新代码,version += 1)
+    │                │  ops submit --overwrite  (从 dropbox 提交新代码,version += 1)
     │                │  → 搬回 staging/ + state→SUBMITTED
     │                ▼
     │            [回到 staging,等待下一次 ops check]
@@ -67,12 +67,19 @@ After `to_lib` / `on_reject`, check rewrites `Modules.Alpha.@module` to the .py'
 
 ## Submit Atomicity (`submit.py::run_submit`)
 
-每个因子串行走一遍 `factor_lock → 锁内 re-check state → _copy_one_to_staging → submit_one`,
-关闭了 filter→copy→lock 之间的并发窗口。任何阶段失败(parse 抛错、`store.put` 异常、文件数
-不合规)都会 `rmtree(staged)` 回滚,正常路径下不再产生 orphan staging。`_build_npy_index`
-在 batch 入口扫一次,传给每个 `parse_factor()` 复用,避免 N 个因子 N 次全盘 scan。
+每个因子串行走一遍 `factor_lock → _copy_one_to_staging → submit_one`(`submit_one` 在锁内做
+权威 `store.get` 存在性判定)。任何阶段失败(parse 抛错、`store.transition` 异常、文件数
+不合规)或 skip(已入库且非 `--overwrite`)都会 `rmtree(staged)` 回滚,正常路径下不再产生
+orphan staging。`_build_npy_index` 在 batch 入口扫一次,传给每个 `parse_factor()` 复用,
+避免 N 个因子 N 次全盘 scan。
 
-`copy_to_staging(config, dirs)` 是给 `ops resubmit` 留的批量 wrapper,内部就是循环 `_copy_one_to_staging`。
+**submit 吸收了原 resubmit**(2026-07-04):同一命令按因子是否已入库分派 —— 新因子
+`store.put` version=1;已入库因子默认**跳过**(只提交新因子的心智 + 破坏性 opt-in),
+`--overwrite` 时才 `store.transition → SUBMITTED, version += 1`(新代码覆盖,旧 alpha_src
+保留作对比基准)。`submit_one` 返回三态 `"pass" | "skip" | "fail"`。discovery_method 硬校验
+与 npy_index 共享对两条路径统一生效(原 resubmit 缺这两项,合并后修正)。
+
+`copy_to_staging(config, dirs)` 是批量 wrapper,内部就是循环 `_copy_one_to_staging`。
 
 ## Backfill (`services/backfill/backfill.py`)
 

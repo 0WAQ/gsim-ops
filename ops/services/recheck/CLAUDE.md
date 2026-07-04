@@ -18,7 +18,7 @@
 ## 语义区分
 
 - `ops recheck`: 原代码不变,重跑 check。version 不变。
-- `ops resubmit`: 新代码从 dropbox 覆盖,version += 1。
+- `ops submit --overwrite`: 新代码从 dropbox 覆盖,version += 1。
 
 ## Destructive 行为
 

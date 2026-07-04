@@ -378,7 +378,7 @@ uv run ops status -u wbai --status submitted
 uv run ops recheck AlphaWbaiReversal -s rejected
 
 # 改了代码从 dropbox 重新提交(version += 1)
-uv run ops resubmit -u wbai -s 20260401 -f AlphaWbaiReversal
+uv run ops submit -u wbai -s 20260401 -f AlphaWbaiReversal --overwrite
 ```
 
 ## 八、日常工作要求
