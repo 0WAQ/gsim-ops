@@ -14,6 +14,16 @@ from psycopg_pool import ConnectionPool
 from .base import DerivedStore, DerivedRecord
 
 
+def _glob_to_like(glob: str) -> str | None:
+    """把 fnmatch glob 转成 SQL LIKE 模式。只处理 * 和 ?;含字符类 ([...])
+    等 LIKE 无法等价表达的元字符时返回 None (调用方跳过下推,靠内存兜底)。
+    先转义 LIKE 自身的元字符 % 和 _,再把 glob 的 * -> %,? -> _。"""
+    if "[" in glob or "]" in glob:
+        return None
+    out = glob.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return out.replace("*", "%").replace("?", "_")
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS factor_derived (
     library_id TEXT NOT NULL,
@@ -76,12 +86,32 @@ class PostgresDerivedStore(DerivedStore):
             max_bcorr=max_bcorr, max_bcorr_factor=max_bcorr_factor,
         )
 
-    def get_all(self, author: str | None = None) -> dict[str, DerivedRecord]:
+    def get_all(
+        self,
+        author: str | None = None,
+        *,
+        field: str | None = None,
+        table_glob: str | None = None,
+    ) -> dict[str, DerivedRecord]:
         sql = f"SELECT {self._COLS} FROM factor_derived WHERE library_id = %s"
         params: list[Any] = [self.lib]
         if author is not None:
             sql += " AND author = %s"
             params.append(author)
+        if field is not None:
+            # fields @> '["X"]'::jsonb 命中 GIN 索引 ix_fd_fields
+            sql += " AND fields @> %s::jsonb"
+            params.append(json.dumps([field]))
+        if table_glob is not None:
+            like = _glob_to_like(table_glob)
+            if like is not None:
+                # tables 不吃 GIN,但把 glob 过滤放 PG 端省传输;含 LIKE 无法
+                # 表达的元字符时 like 为 None,跳过下推留给内存兜底。
+                sql += (
+                    " AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(tables) t "
+                    "WHERE t LIKE %s)"
+                )
+                params.append(like)
         out: dict[str, DerivedRecord] = {}
         with self.pool.connection() as conn:
             for row in conn.execute(sql, params):

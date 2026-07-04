@@ -22,4 +22,6 @@ Comma-separated `key<op>value` expressions. Comparison ops (`>`, `<`, `>=`, `<=`
 
 Repeated keys AND together: `--filter-by "ret>20,ret<=30"`.
 
+**SQL 下推 (datasource 反查)**: `field=` / `tables=` 过滤在 Postgres 后端下推到 SQL —— `field` 走 `fields @> jsonb` 命中 GIN 索引 `ix_fd_fields`,`tables` glob 转 LIKE 走 `EXISTS(jsonb_array_elements_text)`(含 `[]` 字符类等 LIKE 无法表达时跳过下推)。下推只做预筛缩小从 PG 拉回的行集,`apply_filters()` 仍全量兜底,故结果与内存过滤逐位等价。json 回退后端内存过滤同语义。多个同类条件只下推第一个,其余靠兜底。metrics 阈值(`ret>30` 等)不下推,始终内存跑。
+
 **Validation**: unknown keys, invalid syntax, and empty expressions print an error and exit early (no output). Regex was considered but deferred — glob covers the common case.

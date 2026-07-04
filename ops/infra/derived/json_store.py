@@ -8,6 +8,7 @@ datasources.json / bcorr.json —— 那些由 ops/tools/derived_migrate.py 一�
 读-改-写在 fcntl 锁下,tempfile + os.replace 原子落盘,防并发写互相覆盖。
 """
 import fcntl
+import fnmatch
 import json
 import os
 import tempfile
@@ -73,11 +74,23 @@ class JsonDerivedStore(DerivedStore):
             if os.path.exists(tmp):
                 os.unlink(tmp)
 
-    def get_all(self, author: str | None = None) -> dict[str, DerivedRecord]:
+    def get_all(
+        self,
+        author: str | None = None,
+        *,
+        field: str | None = None,
+        table_glob: str | None = None,
+    ) -> dict[str, DerivedRecord]:
         records = self._read()
         out: dict[str, DerivedRecord] = {}
         for name, d in records.items():
             if author is not None and d.get("author") != author:
+                continue
+            if field is not None and field not in (d.get("fields") or []):
+                continue
+            if table_glob is not None and not any(
+                fnmatch.fnmatch(t, table_glob) for t in (d.get("tables") or [])
+            ):
                 continue
             out[name] = DerivedRecord(**d)
         return out

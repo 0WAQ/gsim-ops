@@ -51,8 +51,20 @@ class DerivedStore(ABC):
     """派生数据后端契约。四组各自 upsert,一个 get_all 读全库。"""
 
     @abstractmethod
-    def get_all(self, author: str | None = None) -> dict[str, DerivedRecord]:
-        """读全库派生数据,返回 {name: DerivedRecord}。author 给定则只返回该作者。"""
+    def get_all(
+        self,
+        author: str | None = None,
+        *,
+        field: str | None = None,
+        table_glob: str | None = None,
+    ) -> dict[str, DerivedRecord]:
+        """读全库派生数据,返回 {name: DerivedRecord}。author 给定则只返回该作者。
+
+        field / table_glob 是可选的 datasource 反查下推:
+          - field: 只返回 fields 数组含此值 (精确匹配) 的因子;
+          - table_glob: 只返回 tables 数组任一元素 fnmatch 匹配此 glob 的因子。
+        二者都为 None 时行为与无参一致。下推只做预筛缩小行集,上层仍会用
+        apply_filters 全量兜底,故结果与不下推逐位等价 (下推纯为性能)。"""
 
     @abstractmethod
     def get(self, name: str) -> DerivedRecord | None:

@@ -204,6 +204,15 @@ def apply_filters(records: list[DerivedRecord], filters: list[tuple[str, str, st
     return result
 
 
+def _pushdown_params(filters: list[tuple[str, str, str]]) -> tuple[str | None, str | None]:
+    """从已解析的 filters 里挑出第一个 field= 和第一个 tables= 条件的 value,
+    作为 get_all 的 SQL 下推参数。多个同类条件时只下推第一个,其余留给
+    apply_filters 内存兜底 —— 下推只做预筛,不改变最终结果。"""
+    field = next((v for k, _, v in filters if k == "field"), None)
+    table_glob = next((v for k, _, v in filters if k == "tables"), None)
+    return field, table_glob
+
+
 def run_list(args):
     config = Config.load(args.config_path)
 
@@ -211,6 +220,20 @@ def run_list(args):
     # scan() rebuilds from the filesystem only when alpha_src changed; otherwise
     # it's a no-op read. We ignore its return -- the store is the source now.
     LibraryScanner.from_config_path(args.config_path).scan(refresh=args.refresh)
+
+    # Parse --filter-by up front so datasource conditions (field= / tables=) can
+    # be pushed down into get_all (SQL/GIN on the PG backend). apply_filters still
+    # runs the full filter set below, so pushdown is a pure pre-filter.
+    filters: list[tuple[str, str, str]] | None = None
+    if args.filter_by is not None:
+        if not args.filter_by.strip():
+            _console.print("[red]Empty filter expression.[/]")
+            return
+        filters = parse_filters(args.filter_by)
+        if filters is None:
+            return
+
+    field_pd, table_pd = _pushdown_params(filters) if filters else (None, None)
 
     store = default_derived_store(config)
     state_records = {r.name: r for r in default_store(config).list()}
@@ -224,7 +247,8 @@ def run_list(args):
     # from this set (staging-only submits, un-backfilled dirs); that drift is a
     # health-check concern, deliberately not surfaced here.
     records = sorted(
-        (r for r in store.get_all(author=args.user).values() if r.author is not None),
+        (r for r in store.get_all(author=args.user, field=field_pd, table_glob=table_pd).values()
+         if r.author is not None),
         key=lambda r: r.name,
     )
 
@@ -249,13 +273,7 @@ def run_list(args):
         refreshed = store.get_all()
         records = [refreshed[r.name] for r in records if r.name in refreshed]
 
-    if args.filter_by is not None:
-        if not args.filter_by.strip():
-            _console.print("[red]Empty filter expression.[/]")
-            return
-        filters = parse_filters(args.filter_by)
-        if filters is None:
-            return
+    if filters is not None:
         records = apply_filters(records, filters)
 
     if args.sort_by and args.sort_by in SORT_KEYS:
