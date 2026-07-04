@@ -23,7 +23,7 @@ staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
     │
     │  ops check   → 7-stage pipeline run
     ├── pass ──► alpha_src/AlphaXxx/                  state=ACTIVE
-    │                │  ops recheck   (原代码不变,重跑 check;--purge 顺带清 dump/feature)
+    │                │  ops restage   (原代码不变,召回 staging 待重跑 check;--purge 顺带清 dump/feature)
     │                │  ops submit --overwrite  (从 dropbox 提交新代码,version += 1)
     │                │  → 搬回 staging/ + state→SUBMITTED
     │                ▼
@@ -32,7 +32,7 @@ staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
     │            → staging/ (kept in-place)            state→SUBMITTED  (retry via ops check --retry)
     └── fail (checkbias/checkpoint/compliance/correlation/archive)
                  → alpha_src/AlphaXxx/ (src 归档)      state=REJECTED
-                     │  ops recheck -s rejected         → staging/ + state→SUBMITTED
+                     │  ops restage -s rejected         → staging/ + state→SUBMITTED
                      ▼
                  [same flow as new factor]
 ```

@@ -43,7 +43,7 @@ Feature checklist. Done items are kept for reference. See `docs/plans.md` for de
 - [ ] Incremental update vs full recompute
 - [ ] Retry with exponential backoff
 - [ ] `ops run` for orchestrated factor computation
-- [ ] Batch operations: `ops retire`, `ops recheck`
+- [ ] Batch operations: `ops retire`, `ops restage`
 
 ## Factor Analysis
 - [ ] Factor-to-factor correlation matrix, clustering, redundancy detection

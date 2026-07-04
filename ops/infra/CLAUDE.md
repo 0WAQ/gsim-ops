@@ -22,7 +22,7 @@ Key attributes: all `path.*` fields as `Path`, `compliance`/`correlation`/`check
 
 JFS 集中运维模型下 `alpha_src` / `staging` / `alpha_pnl` 等都是 root-owned,wbai 直接写会 EACCES。
 
-`maybe_elevate(args)`:进程入口检测 `args.sub-command ∈ WRITE_COMMANDS` (submit/recheck/check/rm/approve/cancel/clear/pack/backfill) **且** `alpha_src.st_uid == 0` → `os.execvp('sudo -E --preserve-env=OPS_* ops <argv>')` 替换自身。read-only 命令和 legacy prod (alpha_src wbai-owned) 都 no-op。
+`maybe_elevate(args)`:进程入口检测 `args.sub-command ∈ WRITE_COMMANDS` (submit/restage/check/rm/approve/cancel/clear/pack/backfill) **且** `alpha_src.st_uid == 0` → `os.execvp('sudo -E --preserve-env=OPS_* ops <argv>')` 替换自身。read-only 命令和 legacy prod (alpha_src wbai-owned) 都 no-op。
 
 `ensure_redis_password(args)`:wbai shell 没 `OPS_STATE_REDIS_PASSWORD` env 时,从 `config.state.redis.password_file` (默认 `/etc/juicefs/alphalib-jfs.env`) 通过 `sudo grep` 一次拿密码塞进 env,后续 `maybe_elevate` 的 sudo `--preserve-env` 透传到 root 子进程。**故意不 `os.path.exists` 检查** password_file:`/etc/juicefs/` 是 `0700 root:root`,wbai stat 不到,但 sudo 跑成 root 能读。
 

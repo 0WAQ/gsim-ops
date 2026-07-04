@@ -478,7 +478,7 @@ class CheckerPipeline:
         if failed > 0:
             error(f"✘ 未通过 : {failed:>4}")
         if errored > 0:
-            warn(f"⚠ 异常 : {errored:>4}  (留在 staging,可 recheck)")
+            warn(f"⚠ 异常 : {errored:>4}  (留在 staging,重跑 ops check 即可)")
         if locked > 0:
             warn(f"⚠ 占用 : {locked:>4}  (被其他进程持有,跳过)")
 

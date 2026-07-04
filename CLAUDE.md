@@ -61,12 +61,12 @@ uv run ops sync verify               # 三个数据目录 etag 级两端校验
 uv run ops sync verify --deep        # 忽略缓存重算,捕捉缓存里 mtime/size 没动但内容已坏(慢)
 uv run ops rm AlphaXxx               # 软删除:仅打 DELETED 标,文件保留
 uv run ops rm AlphaXxx --force       # 同时删本地 dump + feature(保留 src/pnl)
-uv run ops recheck AlphaXxx          # 原代码不变,重跑 check 流水线
-uv run ops recheck AlphaXxx -s rejected   # 从 recycle 召回 rejected 因子
-uv run ops recheck AlphaXxx -s deleted    # 复活 deleted 因子(soft-delete 仍保留 src)
-uv run ops recheck AlphaXxx --purge  # 同时清除 dump + feature(保留 src/pnl)
-uv run ops recheck -u wbai           # 批量:wbai 所有 active 因子(apt 风格确认)
-uv run ops recheck -u wbai -y        # 批量,跳过确认
+uv run ops restage AlphaXxx          # 原代码不变,召回 staging 待重跑 check
+uv run ops restage AlphaXxx -s rejected   # 召回 rejected 因子
+uv run ops restage AlphaXxx -s deleted    # 复活 deleted 因子(soft-delete 仍保留 src)
+uv run ops restage AlphaXxx --purge  # 同时清除 dump + feature(保留 src/pnl)
+uv run ops restage -u wbai           # 批量:wbai 所有 active 因子(apt 风格确认)
+uv run ops restage -u wbai -y        # 批量,跳过确认
 uv run ops approve AlphaXxx          # 人工通过 correlation 失败因子 (REJECTED → ACTIVE)
 uv run ops approve -u wbai           # 批量:wbai 所有 correlation-rejected 因子
 uv run ops approve -u wbai -y        # 批量,跳过确认
@@ -98,7 +98,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | Subcommand | Purpose | Module |
 |------------|---------|--------|
 | `submit` | Copy new factors from dropbox to staging, generate `meta.json`, mark SUBMITTED. `--overwrite`: 已入库同名因子改提新代码,version += 1(默认跳过) | `ops/services/submit/` |
-| `recheck` | Move ACTIVE/REJECTED/DELETED factor back to staging for re-check (code unchanged) | `ops/services/recheck/` |
+| `restage` | Recall ACTIVE/REJECTED/DELETED factor back to staging for re-check (code unchanged; doesn't run check itself) | `ops/services/restage/` |
 | `approve` | 人工审批 correlation 失败因子,REJECTED → ACTIVE(不重跑 check) | `ops/services/approve/` |
 | `cancel` | 撤回未入库的 SUBMITTED 因子(删 staging + 硬删 state record) | `ops/services/cancel/` |
 | `clear` | 清理 staging 孤儿(state 无 record 的目录,submit parse 失败留下) | `ops/services/clear/` |
@@ -218,7 +218,7 @@ AlphaXxx/
 - 2026-07-04 Phase G: 派生层 (index/metrics/datasources/bcorr) 迁 Postgres (server-160 docker, host 15432), per-machine JSON 缓存退役; 读写数据流重构 (DerivedRecord 取代 FactorInfo god-object); **state (因子生命周期) 也迁 Postgres, PG 成唯一真相源** (state + derived 同库)。branch `feat/derived-postgres`, 部署 `scripts/postgres/`。**注意: 承载旧 state 的 Redis 同时是 JFS metadata 后端, 不可停 (停进程=挂因子库); ops 只是不再用它存 state。**
 
 **仍在路上**:
-- Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/recheck` 走 `git add/commit`
+- Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/restage` 走 `git add/commit`
 - Phase E: `.state` merge 逻辑简化(其实在 Redis 后大部分逻辑已不需要)
 - Phase F: checkpoint 落地(按设计原则放 JFS / 本地 SSD)
 - Phase G 剩余: ~~反查命令 `ops query --field/--table`~~ (已改造 `ops list --filter-by field=/tables=` 下推 SQL 吃 GIN, 未新增命令) / refresh_* 从 list 独立成 ops refresh / PG 密码正规化 (挪 /etc root-only + 分发 150/144) / 150/144 部署 (uv tool install 带 psycopg) / 分支合 main / 验稳后清 Redis 残留 state key (只 DEL state:*, 绝不 FLUSHDB — Redis 还扛 JFS)

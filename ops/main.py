@@ -12,7 +12,7 @@ from ops.cli.backfill import add_backfill_subparser
 from ops.cli.pack import add_pack_subparser
 from ops.cli.sync import add_sync_subparser
 from ops.cli.rm import add_rm_subparser
-from ops.cli.recheck import add_recheck_subparser
+from ops.cli.restage import add_restage_subparser
 from ops.cli.approve import add_approve_subparser
 from ops.cli.cancel import add_cancel_subparser
 from ops.cli.clear import add_clear_subparser
@@ -44,7 +44,7 @@ def main():
         add_pack_subparser(subparsers)
         add_sync_subparser(subparsers)
         add_rm_subparser(subparsers)
-        add_recheck_subparser(subparsers)
+        add_restage_subparser(subparsers)
         add_approve_subparser(subparsers)
         add_cancel_subparser(subparsers)
         add_clear_subparser(subparsers)

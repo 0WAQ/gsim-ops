@@ -138,7 +138,7 @@ Implemented `ops submit` / `ops status` / `ops backfill`, state tracking in `Che
 
 **Phase 2: 因子质量监控** — Rolling IC/IR, coverage, autocorrelation, correlation drift. SQLite replaces JSON store. `ops monitor` command (cron). Threshold alerts via Feishu.
 
-**Phase 3: 计算编排** — Factor DAG, incremental updates, retry/alerting. `ops run`, `ops retire`, `ops recheck`.
+**Phase 3: 计算编排** — Factor DAG, incremental updates, retry/alerting. `ops run`, `ops retire`, `ops restage`.
 
 **Phase 4: 服务化** — FastAPI over services layer, Redis cache, Streamlit/Grafana dashboard.
 

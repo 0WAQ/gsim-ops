@@ -1,13 +1,13 @@
-"""ops recheck — 原代码不变,重跑 check 流水线。
+"""ops restage — 把已入库因子召回 staging,等待重跑 check(原代码不变)。
 
-把因子从 alpha_src 搬回 staging/<name>/、状态翻为
-SUBMITTED,下一次 ops check 会重跑 8 阶段流水线。version 不变。
+restage 本身不跑回测:它只把因子从 alpha_src 搬回 staging/<name>/、状态翻为
+SUBMITTED,让下一次 ops check 捡起重跑 8 阶段流水线。version 不变。
 
 支持的来源状态:
 - ACTIVE   (默认): 源 = alpha_src/<name>/
 - REJECTED        : 源 = alpha_src/<name>/(REJECTED src 与 ACTIVE 同库)
 - DELETED         : 源 = alpha_src/<name>/(soft-delete 默认保留 src);
-                    若已被 --force 完全清理,则无法 recheck,需走 ops submit 重新提交
+                    若已被 --force 完全清理,则无法 restage,需走 ops submit 重新提交
 
 destructive 为 opt-in:
 - 默认仅搬源 + 翻状态;alpha_dump / alpha_feature / alpha_pnl 保留
@@ -17,7 +17,7 @@ destructive 为 opt-in:
 -y / --yes 跳过确认。
 
 跨机:状态变更通过 ops sync push 的 state merge 传播;sync 不会删 remote
-源目录(rclone copy 是 additive)。其他机器若需召回需自行 recheck。
+源目录(rclone copy 是 additive)。其他机器若需召回需自行 restage。
 """
 import shutil
 from pathlib import Path
@@ -87,7 +87,7 @@ def _resolve_targets(args, store, config: Config) -> list[FactorRecord]:
             error(f"  ✘ 因子 {name} 不在 state 中")
             return []
         if rec.status not in _SUPPORTED_STATUSES:
-            error(f"  ✘ {name} 状态为 {rec.status.value},recheck 不支持")
+            error(f"  ✘ {name} 状态为 {rec.status.value},restage 不支持")
             return []
         return [rec]
 
@@ -103,7 +103,7 @@ def _resolve_targets(args, store, config: Config) -> list[FactorRecord]:
 def _print_plan(targets: list[FactorRecord],
                 sources: dict[str, Path | None],
                 purge: bool) -> None:
-    highlight(f"  将 recheck {len(targets)} 个因子 → submitted:")
+    highlight(f"  将 restage {len(targets)} 个因子 → submitted:")
     for r in targets:
         src = sources.get(r.name)
         src_str = str(src) if src else "✘ 源缺失"
@@ -114,7 +114,7 @@ def _print_plan(targets: list[FactorRecord],
         info("  (默认保留 alpha_dump / alpha_feature / alpha_pnl)")
 
 
-def _recheck_one(rec: FactorRecord, src: Path, config: Config, store, purge: bool) -> None:
+def _restage_one(rec: FactorRecord, src: Path, config: Config, store, purge: bool) -> None:
     name = rec.name
     dst = config.staging / name
 
@@ -139,7 +139,7 @@ def _recheck_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
     shutil.move(str(src), str(dst))
     _rewrite_module_path(dst)
 
-    # REJECTED recheck 自动清掉产物(无生产顾虑,check 会重新产出)
+    # REJECTED restage 自动清掉产物(无生产顾虑,check 会重新产出)
     # ACTIVE/DELETED 仅在 --purge 时清
     if rec.status == FactorStatus.REJECTED or purge:
         removed = _purge_artifacts(name, config)
@@ -157,7 +157,7 @@ def _recheck_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
     info(f"  ✔ {name} {prev_status} → submitted")
 
 
-def run_recheck(args) -> None:
+def run_restage(args) -> None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
 
@@ -168,7 +168,7 @@ def run_recheck(args) -> None:
 
     sources: dict[str, Path | None] = {r.name: _locate_source(r, config) for r in targets}
 
-    banner(f"recheck · {len(targets)} 个因子")
+    banner(f"restage · {len(targets)} 个因子")
     _print_plan(targets, sources, purge=args.purge)
 
     missing = [r.name for r in targets if sources[r.name] is None]
@@ -182,7 +182,7 @@ def run_recheck(args) -> None:
         return
 
     if not args.yes:
-        ans = input(f"  确认 recheck {len(runnable)} 个因子? [y/N] ").strip().lower()
+        ans = input(f"  确认 restage {len(runnable)} 个因子? [y/N] ").strip().lower()
         if ans not in ("y", "yes"):
             info("  已取消")
             bottom()
@@ -192,7 +192,7 @@ def run_recheck(args) -> None:
     for rec in runnable:
         try:
             with factor_lock(rec.name):
-                _recheck_one(rec, sources[rec.name], config, store, purge=args.purge)
+                _restage_one(rec, sources[rec.name], config, store, purge=args.purge)
                 ok += 1
         except FactorLocked:
             warn(f"  ⚠ {rec.name} 被另一个进程占用,跳过")

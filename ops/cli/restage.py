@@ -4,22 +4,22 @@ from pathlib import Path
 from ops.utils.utils import LowerAction
 from ops.core.state import FactorStatus
 from ops.infra.config import get_default_config_path
-from ops.services.recheck import run_recheck
+from ops.services.restage import run_restage
 
 
-def add_recheck_subparser(subparsers: argparse._SubParsersAction):
+def add_restage_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
-        "recheck",
+        "restage",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="原代码不变,重跑 check 流水线",
+        help="把已入库因子召回 staging,等待重跑 check(原代码不变)",
         epilog="""\
 Example:
-    ops recheck AlphaWbaiFoo                  # 单因子,询问确认
-    ops recheck AlphaWbaiFoo -y               # 跳过确认
-    ops recheck AlphaWbaiFoo --purge          # 同时清除 dump + feature(pnl 保留)
-    ops recheck -u wbai                       # 批量:wbai 所有 active 因子
-    ops recheck -u wbai -s rejected           # 批量:wbai 所有 rejected 因子
-    ops recheck -u wbai -s deleted -y         # 批量:复活 wbai 的 deleted 因子
+    ops restage AlphaWbaiFoo                  # 单因子,询问确认
+    ops restage AlphaWbaiFoo -y               # 跳过确认
+    ops restage AlphaWbaiFoo --purge          # 同时清除 dump + feature(pnl 保留)
+    ops restage -u wbai                       # 批量:wbai 所有 active 因子
+    ops restage -u wbai -s rejected           # 批量:wbai 所有 rejected 因子
+    ops restage -u wbai -s deleted -y         # 批量:复活 wbai 的 deleted 因子
 
 来源状态:
   active   ← alpha_src/<name>/
@@ -27,7 +27,7 @@ Example:
   deleted  ← alpha_src/<name>/(soft-delete 保留 src;已 --force 清除则需 ops submit)
 
 默认仅搬源 + 翻状态,alpha_dump / alpha_feature / alpha_pnl 保留。
-version 不变。
+搬回 staging 后需 ops check 才真正重跑;version 不变。
 """,
     )
 
@@ -48,4 +48,4 @@ version 不变。
     parser.add_argument("--config-path", "-c", type=Path,
                         default=get_default_config_path())
 
-    parser.set_defaults(func=run_recheck)
+    parser.set_defaults(func=run_restage)

@@ -375,7 +375,7 @@ uv run ops status -u wbai --status submitted
 
 ```bash
 # 原代码重跑 check(从 alpha_src 召回到 staging)
-uv run ops recheck AlphaWbaiReversal -s rejected
+uv run ops restage AlphaWbaiReversal -s rejected
 
 # 改了代码从 dropbox 重新提交(version += 1)
 uv run ops submit -u wbai -s 20260401 -f AlphaWbaiReversal --overwrite

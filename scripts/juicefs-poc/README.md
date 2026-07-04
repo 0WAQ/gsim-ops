@@ -224,7 +224,7 @@ ops status AlphaXxx                       # 跨机 redis state 强一致
 
 1. `ops` 启动检测 `state.redis.password_file: /etc/juicefs/alphalib-jfs.env`(`config.yaml` 写好的)
 2. wbai shell 没 `OPS_STATE_REDIS_PASSWORD` env → `ensure_redis_password()` 通过 `sudo grep` 一次拿密码塞进 env (sudo prompt 一次,5 min cache 命中后续无感)
-3. 如果是 write 命令(submit/recheck/check/...) + 检测到 `alpha_src` 是 root-owned → `maybe_elevate()` 自动 `os.execvp('sudo -E --preserve-env=OPS_* ops ...')` 把自身提权成 root,带 env 透传
+3. 如果是 write 命令(submit/restage/check/...) + 检测到 `alpha_src` 是 root-owned → `maybe_elevate()` 自动 `os.execvp('sudo -E --preserve-env=OPS_* ops ...')` 把自身提权成 root,带 env 透传
 
 `alphalib_root` 路径覆盖通过 `OPS_ALPHALIB_ROOT` env(只 144 这种 `/storage/vault/` 布局需要,160/150 用默认 `/tank/vault/alphalib`)。可以写进 `~/.profile`。
 
@@ -310,7 +310,7 @@ JFS  /tank/vault/alphalib/        root:alpha-data 2755
 ```
 
 - gid 选 59xxx(GID_MAX=60000 以下,避开 7/8/9000 常见段)
-- 所有 ops 写路径(`submit / recheck / check / pack / rm` 等)必须 sudo 跑;Phase C 之前需要补 sudo wrapper 让 `uv run ops ...` 自动 elevate
+- 所有 ops 写路径(`submit / restage / check / pack / rm` 等)必须 sudo 跑;Phase C 之前需要补 sudo wrapper 让 `uv run ops ...` 自动 elevate
 - `alpha-core/alpha-data` 组 membership 主要用途:跨机器统一 group label(NFS / FUSE 上 gid 数字必须各机一致),并保证未来若放开 group write 位时不需要重 chown
 
 ## 验证结果

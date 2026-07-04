@@ -260,7 +260,7 @@ XML 中通过 `Constants` 控制：
 
 ```bash
 # 原代码重跑 check(从 alpha_src 召回到 staging)
-uv run ops recheck AlphaWbaiExample1 -s rejected
+uv run ops restage AlphaWbaiExample1 -s rejected
 
 # 改了代码从 dropbox 重新提交(version += 1)
 uv run ops submit -u wbai -s 20260401 -f AlphaWbaiExample1 --overwrite
