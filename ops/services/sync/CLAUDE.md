@@ -66,7 +66,7 @@ Pre-push check 基于 `updated_at` 而非 key set:只有当远端某 key 的 `up
 State merge 在前,然后每个数据目录 diff:
 - `only_remote` → 候选下载(按 status 过滤)
 - `differ` → 报冲突
-- 候选名 → 查 `factor_state.json` status:DELETED / SUBMITTED 跳过
+- 候选名 → 查 `factor_state.json` status:SUBMITTED 跳过
 
 ## State Merge (`merge.py`)
 
@@ -81,9 +81,9 @@ State merge 在前,然后每个数据目录 diff:
 
 本地 state 被刻意修剪过(例:清掉 orphan)且远端 still 有的场景。`--force-state` 跳过 pre-push check 和 timestamp merge,直接用本地 state 覆盖远端。慎用。
 
-## Soft-delete
+## 删除
 
-`ops rm <name>` 把 state flip 成 DELETED(tombstone)。Pull 端按 status 跳过该因子数据;远端实际文件 sync 永不删,需要 `ops sync gc`(尚未实现)回收。
+`ops rm <name>` 现在彻底硬删因子(src/pnl/dump/feature + state + derived),不再有 DELETED tombstone。旧的"软删 + sync 跳过"模型已废弃(sync 本身也在退役中)。
 
 ## Verify
 

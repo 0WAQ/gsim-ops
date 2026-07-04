@@ -19,7 +19,6 @@ _STATUS_STYLE = {
     FactorStatus.REJECTED:  "red",
     FactorStatus.DECAYING:  "yellow",
     FactorStatus.RETIRED:   "dim",
-    FactorStatus.DELETED:   "dim",
 }
 
 

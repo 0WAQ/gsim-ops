@@ -12,10 +12,10 @@
 | | `ops cancel` | `ops rm` |
 |---|---|---|
 | 适用状态 | SUBMITTED (`--force` + CHECKING) | ACTIVE / REJECTED |
-| state 处理 | **硬删** record | 软删,留 DELETED tombstone |
+| 删除范围 | staging 目录 + **硬删** state record | src/pnl/dump/feature + state + derived 全删 |
 | 因子曾入库 | 否(从未 ACTIVE) | 是 |
 
-因子从未 ACTIVE 过,所以不需要 tombstone 传播。
+因子从未 ACTIVE 过,没有产物/派生数据可清,只删 staging + state record。
 
 ## 操作流程
 

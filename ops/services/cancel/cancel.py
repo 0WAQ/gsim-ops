@@ -1,7 +1,8 @@
 """ops cancel — 撤回未入库的因子(staging 里的 SUBMITTED)。
 
 针对场景: QR 提交后发现因子不合规,在 ops check 之前撤掉。因子从未 ACTIVE
-过,所以 state record 直接硬删,不留 DELETED tombstone(区别于 ops rm)。
+过,只需删 staging + 硬删 state record(无产物、无派生数据可清)。ops rm 则
+删已入库因子的全部落点(src/pnl/dump/feature + state + derived)。
 
 默认仅 SUBMITTED;--force 也允许 CHECKING(从崩溃 / 中断的 check 残留中清出)。
 真正在跑的 check 由 factor_lock 兜底拦截。

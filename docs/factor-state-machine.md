@@ -9,7 +9,7 @@
 | REJECTED | 验证未通过,不合格 |
 
 - CHECKING 是 check 运行中的瞬态(代码中为独立状态值);reconcile 已下线,崩在半路的因子由下次 `ops check` 按 staging 目录扫到并重跑覆盖
-- DELETED 是 soft-delete 标记,state record 保留,文件可选保留(ops rm 默认仅标记,--force 删 dump+feature)
+- 没有 DELETED 状态:一个因子要么存在(active/rejected/未来 decay 等),要么被 `ops rm` 彻底删除而不存在。删除不是一种状态。
 - DECAYING / RETIRED 暂未实现
 
 ## 命令体系
@@ -22,7 +22,7 @@
 | `ops approve` | 人工通过 correlation 失败因子 | REJECTED 且 last_fail_stage=correlation | — | 不变 |
 | `ops cancel` | 撤回未入库的 SUBMITTED 因子 (删 staging + 硬删 state record) | SUBMITTED (或 CHECKING + `--force`) | — | — |
 | `ops clear` | 清 staging 孤儿目录 (state 无 record) | — | — | — |
-| `ops rm` | 软删除 (打 DELETED 标), `--force` 同时删 dump/feature | 任意状态 | — | — |
+| `ops rm` | 彻底删除因子(src/pnl/dump/feature + state + derived,不可逆) | 任意状态 | — | — |
 
 ## 状态转移图
 
@@ -51,7 +51,7 @@ ops submit (新因子)     ops submit --overwrite (新代码, version+=1)
 
 ## 各状态下因子数据分布
 
-alpha_src 是所有因子的 src 归档,不区分状态(ACTIVE/REJECTED/DELETED 都在里面,状态靠 state 区分)。
+alpha_src 是所有因子的 src 归档,不区分状态(ACTIVE/REJECTED 都在里面,状态靠 state 区分)。
 
 > recycle 已退役(2026-07):它曾是"给研究员看的 REJECTED 副本",但研究员 work tree 在 dropbox 够不着 root-owned 的本地 recycle,且其内容(src / 失败阶段 / 原因)在 alpha_src + state 里都有权威副本,故整体下线。
 

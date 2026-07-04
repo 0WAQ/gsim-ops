@@ -4,10 +4,10 @@
 
 `SUBMITTED → CHECKING → ACTIVE | REJECTED`
 
-(DELETED 是 soft-delete 标记,由 `ops rm` 进入;DECAYING/RETIRED 暂未实现)
+(没有 DELETED 状态:`ops rm` 彻底删除因子而非打标;DECAYING/RETIRED 暂未实现)
 
-`ops cancel` / `ops clear` 不是状态转移,而是把因子从生命周期里**完全移除**:
-- `ops cancel`: state 有 record (SUBMITTED / `--force` 含 CHECKING) → 删 staging + 硬删 state record(从未 ACTIVE,无 tombstone)
+`ops cancel` / `ops clear` / `ops rm` 不是状态转移,而是把因子从生命周期里**完全移除**:
+- `ops cancel`: state 有 record (SUBMITTED / `--force` 含 CHECKING) → 删 staging + 硬删 state record(从未 ACTIVE,无产物)
 - `ops clear`: state 无 record(进程被 SIGKILL 等非常态崩溃留下的 staging 残骸)→ 仅删 staging 目录
 
 **Flow**:

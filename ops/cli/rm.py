@@ -9,21 +9,19 @@ def add_rm_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "rm",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="Soft-delete a factor (mark state=DELETED)",
+        help="彻底删除因子(src/pnl/dump/feature + state + derived,不可逆)",
         epilog="""\
 Example:
-    ops rm AlphaWbaiFoo                # 软删除:仅打标 DELETED,文件保留
-    ops rm AlphaWbaiFoo --force        # 同时删本地 dump + feature(保留 src/pnl)
+    ops rm AlphaWbaiFoo                # 彻底删除,交互确认
     ops rm AlphaWbaiFoo -y             # 跳过确认
 
-list / health 默认隐藏 deleted 因子;`ops list -s deleted` 可查看。
-状态会通过 `ops sync push` 的 state merge 同步到远端,远端文件不会被动。
+删除因子的全部落点:alpha_src / alpha_pnl / alpha_dump / alpha_feature +
+factor_state 行 + factor_derived 行。**不可逆**,恢复只能重新 ops submit。
+没有软删/墓碑。
 """,
     )
 
     parser.add_argument("factor_name", type=str, help="Factor name to delete")
-    parser.add_argument("--force", action="store_true",
-                        help="Also remove local dump dir + feature .npy (src/pnl kept)")
     parser.add_argument("-y", "--yes", action="store_true",
                         help="Skip confirmation prompt")
     parser.add_argument("--config-path", "-c", type=Path,

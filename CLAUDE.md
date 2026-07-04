@@ -59,11 +59,10 @@ uv run ops sync pull --deep          # 同上,忽略本地 etag 缓存重算
 uv run ops sync status               # Quick local-vs-remote summary (no data scan)
 uv run ops sync verify               # 三个数据目录 etag 级两端校验
 uv run ops sync verify --deep        # 忽略缓存重算,捕捉缓存里 mtime/size 没动但内容已坏(慢)
-uv run ops rm AlphaXxx               # 软删除:仅打 DELETED 标,文件保留
-uv run ops rm AlphaXxx --force       # 同时删本地 dump + feature(保留 src/pnl)
+uv run ops rm AlphaXxx               # 彻底删除因子(src/pnl/dump/feature + state + derived,不可逆)
+uv run ops rm AlphaXxx -y            # 跳过确认
 uv run ops restage AlphaXxx          # 原代码不变,召回 staging 待重跑 check
 uv run ops restage AlphaXxx -s rejected   # 召回 rejected 因子
-uv run ops restage AlphaXxx -s deleted    # 复活 deleted 因子(soft-delete 仍保留 src)
 uv run ops restage AlphaXxx --purge  # 同时清除 dump + feature(保留 src/pnl)
 uv run ops restage -u wbai           # 批量:wbai 所有 active 因子(apt 风格确认)
 uv run ops restage -u wbai -y        # 批量,跳过确认
@@ -98,7 +97,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | Subcommand | Purpose | Module |
 |------------|---------|--------|
 | `submit` | Copy new factors from dropbox to staging, generate `meta.json`, mark SUBMITTED. `--overwrite`: 已入库同名因子改提新代码,version += 1(默认跳过) | `ops/services/submit/` |
-| `restage` | Recall ACTIVE/REJECTED/DELETED factor back to staging for re-check (code unchanged; doesn't run check itself) | `ops/services/restage/` |
+| `restage` | Recall ACTIVE/REJECTED factor back to staging for re-check (code unchanged; doesn't run check itself) | `ops/services/restage/` |
 | `approve` | 人工审批 correlation 失败因子,REJECTED → ACTIVE(不重跑 check) | `ops/services/approve/` |
 | `cancel` | 撤回未入库的 SUBMITTED 因子(删 staging + 硬删 state record) | `ops/services/cancel/` |
 | `clear` | 清理 staging 孤儿(state 无 record 的目录,submit parse 失败留下) | `ops/services/clear/` |
@@ -119,7 +118,7 @@ Removed subcommands: `cp`, `scp`, `compiler`.
 
 **Destructive operations are opt-in.** Default behavior never deletes user data. Every destructive path lives behind an explicit flag or a separate subcommand. Established patterns:
 
-- `ops rm` defaults to state-only soft-delete. `--force` removes local dump + feature only.
+- `ops rm` hard-deletes an in-library factor entirely: src/pnl/dump/feature + state row + derived row. Irreversible, no tombstone. Interactive confirm by default (`-y` skips).
 - `ops cancel` hard-deletes staging dir + state record for SUBMITTED (`--force` extends to CHECKING). No tombstone — factor never went live.
 - `ops clear` deletes staging orphans (no state record), left by `ops submit` parse failures.
 - `ops submit --overwrite` copies new code from dropbox to staging for an already-registered factor, version += 1 (default skips existing).

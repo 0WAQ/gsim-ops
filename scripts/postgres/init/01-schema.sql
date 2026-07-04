@@ -66,7 +66,6 @@ CREATE TABLE IF NOT EXISTS factor_state (
     submitted_by     TEXT,
     entered_at       TIMESTAMPTZ,
     rejected_at      TIMESTAMPTZ,
-    deleted_at       TIMESTAMPTZ,
     last_fail_stage  TEXT,
     last_fail_reason TEXT,
     check_history    JSONB NOT NULL DEFAULT '[]',

@@ -1,23 +1,30 @@
 # Rm
 
-Soft-delete a factor.
+彻底删除一个因子(不可逆)。没有软删/墓碑。
 
-## 默认行为
+## 行为
 
-Flip state to DELETED (tombstone). 磁盘文件完全不动。因子可通过 `ops restage -s deleted` 恢复。
+一次删掉因子的全部落点:
 
-## --force
+- `alpha_src/<name>/`(源码目录,唯一代码副本)
+- `alpha_pnl/<name>`(PNL 单文件)
+- `alpha_dump/<name>/`(dump 目录)
+- `alpha_feature/<name>.{v1,v2}.npy`(feature)
+- `factor_derived` PG 行(派生数据:metrics/datasources/bcorr/index)
+- `factor_state` PG 行(状态)
 
-额外删除:
-- `alpha_dump/<name>/` (整个目录)
-- `alpha_feature/<name>.v1.npy` + `<name>.v2.npy`
-
-始终保留: `alpha_src`, `alpha_pnl`
-
-## 传播
-
-Tombstone 通过 `ops sync push` state merge 传播到其他机器。远端文件不删除（留给未来 `ops sync gc`）。
+删除后因子即不存在,要恢复只能重新 `ops submit`。dump+feature 复用 `_purge_artifacts`
+(restage `--purge` 也用它);src/pnl/derived/state 各自单独删。全程包在 `factor_lock` 内。
 
 ## 确认
 
-默认交互确认 `[y/N]`，`-y` 跳过。
+默认交互确认,展示完整删除清单 + "不可逆" 字样;`-y` 跳过。单因子接口,不支持
+`-u` 批量(避免一条命令删一片)。
+
+## 与 ops cancel 的区别
+
+| | `ops rm` | `ops cancel` |
+|---|---|---|
+| 适用状态 | 已入库(ACTIVE/REJECTED 等) | SUBMITTED(`--force` + CHECKING) |
+| 删除范围 | src/pnl/dump/feature + state + derived 全删 | staging 目录 + state record(无产物可删) |
+| 因子曾入库 | 是 | 否(从未 ACTIVE) |

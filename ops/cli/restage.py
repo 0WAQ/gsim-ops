@@ -19,12 +19,10 @@ Example:
     ops restage AlphaWbaiFoo --purge          # 同时清除 dump + feature(pnl 保留)
     ops restage -u wbai                       # 批量:wbai 所有 active 因子
     ops restage -u wbai -s rejected           # 批量:wbai 所有 rejected 因子
-    ops restage -u wbai -s deleted -y         # 批量:复活 wbai 的 deleted 因子
 
 来源状态:
   active   ← alpha_src/<name>/
   rejected ← alpha_src/<name>/
-  deleted  ← alpha_src/<name>/(soft-delete 保留 src;已 --force 清除则需 ops submit)
 
 默认仅搬源 + 翻状态,alpha_dump / alpha_feature / alpha_pnl 保留。
 搬回 staging 后需 ops check 才真正重跑;version 不变。
@@ -38,9 +36,8 @@ Example:
                         help="按 author 过滤(批量)")
     parser.add_argument("--status", "-s", default=FactorStatus.ACTIVE.value,
                         choices=[FactorStatus.ACTIVE.value,
-                                 FactorStatus.REJECTED.value,
-                                 FactorStatus.DELETED.value],
-                        help="来源状态 (active/rejected/deleted;默认 active)")
+                                 FactorStatus.REJECTED.value],
+                        help="来源状态 (active/rejected;默认 active)")
     parser.add_argument("--purge", action="store_true",
                         help="同步清除 alpha_dump + alpha_feature(alpha_pnl 保留)")
     parser.add_argument("-y", "--yes", action="store_true",

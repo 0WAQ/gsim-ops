@@ -28,7 +28,6 @@ _STATUS_STYLE = {
     FactorStatus.CHECKING:  "yellow",
     FactorStatus.DECAYING:  "magenta",
     FactorStatus.RETIRED:   "dim",
-    FactorStatus.DELETED:   "dim",
 }
 
 
@@ -255,9 +254,6 @@ def run_list(args):
     if args.status:
         records = [r for r in records
                    if (s := state_records.get(r.name)) and s.status == args.status]
-    else:
-        records = [r for r in records
-                   if not (s := state_records.get(r.name)) or s.status != FactorStatus.DELETED]
 
     # Refresh derived groups for the (already filtered) set, then re-read those
     # rows so the refreshed values show. Matches old behavior: refresh operated

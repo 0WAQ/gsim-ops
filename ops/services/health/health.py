@@ -8,8 +8,6 @@ from rich.rule import Rule
 from rich import box
 
 from ops.core.library import LibraryScanner, FactorInfo
-from ops.core.state import FactorStatus
-from ops.infra.store import default_store
 from ops.services.list.metrics import load_metrics, refresh_metrics
 from ops.services.list.datasource import load_datasources, refresh_datasources
 
@@ -111,9 +109,6 @@ def _print_issues(issues: list[Issue]) -> None:
 def run_health(args):
     scanner = LibraryScanner.from_config_path(args.config_path)
     factors = scanner.scan(refresh=args.refresh)
-
-    statuses = {r.name: r.status for r in default_store(scanner.config).list()}
-    factors = [f for f in factors if statuses.get(f.name) != FactorStatus.DELETED]
 
     if args.user:
         factors = scanner.filter_by_author(factors, args.user)

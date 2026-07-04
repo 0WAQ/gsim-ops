@@ -19,4 +19,3 @@ Auto-refreshes missing metrics and datasources by running `refresh_metrics` / `r
 ## Filtering
 
 - `--user` filters factors by author before checking
-- DELETED factors are excluded from checks (filtered via state store)

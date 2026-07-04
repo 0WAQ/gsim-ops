@@ -6,7 +6,6 @@
 
 - **ACTIVE** (默认): 源 = `alpha_src/<name>/`
 - **REJECTED** (`-s rejected`): 源 = `alpha_src/<name>/`(REJECTED src 与 ACTIVE 同库)
-- **DELETED** (`-s deleted`): 源 = `alpha_src/<name>/`(soft-delete 保留 src);已被 `--force` 清则无法 restage,需 `ops submit`
 
 ## 操作流程
 

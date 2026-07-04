@@ -6,8 +6,6 @@ SUBMITTED,让下一次 ops check 捡起重跑 8 阶段流水线。version 不变
 支持的来源状态:
 - ACTIVE   (默认): 源 = alpha_src/<name>/
 - REJECTED        : 源 = alpha_src/<name>/(REJECTED src 与 ACTIVE 同库)
-- DELETED         : 源 = alpha_src/<name>/(soft-delete 默认保留 src);
-                    若已被 --force 完全清理,则无法 restage,需走 ops submit 重新提交
 
 destructive 为 opt-in:
 - 默认仅搬源 + 翻状态;alpha_dump / alpha_feature / alpha_pnl 保留
@@ -32,7 +30,7 @@ from ops.services.rm.rm import _purge_artifacts
 from ops.utils.printer import banner, bottom, info, warn, error, highlight
 
 
-_SUPPORTED_STATUSES = {FactorStatus.ACTIVE, FactorStatus.REJECTED, FactorStatus.DELETED}
+_SUPPORTED_STATUSES = {FactorStatus.ACTIVE, FactorStatus.REJECTED}
 
 
 def _clean_pycache(root: Path) -> None:
@@ -64,10 +62,6 @@ def _locate_source(rec: FactorRecord, config: Config) -> Path | None:
         src = config.alpha_src / name
         return src if src.exists() else None
     if rec.status == FactorStatus.REJECTED:
-        src = config.alpha_src / name
-        return src if src.exists() else None
-    if rec.status == FactorStatus.DELETED:
-        # soft-delete 默认保留 alpha_src;--force 才删 dump/feature(src 仍保留)
         src = config.alpha_src / name
         return src if src.exists() else None
     return None
@@ -140,7 +134,7 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
     _rewrite_module_path(dst)
 
     # REJECTED restage 自动清掉产物(无生产顾虑,check 会重新产出)
-    # ACTIVE/DELETED 仅在 --purge 时清
+    # ACTIVE 仅在 --purge 时清
     if rec.status == FactorStatus.REJECTED or purge:
         removed = _purge_artifacts(name, config)
         for r in removed:

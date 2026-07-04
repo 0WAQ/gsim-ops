@@ -301,8 +301,8 @@ def _split_for_pull(result: DirDiff, subdir: str,
     and what to flag as conflict.
 
     Download: only_remote (new additions), restricted to factors whose
-    status is not DELETED / SUBMITTED. Tombstones and in-staging factors
-    should never produce local data via pull.
+    status is not SUBMITTED. In-staging factors should never produce local
+    data via pull.
     Conflict: differ — we never automatically overwrite local when etag
     differs. User must manually resolve (delete local or push first).
     """
@@ -314,7 +314,7 @@ def _split_for_pull(result: DirDiff, subdir: str,
     for rel in candidates:
         name = _extract_factor_name(rel, subdir)
         status = _factor_status(state, name)
-        if status in ("DELETED", "SUBMITTED"):
+        if status == "SUBMITTED":
             skipped_state.append(rel)
         else:
             to_download.append(rel)
@@ -329,7 +329,7 @@ def _pull_dir(name: str, local_root: Path, remote_prefix: str,
               s3: S3Client, state: dict, *, library_id: str, dry_run: bool,
               recompute: bool = False) -> int:
     """Diff one data dir, download what's missing/remote-newer (filtering
-    DELETED/SUBMITTED), warn on conflicts. Returns number of failed
+    SUBMITTED), warn on conflicts. Returns number of failed
     downloads."""
     cache = etag_cache.load(library_id)
     local = walk_local(local_root, subdir=name, cache=cache,
@@ -347,7 +347,7 @@ def _pull_dir(name: str, local_root: Path, remote_prefix: str,
 
     info(f"  本地: {len(local)}  远端: {len(remote)}  "
          f"一致: {len(result.identical)}  待拉: {len(to_download)}  "
-         f"跳过(DELETED/SUBMITTED): {len(skipped_state)}  "
+         f"跳过(SUBMITTED): {len(skipped_state)}  "
          f"冲突: {len(conflicts)}" + ("  [recompute]" if recompute else "") + extra)
     if conflicts:
         warn(f"  ⚠ {len(conflicts)} 个文件 etag 不同,跳过(需手工解决:删本地或先 push)")

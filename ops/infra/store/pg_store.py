@@ -33,7 +33,6 @@ CREATE TABLE IF NOT EXISTS factor_state (
     submitted_by TEXT,
     entered_at TIMESTAMPTZ,
     rejected_at TIMESTAMPTZ,
-    deleted_at TIMESTAMPTZ,
     last_fail_stage TEXT,
     last_fail_reason TEXT,
     check_history JSONB NOT NULL DEFAULT '[]',
@@ -47,12 +46,12 @@ CREATE INDEX IF NOT EXISTS ix_fs_status ON factor_state (library_id, status);
 # Column order shared by SELECT and row->record mapping.
 _COLS = (
     "name, author, status, version, submitted_at, submitted_by, entered_at, "
-    "rejected_at, deleted_at, last_fail_stage, last_fail_reason, "
+    "rejected_at, last_fail_stage, last_fail_reason, "
     "check_history, updated_at"
 )
 
 # Scalar (non-timestamp, non-status, non-check) fields settable via transition().
-_TS_FIELDS = {"submitted_at", "entered_at", "rejected_at", "deleted_at", "updated_at"}
+_TS_FIELDS = {"submitted_at", "entered_at", "rejected_at", "updated_at"}
 
 
 def _now() -> str:
@@ -99,7 +98,7 @@ class PostgresStateStore(StateStore):
 
     def _row_to_record(self, row) -> FactorRecord:
         (name, author, status, version, submitted_at, submitted_by, entered_at,
-         rejected_at, deleted_at, last_fail_stage, last_fail_reason,
+         rejected_at, last_fail_stage, last_fail_reason,
          check_history, updated_at) = row
         checks = [CheckRecord.from_dict(c) for c in (check_history or [])]
         return FactorRecord(
@@ -111,7 +110,6 @@ class PostgresStateStore(StateStore):
             submitted_by=submitted_by,
             entered_at=_ts_out(entered_at),
             rejected_at=_ts_out(rejected_at),
-            deleted_at=_ts_out(deleted_at),
             last_fail_stage=last_fail_stage,
             last_fail_reason=last_fail_reason,
             version=version,
@@ -133,14 +131,14 @@ class PostgresStateStore(StateStore):
         sql = (
             "INSERT INTO factor_state "
             "(library_id, name, author, status, version, submitted_at, submitted_by, "
-            "entered_at, rejected_at, deleted_at, last_fail_stage, last_fail_reason, "
+            "entered_at, rejected_at, last_fail_stage, last_fail_reason, "
             "check_history, updated_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (library_id, name) DO UPDATE SET "
             "author=EXCLUDED.author, status=EXCLUDED.status, version=EXCLUDED.version, "
             "submitted_at=EXCLUDED.submitted_at, submitted_by=EXCLUDED.submitted_by, "
             "entered_at=EXCLUDED.entered_at, rejected_at=EXCLUDED.rejected_at, "
-            "deleted_at=EXCLUDED.deleted_at, last_fail_stage=EXCLUDED.last_fail_stage, "
+            "last_fail_stage=EXCLUDED.last_fail_stage, "
             "last_fail_reason=EXCLUDED.last_fail_reason, "
             "check_history=EXCLUDED.check_history, updated_at=EXCLUDED.updated_at"
         )
@@ -149,7 +147,7 @@ class PostgresStateStore(StateStore):
                 self.lib, record.name, record.author, record.status.value, record.version,
                 _ts_in(record.submitted_at), record.submitted_by or None,
                 _ts_in(record.entered_at), _ts_in(record.rejected_at),
-                _ts_in(record.deleted_at), record.last_fail_stage, record.last_fail_reason,
+                record.last_fail_stage, record.last_fail_reason,
                 checks, _ts_in(record.updated_at),
             ))
 
@@ -182,11 +180,11 @@ class PostgresStateStore(StateStore):
                 conn.execute(
                     "UPDATE factor_state SET status=%s, version=%s, "
                     "submitted_at=%s, submitted_by=%s, entered_at=%s, rejected_at=%s, "
-                    "deleted_at=%s, last_fail_stage=%s, last_fail_reason=%s, updated_at=%s "
+                    "last_fail_stage=%s, last_fail_reason=%s, updated_at=%s "
                     "WHERE library_id=%s AND name=%s",
                     (rec.status.value, rec.version,
                      _ts_in(rec.submitted_at), rec.submitted_by or None,
-                     _ts_in(rec.entered_at), _ts_in(rec.rejected_at), _ts_in(rec.deleted_at),
+                     _ts_in(rec.entered_at), _ts_in(rec.rejected_at),
                      rec.last_fail_stage, rec.last_fail_reason, _ts_in(rec.updated_at),
                      self.lib, name),
                 )

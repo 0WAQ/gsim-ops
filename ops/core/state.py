@@ -9,7 +9,6 @@ class FactorStatus(str, Enum):
     REJECTED  = "rejected"
     DECAYING  = "decaying"
     RETIRED   = "retired"
-    DELETED   = "deleted"
 
 
 @dataclass
@@ -38,7 +37,6 @@ class FactorRecord:
     submitted_by: str | None = None
     entered_at: str | None = None
     rejected_at: str | None = None
-    deleted_at: str | None = None
     last_fail_stage: str | None = None
     last_fail_reason: str | None = None
     version: int = 1

@@ -25,7 +25,7 @@ Example:
     parser.add_argument("--factor", "-f", type=str, default=None, help="只处理指定因子")
     parser.add_argument("--user", "-u", type=str, default=None, help="按作者过滤")
     parser.add_argument("--status", "-s", type=str, default=None,
-                        choices=["submitted", "checking", "active", "rejected", "decaying", "retired", "deleted"],
+                        choices=["submitted", "checking", "active", "rejected", "decaying", "retired"],
                         help="按状态过滤")
     parser.add_argument("--force", action="store_true", help="强制重写已打包因子")
     parser.add_argument("--dry-run", action="store_true", help="仅列出待打包因子,不执行")
