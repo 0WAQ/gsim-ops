@@ -176,3 +176,59 @@ def test_rm_missing_factor(test_config):
     # 不在 state → 报错返回,不炸
     run_rm(_args(cfg_path, factor_name="AlphaWbaiNope"))
     assert _store(config).get("AlphaWbaiNope") is None
+
+
+# ---------------------------------------------------------------------------
+# 批量 -u 路径 (风险最高: 一条命令动一片因子。单因子与批量是两套独立校验分支)
+# ---------------------------------------------------------------------------
+
+def test_approve_batch_only_correlation(test_config):
+    """approve -u: 只放行 correlation-rejected,其他失败阶段归 skipped 不误放。"""
+    from ops.services.approve.approve import run_approve
+    cfg_path, config = test_config
+    s = _store(config)
+    s.put(FactorRecord(name="AlphaWbaiC1", author="wbai", status=FactorStatus.REJECTED,
+                       updated_at="2026-07-05T00:00:00", last_fail_stage="correlation"))
+    s.put(FactorRecord(name="AlphaWbaiC2", author="wbai", status=FactorStatus.REJECTED,
+                       updated_at="2026-07-05T00:00:00", last_fail_stage="checkbias"))
+    s.put(FactorRecord(name="AlphaWbaiC3", author="wbai", status=FactorStatus.ACTIVE,
+                       updated_at="2026-07-05T00:00:00"))
+    run_approve(_args(cfg_path, user="wbai"))
+    # 只有 correlation-rejected 被放行
+    assert s.get("AlphaWbaiC1").status == FactorStatus.ACTIVE
+    assert s.get("AlphaWbaiC2").status == FactorStatus.REJECTED  # checkbias 不放
+    assert s.get("AlphaWbaiC3").status == FactorStatus.ACTIVE    # 本就 active,不动
+
+
+def test_cancel_batch_only_eligible(test_config):
+    """cancel -u: 只删 SUBMITTED,ACTIVE/REJECTED 归 skipped 不误删。"""
+    from ops.services.cancel.cancel import run_cancel
+    cfg_path, config = test_config
+    s = _store(config)
+    for n in ("AlphaWbaiS1", "AlphaWbaiS2"):
+        (config.staging / n).mkdir(parents=True, exist_ok=True)
+    s.put(FactorRecord(name="AlphaWbaiS1", author="wbai", status=FactorStatus.SUBMITTED,
+                       updated_at="2026-07-05T00:00:00"))
+    s.put(FactorRecord(name="AlphaWbaiS2", author="wbai", status=FactorStatus.ACTIVE,
+                       updated_at="2026-07-05T00:00:00"))
+    run_cancel(_args(cfg_path, user="wbai", force=False))
+    # SUBMITTED 删,ACTIVE 保留
+    assert _store(config).get("AlphaWbaiS1") is None
+    assert _store(config).get("AlphaWbaiS2").status == FactorStatus.ACTIVE
+
+
+def test_cancel_batch_does_not_touch_other_user(test_config):
+    """cancel -u wbai 不该动 mhe 的因子。"""
+    from ops.services.cancel.cancel import run_cancel
+    cfg_path, config = test_config
+    s = _store(config)
+    (config.staging / "AlphaWbaiMine").mkdir(parents=True, exist_ok=True)
+    (config.staging / "AlphaMheOther").mkdir(parents=True, exist_ok=True)
+    s.put(FactorRecord(name="AlphaWbaiMine", author="wbai", status=FactorStatus.SUBMITTED,
+                       updated_at="2026-07-05T00:00:00"))
+    s.put(FactorRecord(name="AlphaMheOther", author="mhe", status=FactorStatus.SUBMITTED,
+                       updated_at="2026-07-05T00:00:00"))
+    run_cancel(_args(cfg_path, user="wbai", force=False))
+    assert _store(config).get("AlphaWbaiMine") is None
+    assert _store(config).get("AlphaMheOther") is not None  # 别人的不动
+

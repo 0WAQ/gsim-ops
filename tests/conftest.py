@@ -133,6 +133,11 @@ def test_config(tmp_path: Path, pg_conninfo, library_id):
     p["alpha_path"] = str(tmp_path / "workspace" / "alpha")
     p["checkpoint_path"] = str(tmp_path / "workspace" / "checkpoint")
     p["nio_data_path"] = str(tmp_path / "nio")  # 不存在 → _build_npy_index 返回 {}
+    # bcorr 对比池 (correlation 读路径用)。fake checker 不跑真 correlation,故当前测试不碰,
+    # 但仍重定位到 tmp,防止将来扩测试误读/误写生产池。
+    p["pnl_prod_path"] = str(tmp_path / "pnl_prod")
+    p["pnl_alphalib"] = str(root / "alpha_pnl")
+    p["pnl_pool_path"] = str(tmp_path / "pnl_pool")
 
     # library_id 显式固定(否则默认取 alpha_src.parent.name = "alphalib")
     base.setdefault("sync", {})
