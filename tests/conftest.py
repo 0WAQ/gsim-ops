@@ -120,6 +120,7 @@ def test_config(tmp_path: Path, pg_conninfo, library_id):
 
     # 逐条兜底重写 path(不依赖 vars 里恰好有对应变量)
     p = base["path"]
+    p["dropbox_path"] = str(tmp_path / "dropbox")  # 隔离: 绝不碰生产 dropbox
     p["alpha_src"] = str(root / "alpha_src")
     p["alpha_dump"] = str(root / "alpha_dump")
     p["alpha_pnl"] = str(root / "alpha_pnl")
@@ -158,7 +159,8 @@ def test_config(tmp_path: Path, pg_conninfo, library_id):
     # 预建数据目录(pipeline __init__ 只 mkdir 一部分)
     for d in (config.staging, config.alpha_src, config.alpha_dump, config.alpha_pnl,
               config.alpha_feature, config.pnl_automated, config.pnl_manual,
-              config.pnl_path, config.alpha_path, config.checkpoint_path):
+              config.pnl_path, config.alpha_path, config.checkpoint_path,
+              config.dropbox_path):
         d.mkdir(parents=True, exist_ok=True)
 
     return cfg_path, config
@@ -304,3 +306,59 @@ def fake_metrics(monkeypatch):
     m = Metrics(ret=15.0, tvr=40.0, shrp=2.5, mdd=8.0, fitness=1.2)
     monkeypatch.setattr(check_mod.Runner, "run_simsummary", staticmethod(lambda *a, **k: m))
     return m
+
+
+# ---------------------------------------------------------------------------
+# dropbox 因子生成 (submit 从 dropbox 读, 不是 staging)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def make_dropbox_factor(test_config):
+    """在 dropbox/<user>/<date>/<name>/ 造一个因子源 (submit 的输入)。
+
+    返回 callable(name, user, date, delay, discovery_method) → factor_dir。
+    默认 discovery_method="manual"。传 None 造缺失(测硬校验)。
+    """
+    _, config = test_config
+
+    def _make(name: str = "AlphaWbaiTest",
+              user: str = "wbai",
+              date: str = "20260705",
+              delay: int = 0,
+              discovery_method: str | None = "manual") -> Path:
+        d = config.dropbox_path / user / date / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{name}.py").write_text(_MINIMAL_PY.format(name=name))
+        (d / f"Config.{name}.xml").write_text(
+            _minimal_xml(name, delay, discovery_method))
+        return d
+
+    return _make
+
+
+# ---------------------------------------------------------------------------
+# args namespace (驱动 run_* 入口)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def make_args(test_config):
+    """构造一个模拟 argparse.Namespace 的对象喂给 run_*(args)。
+
+    自动带上 config_path;其余字段按需 kwargs 覆盖。yes=True 默认跳过交互确认。
+    """
+    from types import SimpleNamespace
+
+    cfg_path, _ = test_config
+
+    def _make(**kwargs):
+        defaults = dict(
+            config_path=cfg_path,
+            yes=True,
+            user=None,
+            factor_name=None,
+        )
+        defaults.update(kwargs)
+        return SimpleNamespace(**defaults)
+
+    return _make
+

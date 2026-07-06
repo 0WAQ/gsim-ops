@@ -47,6 +47,9 @@ PY
 | `test_derived_store_pg.py` | PostgresDerivedStore:四组独立 upsert、get_all 各下推参、delete、meta | 是 |
 | `test_check_routing.py` | **主体**:pipeline 5 结局(pass/retry/reject-late/reject-early/skip/crash)+ pnl 分流 + short-circuit + 派生局部失败不阻断 | 是 |
 | `test_check_scan.py` | `_scan_factors` 过滤、`_ensure_record` 补建/不覆盖、CHECKING 自愈、FactorLocked → locked | 是 |
+| `test_submit.py` | submit:新因子 version=1、已入库跳过、`--overwrite` version+1、文件数/syntax/discovery_method 校验失败回滚 staging | 是 |
+| `test_restage.py` | restage:ACTIVE/REJECTED 召回 → SUBMITTED、REJECTED 清 pnl、`--purge` 清 dump/feature、不支持状态/源缺失跳过 | 是 |
+| `test_lifecycle_cmds.py` | cancel(SUBMITTED/`--force` CHECKING)、approve(仅 correlation-rejected)、clear(仅孤儿)、rm(硬删全落点 + state + derived 行) | 是 |
 
 ### 可测性接缝(依赖注入)
 

@@ -83,10 +83,11 @@ uv run ops combo run <dir> --start 20241210 --end 20241231 --predict-start 20241
 ```
 
 Test suite in `tests/` (pytest, dev group). Covers the check pipeline's control flow
-(routing outcomes, on_reject artifact policy, scan/self-heal/lock) + state/derived PG
-storage. `uv sync --group dev && uv run pytest -m "not slow"`. PG tests need an isolated
-`ops_test` db (auto-skip if unreachable); see `tests/README.md`. Python 3.10+ required
-(see `.python-version`). Package manager is **uv** (not pip).
+(routing outcomes, on_reject artifact policy, scan/self-heal/lock), the factor-lifecycle
+write commands (submit/restage/cancel/approve/clear/rm state transitions + artifact
+handling), and state/derived PG storage. `uv sync --group dev && uv run pytest -m "not slow"`.
+PG tests need an isolated `ops_test` db (auto-skip if unreachable); see `tests/README.md`.
+Python 3.10+ required (see `.python-version`). Package manager is **uv** (not pip).
 
 ```bash
 uv sync          # Install dependencies

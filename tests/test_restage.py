@@ -1,0 +1,117 @@
+"""restage 写路径测试 (PG)。
+
+覆盖 run_restage / _resolve_targets / _restage_one 分支:
+- ACTIVE / REJECTED 召回 → SUBMITTED,src 搬回 staging
+- REJECTED 自动清 dump/feature/pnl;ACTIVE 默认保留,--purge 才清
+- 不支持的状态 / 源缺失 / staging 已存在拒绝覆盖
+"""
+import pytest
+
+from ops.core.state import FactorStatus, FactorRecord
+
+pytestmark = pytest.mark.pg
+
+
+def _store(config):
+    from ops.infra.store import default_store
+    return default_store(config)
+
+
+def _seed_active(config, name="AlphaWbaiAct", author="wbai"):
+    """在 alpha_src 造一个 ACTIVE 因子 (src 目录 + state 行)。"""
+    src = config.alpha_src / name
+    src.mkdir(parents=True, exist_ok=True)
+    (src / f"{name}.py").write_text("x = 1\n")
+    (src / f"Config.{name}.xml").write_text(
+        '<gsim><Modules><Alpha id="M" module="old"></Alpha></Modules></gsim>')
+    _store(config).put(FactorRecord(name=name, author=author, status=FactorStatus.ACTIVE,
+                                    updated_at="2026-07-05T00:00:00"))
+    return src
+
+
+def _args(cfg_path, **kw):
+    from types import SimpleNamespace
+    d = dict(config_path=cfg_path, yes=True, user=None, factor_name=None,
+             status="active", purge=False)
+    d.update(kw)
+    return SimpleNamespace(**d)
+
+
+def test_restage_active_moves_to_staging(test_config, make_args):
+    from ops.services.restage.restage import run_restage
+    cfg_path, config = test_config
+    _seed_active(config, "AlphaWbaiAct")
+    run_restage(_args(cfg_path, factor_name="AlphaWbaiAct"))
+    rec = _store(config).get("AlphaWbaiAct")
+    assert rec.status == FactorStatus.SUBMITTED
+    assert (config.staging / "AlphaWbaiAct").exists()
+    assert not (config.alpha_src / "AlphaWbaiAct").exists()
+
+
+def test_restage_active_keeps_artifacts(test_config):
+    from ops.services.restage.restage import run_restage
+    cfg_path, config = test_config
+    _seed_active(config, "AlphaWbaiKeep")
+    # 预造 dump + feature
+    (config.alpha_dump / "AlphaWbaiKeep").mkdir(parents=True, exist_ok=True)
+    (config.alpha_feature / "AlphaWbaiKeep.v1.npy").write_bytes(b"x")
+    run_restage(_args(cfg_path, factor_name="AlphaWbaiKeep", purge=False))
+    # 默认保留
+    assert (config.alpha_dump / "AlphaWbaiKeep").exists()
+    assert (config.alpha_feature / "AlphaWbaiKeep.v1.npy").exists()
+
+
+def test_restage_active_purge_wipes_artifacts(test_config):
+    from ops.services.restage.restage import run_restage
+    cfg_path, config = test_config
+    _seed_active(config, "AlphaWbaiPurge")
+    (config.alpha_dump / "AlphaWbaiPurge").mkdir(parents=True, exist_ok=True)
+    (config.alpha_feature / "AlphaWbaiPurge.v1.npy").write_bytes(b"x")
+    (config.alpha_pnl / "AlphaWbaiPurge").write_text("pnl")
+    run_restage(_args(cfg_path, factor_name="AlphaWbaiPurge", purge=True))
+    # --purge 清 dump + feature;pnl 始终保留 (ACTIVE)
+    assert not (config.alpha_dump / "AlphaWbaiPurge").exists()
+    assert not (config.alpha_feature / "AlphaWbaiPurge.v1.npy").exists()
+    assert (config.alpha_pnl / "AlphaWbaiPurge").exists()
+
+
+def test_restage_rejected_wipes_pnl(test_config):
+    from ops.services.restage.restage import run_restage
+    cfg_path, config = test_config
+    name = "AlphaWbaiRej"
+    src = config.alpha_src / name
+    src.mkdir(parents=True, exist_ok=True)
+    (src / f"{name}.py").write_text("x = 1\n")
+    (src / f"Config.{name}.xml").write_text(
+        '<gsim><Modules><Alpha id="M" module="old"></Alpha></Modules></gsim>')
+    _store(config).put(FactorRecord(name=name, author="wbai", status=FactorStatus.REJECTED,
+                                    updated_at="2026-07-05T00:00:00",
+                                    last_fail_stage="correlation"))
+    (config.alpha_pnl / name).write_text("pnl")
+    run_restage(_args(cfg_path, factor_name=name, status="rejected"))
+    assert _store(config).get(name).status == FactorStatus.SUBMITTED
+    # REJECTED restage 额外清 pnl
+    assert not (config.alpha_pnl / name).exists()
+
+
+def test_restage_unsupported_status_rejected(test_config):
+    from ops.services.restage.restage import run_restage
+    cfg_path, config = test_config
+    _store(config).put(FactorRecord(name="AlphaWbaiSub", author="wbai",
+                                    status=FactorStatus.SUBMITTED,
+                                    updated_at="2026-07-05T00:00:00"))
+    run_restage(_args(cfg_path, factor_name="AlphaWbaiSub"))
+    # SUBMITTED 不支持 restage → 状态不变
+    assert _store(config).get("AlphaWbaiSub").status == FactorStatus.SUBMITTED
+
+
+def test_restage_missing_source_skipped(test_config):
+    from ops.services.restage.restage import run_restage
+    cfg_path, config = test_config
+    # state ACTIVE 但 alpha_src 无目录
+    _store(config).put(FactorRecord(name="AlphaWbaiGone", author="wbai",
+                                    status=FactorStatus.ACTIVE,
+                                    updated_at="2026-07-05T00:00:00"))
+    run_restage(_args(cfg_path, factor_name="AlphaWbaiGone"))
+    # 源缺失 → 不动状态
+    assert _store(config).get("AlphaWbaiGone").status == FactorStatus.ACTIVE
