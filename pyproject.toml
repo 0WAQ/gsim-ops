@@ -47,7 +47,8 @@ filterwarnings = [
 ]
 markers = [
     "pg: 需要可达的 ops_test Postgres 库 (host 10.9.100.160:15432); 库不可达时自动 skip",
-    "slow: 真跑 gsim 的端到端冒烟 (手动, 不随默认 suite)",
+    "slow: 真跑 gsim 的端到端测试 (慢, 默认不跑)",
+    "e2e: 端到端测试 (真实 gsim + cc 数据); 环境不可达时自动 skip",
 ]
 
 [tool.setuptools.packages.find]

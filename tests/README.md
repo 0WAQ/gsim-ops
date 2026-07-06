@@ -71,16 +71,35 @@ uv run pytest tests/test_pure.py      # 只跑纯函数 (无需 PG)
 uv run pytest -k routing -v           # 只跑路由测试
 ```
 
-## 手动端到端冒烟(`slow`,不随默认 suite)
+## 端到端测试(`tests/e2e/`,标 `slow` + `e2e`,默认不跑)
 
-真跑一个逻辑极简因子的完整 `ops check`(真 gsim,~1-2min),验证 CLI→Config→gsim→store
-全链路装配。依赖真实 cc 数据就绪,不适合无人值守 CI,故标 `slow` 手动跑:
+真实 gsim + 真实 cc_2025 数据,**构造假因子确定性触发每条 pipeline 路径**,验证从
+`submit` → `check`(真回测)→ 最终 state + 文件落点 的完整生产流程。
 
-1. 造一个隔离 config(参考 `conftest.py:test_config` 的路径重定位 + `ops_test` 后端)。
-2. 往 dropbox 放一个简单因子 → `uv run ops -c <config> submit -u <you> -s <date>`。
-3. `uv run ops -c <config> check -f <factor>`,观察走完 6 stage 入库。
-4. `uv run ops -c <config> list` 能查到、`info` 显示 metrics/datasources。
-5. `uv run ops -c <config> rm <factor> -y` 清干净。
+```bash
+uv run pytest -m e2e -v                # 跑全部 6 条路径 (~85s)
+uv run pytest tests/e2e/ -m e2e -k pass   # 只跑 pass 路径
+```
+
+覆盖的 6 条路径(`tests/e2e/test_e2e_pipeline.py`):
+
+| 假因子 | 触发点 | 期望结局 |
+|---|---|---|
+| 正常 reversal | 全过(e2e config 放宽业绩门槛)| → ACTIVE + rm 清干净 |
+| `generate` 抛异常 | validate gsim 崩 | → SUBMITTED (retry) |
+| delay=1 访问当日数据 | checkbias firewall 拦前视 | → REJECTED |
+| `np.random` 非确定输出 | checkpoint 断点 md5 不一致 | → REJECTED |
+| 只选 10 只股票 | compliance 持股数不足 | → REJECTED |
+| 噪声输出 | correlation 业绩不达标 | → REJECTED |
+
+**隔离**(`tests/e2e/conftest.py`):真实 gsim/cc + 隔离可写落点(dropbox/alpha_src/pnl/staging
+→ tmp)+ PG(ops_test + 唯一 library_id)+ check 报告目录重定向到 tmp(否则污染
+`docs/reports/check/`)。gsim/cc/PG 任一不可达 → skip 整组。假因子模板见 conftest `_TEMPLATES`。
+
+**为什么放宽 pass 路径的门槛**:真实 reversal 因子实测 shrp~1.2/tvr~78 达不到生产门槛
+(ret≥10/shrp>2/tvr≤60),会 correlation-reject。E2E pass 路径要验的是 **pipeline 路由到
+ACTIVE**,不是生产门槛本身(门槛校验由 correlation_checker 逻辑 + 单测覆盖),故 `relax_thresholds`
+fixture 放宽 + `corr_threshold=1.01` 恒走低相关直接通过分支。
 
 ## teardown 测试库(需要时)
 
