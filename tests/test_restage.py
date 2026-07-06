@@ -115,3 +115,29 @@ def test_restage_missing_source_skipped(test_config):
     run_restage(_args(cfg_path, factor_name="AlphaWbaiGone"))
     # 源缺失 → 不动状态
     assert _store(config).get("AlphaWbaiGone").status == FactorStatus.ACTIVE
+
+
+def test_restage_batch_respects_author(test_config):
+    """批量 -u 路径:只召回指定作者的因子,不误动其他作者。"""
+    from ops.services.restage.restage import run_restage
+    cfg_path, config = test_config
+    # 混入多作者因子:wbai 2 个 ACTIVE,mhe 1 个 ACTIVE
+    _seed_active(config, "AlphaWbaiA", author="wbai")
+    _seed_active(config, "AlphaWbaiB", author="wbai")
+    _seed_active(config, "AlphaMheX", author="mhe")
+
+    # restage -u wbai
+    run_restage(_args(cfg_path, user="wbai", status="active"))
+
+    # wbai 的两个应被召回 → SUBMITTED + 进 staging
+    assert _store(config).get("AlphaWbaiA").status == FactorStatus.SUBMITTED
+    assert _store(config).get("AlphaWbaiB").status == FactorStatus.SUBMITTED
+    assert (config.staging / "AlphaWbaiA").exists()
+    assert (config.staging / "AlphaWbaiB").exists()
+
+    # mhe 的不动:仍 ACTIVE,仍在 alpha_src
+    rec_mhe = _store(config).get("AlphaMheX")
+    assert rec_mhe.status == FactorStatus.ACTIVE
+    assert (config.alpha_src / "AlphaMheX").exists()
+    assert not (config.staging / "AlphaMheX").exists()
+

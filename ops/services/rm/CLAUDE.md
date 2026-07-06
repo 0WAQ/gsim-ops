@@ -28,3 +28,7 @@
 | 适用状态 | 已入库(ACTIVE/REJECTED 等) | SUBMITTED(`--force` + CHECKING) |
 | 删除范围 | src/pnl/dump/feature + state + derived 全删 | staging 目录 + state record(无产物可删) |
 | 因子曾入库 | 是 | 否(从未 ACTIVE) |
+
+---
+
+Tests: `tests/test_lifecycle_cmds.py` (hard deletion of all five artifact dirs + state + derived row).

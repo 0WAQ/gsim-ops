@@ -49,3 +49,7 @@
 ## 并发安全
 
 每个因子操作包裹在 `factor_lock`。被占用则跳过(warn + locked 计数)。
+
+---
+
+Tests: `tests/test_lifecycle_cmds.py` (correlation-rejected approval, batch -u filters, non-correlation-reject skip).

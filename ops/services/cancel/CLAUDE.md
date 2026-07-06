@@ -41,3 +41,7 @@ SUBMITTED 因子按定义没有这些产物;CHECKING 残留若有 dump,留给后
 先删 staging 再删 state record — 崩在中间留下 orphan state(SUBMITTED、无文件)。
 reconcile 已下线,不再自动清理;但 `ops check` 按 staging 目录扫描,该 orphan 不影响后续流程,
 必要时人工 `ops rm` / 后续 `ops doctor` 处理。
+
+---
+
+Tests: `tests/test_lifecycle_cmds.py` (SUBMITTED/--force CHECKING deletion, batch -u filters).

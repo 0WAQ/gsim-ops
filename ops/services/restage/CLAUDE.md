@@ -35,3 +35,7 @@
 先 move 再 transition — 崩在中间(src 已离开 alpha_src、state 未翻）留下 orphan。reconcile
 已下线;此类残留不自动修复,必要时人工 `ops rm` / 后续 `ops doctor`。因子若已进 staging,
 下次 `ops check` 会照常扫到并重跑。
+
+---
+
+Tests: `tests/test_restage.py` (ACTIVE/REJECTED recall, --purge, unsupported status/missing source skip).

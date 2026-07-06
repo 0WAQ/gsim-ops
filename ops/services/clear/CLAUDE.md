@@ -40,3 +40,7 @@ XML 异常 / py syntax error),staging 目录已就位但 state 没写入 → 孤
 ## 跨机一致性
 
 staging 在 JFS 共享挂载点,任意一台 ops 节点 clear 一次,所有节点立即看到。
+
+---
+
+Tests: `tests/test_lifecycle_cmds.py` (orphan-only deletion, batch -u filters by inferred author).

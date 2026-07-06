@@ -84,3 +84,7 @@ orphan staging。`_build_npy_index` 在 batch 入口扫一次,传给每个 `pars
 ## Backfill (`services/backfill/backfill.py`)
 
 One-shot for legacy factors in `alpha_src/` (originally 2194, now 2551 in prod) — builds the npy_index once and reuses it across all `parse_factor()` calls (the optional `npy_index` param avoids 2551 redundant filesystem walks). Skips records that already exist in state.
+
+---
+
+Tests: `tests/test_submit.py` (new/overwrite/skip, parse failures, staging rollback).
