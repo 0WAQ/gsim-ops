@@ -190,7 +190,7 @@ skip,e2e 排除。
 | 项 | 内容 | 阻塞点 |
 |---|---|---|
 | ~~**Wave 1 回退决断**~~ | **已执行(见下方 Wave 1 章节,F1-F6)**:删除路线 | ⚠ 密钥轮换仍未完成(git 历史),见 F1 |
-| **Wave 2 僵尸拆除** | list 改纯 PG 判据删 scan、删 derived 层、删 health | 依赖 list 判据切换在生产验证 |
+| ~~**Wave 2 僵尸拆除**~~ | **已执行(见下方 Wave 2 章节,V1-V4)** | ⚠ 生产验证 ops list/info + 手动跑 migrate_drop_derived.sql + JSON 消费方适配 |
 | **I2 测试基建** | per-schema 隔离 + info 种子行 + 契约测试补齐(含 R1 的行为测试) | 需要可达的 ops_test PG |
 | 死 config 键清理 | recycle/thres/stats/max_workers/authors/notification/users 等 | 触碰 Config 必填键集,与 G(Config 治理)一起做 |
 | bcorr.cpp 归属 | ops 仓里的 C++ 源与 gsim 部署二进制的关系 | 需要作者确认 |
