@@ -34,8 +34,12 @@ class InfoStore(ABC):
         """
 
     @abstractmethod
-    def delete(self, name: str) -> None:
-        """删除因子身份信息（级联删除 state/snapshot）。"""
+    def delete(self, name: str) -> bool:
+        """删除因子身份信息（级联删除 state/snapshot）。
+
+        返回 True 表示行存在且已删除(与 StateStore.delete 契约对齐;原返回 None
+        导致 rm 的 `if delete(name):` 确认信息永不打印,full-review 第三部分 D3)。
+        """
 
     @abstractmethod
     def list(self, author: str | None = None) -> list[FactorInfo]:

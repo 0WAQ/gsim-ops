@@ -26,6 +26,7 @@ from ops.infra.config import Config
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.infra.store import default_store
 from ops.infra.info import default_info_store
+from ops.infra.snapshot import default_snapshot_store
 from ops.core.state import FactorRecord, FactorStatus
 from ops.services.rm.rm import _purge_artifacts
 from ops.utils.printer import banner, bottom, info, warn, error, highlight
@@ -70,10 +71,11 @@ def _locate_source(rec: FactorRecord, config: Config) -> Path | None:
 
 def _resolve_targets(args, store, info_store, config: Config) -> list[FactorRecord]:
     name: str | None = args.factor_name
-    status_enum = FactorStatus(args.status)
 
-    if status_enum not in _SUPPORTED_STATUSES:
-        error(f"  ✘ --status 仅支持: {', '.join(s.value for s in _SUPPORTED_STATUSES)}")
+    # 与 approve/cancel/clear 对齐:name 与 -u 互斥(原先静默忽略 -u,是
+    # clone-and-edit 漂移;full-review 第二部分 §3.4)。
+    if name and args.user:
+        error("  ✘ factor_name 与 -u 互斥")
         return []
 
     if name:
@@ -86,8 +88,15 @@ def _resolve_targets(args, store, info_store, config: Config) -> list[FactorReco
             return []
         return [rec]
 
+    # 批量模式守卫:必须显式给 -u 和/或 -s。--status 的 argparse 默认值为 None,
+    # 否则本守卫永远不触发、裸 `ops restage` 会解析出全库 ACTIVE 因子。
     if not args.user and not args.status:
-        error("  ✘ 必须指定 factor_name 或 -u / -s")
+        error("  ✘ 批量模式必须指定 -u 和/或 -s(裸 restage 意味着召回全库,拒绝)")
+        return []
+
+    status_enum = FactorStatus(args.status) if args.status else FactorStatus.ACTIVE
+    if status_enum not in _SUPPORTED_STATUSES:
+        error(f"  ✘ --status 仅支持: {', '.join(s.value for s in _SUPPORTED_STATUSES)}")
         return []
 
     # 批量模式：先从 info 获取符合 author 条件的 name 集合
@@ -130,7 +139,8 @@ def _print_plan(targets: list[FactorRecord],
         info("  (默认保留 alpha_dump / alpha_feature / alpha_pnl)")
 
 
-def _restage_one(rec: FactorRecord, src: Path, config: Config, store, purge: bool) -> None:
+def _restage_one(rec: FactorRecord, src: Path, config: Config, store,
+                 snapshot_store, purge: bool) -> None:
     name = rec.name
     dst = config.staging / name
 
@@ -170,6 +180,15 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
                 info(f"    ✔ 已删除 alpha_pnl/{name}")
 
     store.transition(name, FactorStatus.SUBMITTED)
+
+    # 离库 → 旧快照失效。快照语义是"入库事件的不可变快照",re-check 通过后 archive
+    # 会写新快照;不删则 insert 撞 name UNIQUE 被吞,反查/报告永远停在旧代码的指标
+    # (full-review P0-1)。删失败不阻断(archive 侧有 stale 自愈兜底)。
+    try:
+        snapshot_store.delete(name)
+    except Exception as e:
+        warn(f"    ⚠ 删除旧 snapshot 失败(archive 时会自愈): {e}")
+
     info(f"  ✔ {name} {prev_status} → submitted")
 
 
@@ -177,6 +196,7 @@ def run_restage(args) -> None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
     info_store = default_info_store(config)
+    snapshot_store = default_snapshot_store(config)
 
     targets = _resolve_targets(args, store, info_store, config)
     if not targets:
@@ -209,7 +229,8 @@ def run_restage(args) -> None:
     for rec in runnable:
         try:
             with factor_lock(rec.name, config):
-                _restage_one(rec, sources[rec.name], config, store, purge=args.purge)
+                _restage_one(rec, sources[rec.name], config, store,
+                             snapshot_store, purge=args.purge)
                 ok += 1
         except FactorLocked:
             warn(f"  ⚠ {rec.name} 被另一个进程占用,跳过")

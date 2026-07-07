@@ -25,7 +25,6 @@ from ops.core.state import FactorRecord, FactorStatus, CheckRecord
 from ops.core.alpha.results.compliance import *
 from ops.core.alpha.results.correlation import *
 from ops.core.alpha.results.checkpoint import *
-from ops.core.alpha.results.checkbias import *
 
 # Imported AFTER the `results.*` star imports so its Status doesn't get
 # shadowed by the stub Status enum in core/alpha/results/base.py.
@@ -54,7 +53,6 @@ class CheckerPipeline:
                  users: list[str] | None,
                  config_path: Path,
                  factor: str | None = None,
-                 retry: bool = False,
                  checkers: dict[str, "Checker"] | None = None):
 
         self.config = Config.load(config_path)
@@ -65,7 +63,6 @@ class CheckerPipeline:
         self.config.alpha_pnl.mkdir(exist_ok=True)
         self.config.pnl_automated.mkdir(parents=True, exist_ok=True)
         self.config.pnl_manual.mkdir(parents=True, exist_ok=True)
-        self.retry = retry
 
         # kept for report file naming (see .report.write_check_report)
         self._user = users[0] if users else None
@@ -197,6 +194,13 @@ class CheckerPipeline:
 
         # 一次性写入 snapshot
         try:
+            # Re-archive 自愈:restage / submit --overwrite 在离库时删旧快照,但
+            # 迁移期存量 REJECTED 快照行、或删除步骤崩掉的残留仍可能在。快照语义
+            # = "本次入库事件的快照",旧行必须让位 —— 否则 insert 撞 name UNIQUE
+            # 被吞,反查/报告永远读到上一版代码的指标(full-review P0-1)。
+            if snapshot_store.get(factor.name) is not None:
+                logger.warning("stale snapshot exists, replacing factor={}", factor.name)
+                snapshot_store.delete(factor.name)
             snapshot_store.insert(FactorSnapshot(
                 name=factor.name,
                 ret=ret,
@@ -228,9 +232,14 @@ class CheckerPipeline:
             shutil.rmtree(dump_dst)
         shutil.move(factor.alpha_dir, self.config.alpha_dump)
 
+        # alpha_pnl/<name> 是单文件(根 CLAUDE.md 明文警告的 Errno 20 反模式):
+        # restage 保留 pnl → re-archive 时此处必有旧文件,rmtree 对文件抛
+        # NotADirectoryError(full-review 第一部分 1.2)。目录形态只可能是远古残留。
         pnl_dst = self.config.alpha_pnl / factor.name
-        if pnl_dst.exists():
+        if pnl_dst.is_dir():
             shutil.rmtree(pnl_dst)
+        elif pnl_dst.exists():
+            pnl_dst.unlink()
         shutil.move(factor.pnl_file, pnl_dst)
 
         # 按因子来源 (discovery_method) 把 pnl 额外分流一份到 pnl_automated / pnl_manual。
@@ -582,13 +591,11 @@ def run_check(args):
     users: list[str] | None = [args.user] if args.user else None
     config_path: Path = args.config_path
     factor: str | None = args.factor_name
-    retry: bool = getattr(args, "retry", False)
 
     pipeline = CheckerPipeline(
         users=users,
         config_path=config_path,
         factor=factor,
-        retry=retry,
     )
     pipeline.run()
 

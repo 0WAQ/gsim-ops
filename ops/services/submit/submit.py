@@ -7,6 +7,7 @@ from ops.utils.func import date_range
 from ops.utils.printer import info, warn, error, highlight, banner, bottom, progress
 from ops.infra.store import default_store, StateStore
 from ops.infra.info import default_info_store, FactorInfo
+from ops.infra.snapshot import default_snapshot_store
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.core.state import FactorRecord, FactorStatus
 from ops.services.list.datasource import _build_npy_index
@@ -139,6 +140,12 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
         store.transition(meta.name, FactorStatus.SUBMITTED,
                          submitted_at=submitted_at,
                          version=new_version)
+        # 覆盖提交 = 旧入库快照失效(新代码 re-check 通过后 archive 写新快照)。
+        # 不删则 insert 撞 name UNIQUE 被吞,快照永远停在旧代码(full-review P0-1)。
+        try:
+            default_snapshot_store(config).delete(meta.name)
+        except Exception:
+            warn(f"  ⚠  {meta.name} 旧 snapshot 删除失败(archive 时会自愈)")
         info(f"  ✔  {meta.name} → submitted (version={new_version},覆盖新代码)")
 
     if meta.author and meta.author != submitted_by:

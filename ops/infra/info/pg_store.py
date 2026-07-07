@@ -59,9 +59,10 @@ class PostgresInfoStore(InfoStore):
                 (info.name, info.author, info.discovery_method, info.created_at or datetime.now()),
             )
 
-    def delete(self, name: str) -> None:
+    def delete(self, name: str) -> bool:
         with self.pool.connection() as conn:
-            conn.execute("DELETE FROM factor_info WHERE name = %s", (name,))
+            cur = conn.execute("DELETE FROM factor_info WHERE name = %s", (name,))
+            return cur.rowcount > 0
 
     def list(self, author: str | None = None) -> list[FactorInfo]:
         with self.pool.connection() as conn:

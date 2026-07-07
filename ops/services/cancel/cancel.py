@@ -50,6 +50,14 @@ def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[
             error(f"  ✘ {name} 状态为 {rec.status.value},cancel 仅支持 {hint}"
                   f"{' (CHECKING 需 --force)' if rec.status == FactorStatus.CHECKING else ''}")
             return [], []
+        if rec.entered_at:
+            # 曾入库因子被 restage 召回后也是 SUBMITTED,但源码唯一副本在 staging
+            # (restage 是 move 不是 copy)。cancel 的 rmtree 会毁掉唯一源码
+            # (full-review 第一部分 1.2 / 第三部分 §3.1:"SUBMITTED(新)"与
+            # "SUBMITTED(曾入库)"是被压成一个状态的两个状态,entered_at 即判据)。
+            error(f"  ✘ {name} 曾入库(entered_at={rec.entered_at}),staging 里可能是"
+                  f"唯一源码副本,拒绝 cancel;要彻底删除用 ops rm,要重新入库跑 ops check")
+            return [], []
         return [rec], []
 
     if not args.user:
@@ -69,10 +77,13 @@ def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[
     targets: list[FactorRecord] = []
     skipped: list[tuple[FactorRecord, str]] = []
     for r in records:
-        if r.status in eligible:
-            targets.append(r)
-        else:
+        if r.status not in eligible:
             skipped.append((r, f"status={r.status.value}"))
+        elif r.entered_at:
+            # 曾入库(restage 召回态):staging 可能是唯一源码,批量里静默跳过并说明
+            skipped.append((r, "曾入库,staging 或为唯一源码,用 rm/check"))
+        else:
+            targets.append(r)
     return targets, skipped
 
 
@@ -99,7 +110,7 @@ def _print_plan(targets: list[FactorRecord],
         highlight("  --force: 同时允许 CHECKING(用于清理崩溃 / 中断的 check 残留)")
 
 
-def _cancel_one(rec: FactorRecord, config: Config, store) -> None:
+def _cancel_one(rec: FactorRecord, config: Config, store, info_store) -> None:
     name = rec.name
     staging_dir = config.staging / name
 
@@ -116,6 +127,13 @@ def _cancel_one(rec: FactorRecord, config: Config, store) -> None:
         info(f"    ✔ 已删除 state record {name}")
     else:
         warn(f"    ⚠ state record {name} 已不存在")
+
+    # FK 级联方向是 info→state,删 state 不会带走 info:不删则每次 cancel 泄漏一行
+    # 孤儿 factor_info,且任何命令都够不到它(full-review P0-6 同族)。resolve 阶段的
+    # entered_at 守卫保证走到这里的因子从未入库,身份行可以安全移除;重新 submit 会
+    # 重建 info。
+    if info_store.delete(name):
+        info(f"    ✔ 已删除 factor_info {name}")
 
 
 def run_cancel(args) -> None:
@@ -147,7 +165,7 @@ def run_cancel(args) -> None:
     for rec in targets:
         try:
             with factor_lock(rec.name, config):
-                _cancel_one(rec, config, store)
+                _cancel_one(rec, config, store, info_store)
                 ok += 1
         except FactorLocked:
             warn(f"  ⚠ {rec.name} 被另一个进程占用(check 正在运行?),跳过")
