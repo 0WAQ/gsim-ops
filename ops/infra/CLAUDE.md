@@ -8,25 +8,23 @@
 
 Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables with `OPS_` prefix (e.g. `OPS_GSIM_HOME` → `gsim_home`).
 
-Key attributes: all `path.*` fields as `Path`, `compliance`/`correlation`/`checkpoint` dicts, `sync_remote`, `library_id`, S3 credentials.
+Key attributes: all `path.*` fields as `Path`, `compliance`/`correlation`/`checkpoint` dicts, `library_id`。
 
 **State backend (`state.*` in yaml)**:
-- `state.backend: json | redis | postgres` (default `json`;`config.yaml` 2026-07-04 起用 `postgres`)
-- For `postgres`: `state.postgres.{host,port,dbname,user}` + password (literal / `password_env` / `password_file`+`password_key`),复用 `_build_pg_conninfo`。真相源,factor_state 表。
-- For `redis`(回退): `state.redis.url` + password 三层 fallback。**注意 redis 仍是 JFS metadata 后端,不可停**。
-- 三层 fallback 顺序见 `config.py` 注释。`config.prod-legacy.yaml` 用 json,`config.yaml` 用 postgres(state)+ postgres(derived)。
-
-`config.prod-legacy.yaml` 是上线前的 prod (S3 sync 模型),保留作紧急回退。
+- `state.backend: postgres | json`(`config.yaml` 用 postgres)
+- `postgres`: `state.postgres.{host,port,dbname,user}` + password (literal / `password_env` / `password_file`+`password_key`),复用 `_build_pg_conninfo`。真相源,factor_state 表。
+- `json`: 单机 dev/test 后端(~/.cache/ops/lib/<lib>/factor_state.json)。**不是生产回退。**
+- redis 后端与 `config.prod-legacy.yaml` 已于 2026-07-07 (Wave 1) 删除 —— 两者自三表拆分起已不可用,是假保险(JOURNAL F1/F2)。**redis-sentinel 实例是 JFS metadata 后端,与 ops 无关,不可停。**
 
 ## Sudo Self-Elevation (`sudo.py`)
 
 JFS 集中运维模型下 `alpha_src` / `staging` / `alpha_pnl` 等都是 root-owned,wbai 直接写会 EACCES。
 
-`maybe_elevate(args)`:进程入口检测 `args.sub-command ∈ WRITE_COMMANDS` (submit/restage/check/rm/approve/cancel/clear/pack/backfill) **且** `alpha_src.st_uid == 0` → `os.execvp('sudo -E --preserve-env=OPS_* ops <argv>')` 替换自身。read-only 命令和 legacy prod (alpha_src wbai-owned) 都 no-op。
+`maybe_elevate(args)`:进程入口检测 `args.sub-command ∈ WRITE_COMMANDS` (submit/restage/check/**run**/rm/approve/cancel/clear/pack/backfill) **且** `alpha_src.st_uid == 0` → `os.execvp('sudo --preserve-env=OPS_* ops <argv>')` 替换自身。read-only 命令和 alpha_src 非 root-owned 环境都 no-op。
 
-`ensure_redis_password(args)`:wbai shell 没 `OPS_STATE_REDIS_PASSWORD` env 时,从 `config.state.redis.password_file` (默认 `/etc/juicefs/alphalib-jfs.env`) 通过 `sudo grep` 一次拿密码塞进 env,后续 `maybe_elevate` 的 sudo `--preserve-env` 透传到 root 子进程。**故意不 `os.path.exists` 检查** password_file:`/etc/juicefs/` 是 `0700 root:root`,wbai stat 不到,但 sudo 跑成 root 能读。
-
-两者都在 `ops/main.py` 入口调,顺序:`ensure_redis_password(args)` → `maybe_elevate(args)` → `args.func(args)`。
+`ensure_redis_password` 钩子随 redis state 后端一并删除(2026-07-07 Wave 1)。
+`maybe_elevate(args)` 在 `ops/main.py` 入口调用;`run` 已补进 WRITE_COMMANDS,sudo 只用
+`--preserve-env=<白名单>`(去掉了架空白名单的 `-E`)。
 
 ## Cache (`cache.py`)
 
@@ -35,7 +33,7 @@ All ops state/cache files live under `~/.cache/ops/`.
 - New layout: `~/.cache/ops/lib/<library_id>/<filename>`
 - `cache_path(library_id, filename, legacy_hash=...)` resolves path + one-shot migrates legacy files
 - `library_cache_dir(library_id)` returns the dir, ensuring it exists
-- Locks at `~/.cache/ops/locks/` — fcntl, per-machine(**仅 json/redis 回退后端用**;postgres 后端走跨机 PG advisory lock,见 `lock.py`)
+- Locks at `~/.cache/ops/locks/` — fcntl, per-machine(**仅 json dev/test 后端用**;postgres 后端走跨机 PG advisory lock,见 `lock.py`)
 - Index/metrics/datasources/bcorr **已迁 Postgres**(2026-07-04 迁 derived,2026-07-06 metrics/datasources/bcorr 再迁 `factor_snapshot`)。`cache.py` 现仅剩 json 回退后端 + `derived.json`(僵尸 index 缓存)+ locks 用;PG 后端下不再写这些缓存。
 
 ## Info (`info/`)
@@ -87,45 +85,40 @@ All ops state/cache files live under `~/.cache/ops/`.
 
 Per-factor advisory lock. Serializes all ops mutations on a single factor. **两个后端,按 `config.state_backend` 选**:
 
-- **postgres**(生产):PG session-level advisory lock (`pg_try_advisory_lock(hashtext(lib), hashtext(name))`),**跨机**。state 在共享 PG、staging 在共享 JFS,三机都能 `ops check` 同一 staging —— per-machine 文件锁挡不住跨机并发,PG advisory lock 能(PG 是三机唯一强一致存储)。用**专用连接**(非 state pool)持有整个临界区;session 级锁在**连接断开时自动释放**(机器崩溃/SIGKILL/断电),无死锁残留。
-- **json / redis / 无 conninfo**:回退 per-machine `fcntl` 文件锁 `~/.cache/ops/locks/{name}.lock`(单机 json 正确;redis-state 退役中,本就 fcntl)。
+- **postgres**(生产):PG session-level advisory lock (`pg_try_advisory_lock(hashtext('ops:factor_lock'), hashtext(name))`),**跨机**。锁键 2026-07-07 起用固定命名空间(原 `hashtext(library_id)` 会随 config 文件不同而锁不同的锁,S18);conninfo 缺失**硬错误**,不再静默降级单机锁(F4)。用**专用连接**(非 state pool)持有整个临界区;session 级锁在**连接断开时自动释放**,无死锁残留。
+- **json**(单机 dev/test):per-machine `fcntl` 文件锁 `~/.cache/ops/locks/{name}.lock`。
 
 - Non-blocking(两后端一致):`FactorLocked` raised immediately if contended (no queueing)
 - Usage: `with factor_lock(name, config): ...`(config 选后端 + 提供 conninfo)
 
 ## Store (`store/`)
 
-三个后端,通过 `state.backend` 切换。`default_store(config)` 根据 backend 返回对应实现。
+两个后端(postgres 生产 / json dev-test),通过 `state.backend` 切换。`default_store(config)` 根据 backend 返回对应实现。
 
 ### `pg_store.py` (default since 2026-07-04, 真相源)
 
 `PostgresStateStore` — 因子生命周期真相源,从 Redis 迁入。`factor_state` 表 `id SERIAL` 主键 + `name UNIQUE`(2026-07-06 去掉 library_id / author / submitted_by —— 永远单库,author 移到 factor_info)。`name` 外键 `REFERENCES factor_info(name) ON DELETE CASCADE`。`FactorRecord` 现为纯状态机(status/version/时间戳/last_fail_*/check_history),不含身份字段。原子性用 PG 事务 + `SELECT ... FOR UPDATE` 行级锁替代 Redis 的 WATCH/MULTI/EXEC(transition/append_check 锁行读改写,天然串行,无应用层重试)。时间戳列 TIMESTAMPTZ,读写边界做 ISO string ↔ 本地 tz 转换(`_ts_in`/`_ts_out`,与 Redis `_now()` 格式一致 —— naive datetime 必须打本地 tz 再入库,否则 PG 当 UTC 偏 8h)。连接池/UPSERT 范式同 `snapshot/pg_store.py`。迁移工具 `ops/tools/state_to_pg.py`(旧)+ `scripts/postgres/migrate_to_snapshot.sql`(三表迁移)。
 
-### `redis_store.py` (回退, 且仍是 JFS metadata 后端)
+### `redis_store.py` — 已删除(2026-07-07 Wave 1)
 
-`RedisStateStore` — state 2026-07-04 已迁 PG,此后 redis 仅作 state 回退。**但承载它的 Redis 实例 (`...:26380/mymaster/0` sentinel) 同时是 JuiceFS `/tank/vault/alphalib` 的 metadata 后端,进程不可停**。两种 URL scheme:
+state 2026-07-04 迁 PG 后 redis 仅名义回退;三表拆分后它读写已删字段,每次 put 必炸,
+作为回退是假保险,连同 `ensure_redis_password`、redis 依赖一并删除(JOURNAL F2)。
+**redis-sentinel 实例本身是 JFS metadata 后端,不可停 —— 删的只是 ops 侧代码。**
 
-- `redis://host:port/db` — 直连单实例(legacy / 单机部署)
-- `redis-sentinel://h1:p1,h2:p2,h3:p3/service_name/db` — Sentinel-aware,自动 failover
+### `json_store.py` (单机 dev/test 后端)
 
-Sentinel 路径构造 `redis.sentinel.Sentinel(...).master_for(service, ...)`,每次 connection 重新 resolve master。`protocol=2` 强制经典 AUTH(redis-py 8.x `from_url` 不 honor protocol=2,直接用 `redis.Redis()` ctor 避雷,见 commit fc4d8f8)。
-
-Schema:`state-meta:<lib>` / `state-index:<lib>` set / `state:<lib>:<name>` hash / `state-checks:<lib>:<name>` list。WATCH/MULTI/EXEC 做 read-modify-write,append_check 原子。
-
-### `json_store.py` (legacy fallback)
-
-`JsonStateStore` — JSON-backed state persistence with fcntl cross-process locking. 用于 `config.prod-legacy.yaml`(回退路径)。
+`JsonStateStore` — JSON-backed state persistence with fcntl cross-process locking。
+测试套件的无 PG 层用它;**不是生产回退**。
 
 - Single fcntl lock over the full read-modify-write window
 - Atomic write via tempfile + `os.replace`
 - Stale `.tmp` cleanup (> 1h) on lock acquisition
 - Methods: `get`, `list`, `upsert`, `transition`, `bulk_upsert`
 
-## S3 (`s3.py`)
+## S3 — 已删除(2026-07-07 Wave 1)
 
-Thin boto3 wrapper for `ops sync`. **JFS 上线后 (`config.yaml`) 不走 S3**,仅在 `config.prod-legacy.yaml` 路径下使用,后续整体退役。
-
-`S3Client(endpoint_url, access_key_id, secret_access_key, bucket)`. Methods: `upload`, `download`, `list_objects`, `upload_dir`, `download_dir`. ThreadPoolExecutor(8) for parallel transfers.
+`s3.py` 随 sync 栈整体退役(JOURNAL F1);boto3/tqdm 依赖同批移除。
+**遗留义务:MinIO 密钥曾入库(git 历史仍在),必须轮换。**
 
 ## Gsim Runner (`gsim/runner.py`)
 

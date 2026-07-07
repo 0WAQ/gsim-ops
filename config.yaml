@@ -109,18 +109,17 @@ mode:
   dates:
     - '20251030'
 
-# sync 段 PoC 期不启用 —— JuiceFS 直接接管了"多机共享"职责
-# 但保留 library_id 用来隔离 ~/.cache/ops/lib/ 下的 state 文件,
-# 防止和生产 alphalib(同名 parent.name=alphalib)共用 factor_state.json
+# sync 命令与 S3 栈已于 2026-07-07 退役 (Wave 1, docs/remediation/JOURNAL.md F1)。
+# 本段仅存 library_id 作 ~/.cache/ops/lib/ 命名空间键 (G-wave 时迁到顶层键)。
 sync:
   library_id: alphalib-juicefs
 
 # 因子生命周期 state 真相源 (2026-07-04 从 Redis 迁到 Postgres, 单一真相源)。
-# backend: postgres 走 factor_state 表 (与 factor_derived 同 PG 实例)。
-# 密码 fallback 同 derived: postgres.password > env OPS_DERIVED_PG_PASSWORD
-#   > password_file (key=OPS_PG_PASSWORD)。
-# 回退: backend 改回 redis 即用下方 redis 配置 (Redis 数据迁移时未删, 只读)。
-# 迁移工具: ops/tools/state_to_pg.py。Redis 降为缓存但暂不实装 (直接 PG)。
+# backend: postgres 走 factor_state 表。backend: json 为单机 dev/test 后端
+# (~/.cache/ops/lib/<lib>/factor_state.json, fcntl 锁), 不是生产回退 ——
+# 2026-07-07 Wave 1 起没有"紧急回退"路径: redis state 后端已删除 (自三表拆分起
+# 就与 FactorRecord 不兼容, 是假保险)。注意: redis-sentinel 实例本身是 JFS
+# metadata 后端, 与 ops 无关, 不可停 —— 这里删的只是 ops 侧代码与配置。
 state:
   backend: postgres
   postgres:
@@ -130,11 +129,6 @@ state:
     user: ops
     password_file: /home/wbai/gsim-ops/scripts/postgres/.env
     password_key: OPS_PG_PASSWORD
-  # --- 回退用 (backend: redis 即启用) ---
-  redis:
-    url: redis-sentinel://10.9.100.160:26380,10.9.100.150:26380,10.6.100.144:26380/mymaster/0
-    password_file: /etc/juicefs/alphalib-jfs.env
-    password_key: META_PASSWORD
 
 # 派生层 (index/metrics/datasources/bcorr) 存 Postgres (server-160 docker, host 15432),
 # 三机共享 + 可查询, 替代 per-machine ~/.cache/ops/lib/<lib>/*.json.

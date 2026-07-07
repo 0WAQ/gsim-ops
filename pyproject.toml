@@ -4,21 +4,18 @@ version = "0.1.1"
 description = "Gsim Operations Tool"
 readme = "README.md"
 requires-python = ">=3.10"
-# 2026-07-07 依赖大扫除(full-review 第三部分 §五):删除从未 import 的
-# mlflow/pandas/lxml/lxml-stubs/scp/zstandard/colorama、遮蔽 stdlib 的 py2
-# backport argparse、误入 runtime 的 setuptools/wheel,以及随死代码
-# (utils.Remote / notify.feishu_send) 一起退役的 paramiko/requests。
-# boto3/tqdm 仅 legacy sync 使用、redis 仅回退后端使用 —— 随 Wave 1 决断退役。
+# 2026-07-07 依赖大扫除(full-review 第三部分 §五 + Wave 1):Wave 0 删除从未
+# import 的 mlflow/pandas/lxml(+stubs)/scp/zstandard/colorama、argparse backport、
+# setuptools/wheel、随死代码退役的 paramiko/requests;Wave 1 (JOURNAL F1/F2) 再删
+# boto3/tqdm(随 sync 栈)与 redis(随已坏的 redis state 后端;redis-sentinel
+# 实例是 JFS metadata 后端,与 ops 依赖无关)。
 dependencies = [
-    "boto3>=1.43.16",
     "loguru>=0.7.2",
     "numpy>=2.2.6",
     "psycopg-pool>=3.3.1",
     "psycopg[binary]",
     "pyyaml>=6.0.3",
-    "redis>=8.0.0",
     "rich>=15.0.0",
-    "tqdm>=4.67.1",
     "xmltodict>=1.0.2",
 ]
 

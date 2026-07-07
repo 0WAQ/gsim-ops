@@ -22,8 +22,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `infra/info/` | `FactorInfo` dataclass + `InfoStore` ABC + `PostgresInfoStore`(factor_info 表:身份信息 author/discovery_method/created_at) |
 | `infra/snapshot/` | `FactorSnapshot` dataclass + `SnapshotStore` ABC + `PostgresSnapshotStore`(factor_snapshot 表:入库时不可变快照 metrics+datasources+index+bcorr) |
 | `infra/store/pg_store.py` | Postgres state backend (真相源 since 2026-07-04), `SELECT FOR UPDATE` + check_history JSONB;2026-07-06 去 library_id / author,`id SERIAL` 主键 + `name UNIQUE`,外键引 factor_info |
-| `infra/store/redis_store.py` | Redis state backend (回退; 实例仍是 JFS metadata 后端) |
-| `infra/store/json_store.py` | JSON state backend, fcntl cross-process lock, atomic write |
+| `infra/store/json_store.py` | JSON state backend(单机 dev/test;非生产回退), fcntl cross-process lock, atomic write |
 | `infra/query.py` | `query_factors(config, ...)` — list 读 info+state+snapshot 三表的唯一入口,返回 `FactorRow = (info, status, last_fail_stage, snapshot)`(当前三次查 + 内存按 name JOIN,TODO 单条 SQL)。health 不走此入口(直接 LibraryScanner.scan + snapshot_store.list) |
 | `infra/lock.py` | Per-factor advisory lock (`factor_lock(name, config)` / `FactorLocked`);postgres 后端跨机 PG advisory lock,json/redis 回退 fcntl |
 

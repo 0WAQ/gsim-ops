@@ -19,7 +19,6 @@ JFS 集中运维模型下 alpha_src / staging / alpha_pnl / alpha_feature
 """
 import os
 import shutil
-import subprocess
 import sys
 
 from rich.console import Console
@@ -27,11 +26,16 @@ from rich.console import Console
 _stderr = Console(stderr=True)
 
 
-# 写 alpha_src / staging / alpha_pnl / alpha_feature 的子命令
+# 写 alpha_src / staging / alpha_pnl / alpha_feature 的子命令。
+# ⚠ 手抄名单是多真相源 (full-review S16),正确形态是子命令注册时声明
+# writes=True 由此派生 —— G-wave 工件。在那之前,新增写命令必须记得改这里。
 WRITE_COMMANDS = {
     "submit",
     "restage",
     "check",
+    # run 改写 alpha_src 内 XML + gsim 写 alpha_pnl/alpha_dump,却一直缺席
+    # 本名单 → JFS 下非 root 直接 EACCES (full-review 第一部分 1.2, 2026-07-07 补)
+    "run",
     "rm",
     "approve",
     "cancel",
@@ -40,10 +44,9 @@ WRITE_COMMANDS = {
     "backfill",
 }
 
-# 这些环境变量在 sudo 提权时必须保留 (sudo 默认 strip 用户 env)
-# 没保留 OPS_STATE_REDIS_PASSWORD 会导致 redis NOAUTH
+# 这些环境变量在 sudo 提权时必须保留 (sudo 默认 strip 用户 env)。
+# (OPS_STATE_REDIS_PASSWORD 随 redis state 后端退役移除, Wave 1 F2。)
 _PRESERVE_ENV = [
-    "OPS_STATE_REDIS_PASSWORD",
     "OPS_CONFIG",
     # OPS_* prefix vars consumed by Config._resolve_vars
     "OPS_GSIM_HOME",
@@ -74,59 +77,6 @@ def _get_subcommand(args) -> str | None:
     return vars(args).get("sub-command")
 
 
-def ensure_redis_password(args) -> None:
-    """新 shell 启动时 OPS_STATE_REDIS_PASSWORD 没设的兜底:
-    sudo grep config.state.redis.password_file 一次拿密码塞进 env, 让后续
-    self-elevate 透传到 root 子进程。
-
-    跑了之后 sudo cache 命中, maybe_elevate 那次 exec sudo 就不再 prompt。
-
-    - 已是 root 时 noop (Config 自己能直接读 password_file)
-    - env 已有 password 时 noop
-    - 没配 state.backend=redis 或没有 password_file 时 noop
-    - sudo 失败 (用户取消 / 文件不存在) 静默退出, 后续步骤靠 Config / RedisStateStore
-      自己处理失败 (NOAUTH 会以正常异常 surface 出来)
-    """
-    if os.geteuid() == 0:
-        return
-    env_var = "OPS_STATE_REDIS_PASSWORD"
-    if os.environ.get(env_var):
-        return
-    config_path = getattr(args, "config_path", None)
-    if config_path is None:
-        return
-    try:
-        from ops.infra.config import Config
-        config = Config.load(config_path)
-    except Exception:
-        return
-    if getattr(config, "state_backend", "json") != "redis":
-        return
-    if getattr(config, "state_redis_password", None):
-        return  # already populated by yaml literal
-    pwd_file = getattr(config, "state_redis_password_file", None)
-    pwd_key = getattr(config, "state_redis_password_key", "META_PASSWORD")
-    env_name = getattr(config, "state_redis_password_env", env_var)
-    if not pwd_file:
-        return
-    # Do NOT os.path.exists(pwd_file) here -- /etc/juicefs/ is 0700 root:root,
-    # wbai can't stat its contents, so exists() returns False and we'd skip.
-    # Let sudo (running as root) decide whether the file is readable.
-    try:
-        result = subprocess.run(
-            ["sudo", "grep", "-oP", f"{pwd_key}=\\K.*", pwd_file],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    except Exception:
-        return
-    pwd = result.stdout.strip()
-    if pwd:
-        os.environ[env_name] = pwd
-
-
 def maybe_elevate(args) -> None:
     """提权检测 + exec sudo。
 
@@ -149,9 +99,10 @@ def maybe_elevate(args) -> None:
 
     ops_bin = shutil.which("ops") or sys.argv[0]
     env_list = ",".join(_PRESERVE_ENV)
+    # 只用 --preserve-env=<白名单>,不加 -E:-E 会保留整个用户环境,让精心
+    # 维护的白名单形同虚设 (full-review 第一部分 sudo.py:154 项, 2026-07-07 修)。
     sudo_argv = [
         "sudo",
-        "-E",
         f"--preserve-env={env_list}",
         ops_bin,
     ] + sys.argv[1:]

@@ -41,7 +41,6 @@ uv run ops status -u wbai --status submitted     # Filter by author/state
 uv run ops backfill --dry-run                    # Preview backfill on alpha_src/
 uv run ops backfill                              # Generate meta.json + ACTIVE for legacy factors
 uv run ops list                      # List factors (default config.yaml → JFS)
-uv run ops list -c config.prod-legacy.yaml  # 紧急回退到旧 prod (S3 sync 模型)
 uv run ops list --author wbai        # Filter by author
 uv run ops list --refresh            # Force rebuild index cache
 uv run ops list --format json        # JSON output
@@ -50,14 +49,6 @@ uv run ops health                    # Factor library health check
 uv run ops pack                      # Aggregate alpha_dump → alpha_feature (skip already-packed)
 uv run ops pack --force              # Rewrite all factors
 uv run ops pack --factor AlphaXxx    # Pack one factor
-uv run ops sync push                 # 两端 list+diff 增量推送 (etag 权威) + state merge
-uv run ops sync push --dry-run       # Preview transfers
-uv run ops sync push --deep          # 忽略本地 etag 缓存重算(慢)
-uv run ops sync pull                 # state merge + 拉远端新增/变更的文件(按 status 过滤)
-uv run ops sync pull --deep          # 同上,忽略本地 etag 缓存重算
-uv run ops sync status               # Quick local-vs-remote summary (no data scan)
-uv run ops sync verify               # 三个数据目录 etag 级两端校验
-uv run ops sync verify --deep        # 忽略缓存重算,捕捉缓存里 mtime/size 没动但内容已坏(慢)
 uv run ops rm AlphaXxx               # 彻底删除因子(src/pnl/dump/feature + factor_info 级联 state+snapshot,不可逆)
 uv run ops rm AlphaXxx -y            # 跳过确认
 uv run ops restage AlphaXxx          # 原代码不变,召回 staging 待重跑 check
@@ -117,9 +108,8 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `health` | Factor library health check | `ops/cli/health.py` + `ops/services/health/` |
 | `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
-| `sync` | Push/pull factor library (data + state) across servers via S3 | `ops/cli/sync.py` + `ops/services/sync/` |
 
-Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwrite`), `recheck`(改名 `restage`), `refresh`(2026-07-06 删除 —— metrics/datasources/bcorr 改为入库时不可变快照,不再支持重算;需最新表现须重跑 backtest)。
+Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwrite`), `recheck`(改名 `restage`), `sync`(2026-07-07 Wave 1 退役: S3 模型已被 JFS 取代且回退配置早已不可用), `refresh`(2026-07-06 删除 —— metrics/datasources/bcorr 改为入库时不可变快照,不再支持重算;需最新表现须重跑 backtest)。
 
 ### Design Principles
 
@@ -129,7 +119,6 @@ Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwr
 - `ops cancel` hard-deletes staging dir + state record for SUBMITTED (`--force` extends to CHECKING). No tombstone — factor never went live.
 - `ops clear` deletes staging orphans (no state record), left by `ops submit` parse failures.
 - `ops submit --overwrite` copies new code from dropbox to staging for an already-registered factor, version += 1 (default skips existing).
-- `ops sync push` is additive, never deletes remote objects.
 - Bulk operations default to dry-run; require `--apply` (or equivalent) to execute.
 - State merge prefers data preservation over precision: tied `updated_at` keeps local.
 
@@ -138,10 +127,12 @@ When adding a new command that touches files, state, or remotes: default to the 
 ### Default Config (2026-06-05 上线后)
 
 `config.yaml` (project root) 是当前 default,指向 JFS (`/tank/vault/alphalib/`) +
-redis sentinel-aware state backend。`ops xxx` 不带 `-c` 自动走它。
+Postgres state 后端。`ops xxx` 不带 `-c` 自动走它。
 
-旧的 `/mnt/storage/alphalib/` + S3 sync 模型保留为 `config.prod-legacy.yaml`,
-紧急回退用 `-c config.prod-legacy.yaml`。验稳一周后会删除 prod 数据。
+**没有"紧急回退"配置**(2026-07-07 Wave 1):`config.prod-legacy.yaml` 与 json/redis
+回退路径经审计确认早已不可用(假保险),连同 sync 栈一并删除;见
+`docs/remediation/JOURNAL.md` F1-F3。state 的 `backend: json` 是单机 dev/test 后端,
+不是生产回退。
 
 ## Key Concepts
 
@@ -199,9 +190,7 @@ AlphaXxx/
 - **colorama** - Terminal colors
 - **tqdm** - Progress bars
 - **pyyaml** - Config parsing
-- **redis** - JFS metadata 后端 + 旧 state backend (Sentinel-aware client, `ops/infra/store/redis_store.py`; state 2026-07-04 已迁 PG, redis 仅作回退 + JFS)
 - **psycopg** - Postgres client (state + info + snapshot 真相源, `ops/infra/store/pg_store.py` / `ops/infra/info/pg_store.py` / `ops/infra/snapshot/pg_store.py`)
-- **boto3** - S3 object storage (only used by legacy `ops sync`,JFS 上线后不再走主路径)
 
 ## Known Technical Debt (Deferred)
 
@@ -210,7 +199,7 @@ AlphaXxx/
 - **Debug residual**: `utils/func.py` has a `debug()` with infinite loop
 - **Feishu credentials hardcoded**: `infra/notify/feishu_send.py` — move to config/env later
 - **`core/alpha/metadata.py` has I/O**: `_modify_always()`, `save()`, `get_v2npy_files()` — extract to services/infra
-- **`ops sync` 在 JFS 上线后是 legacy fallback**: 仅对 `config.prod-legacy.yaml` 有意义,后续整体退役;`ops/services/sync/CLAUDE.md` 有 deprecation 标注
+- ~~`ops sync` legacy fallback~~ **已退役删除**(2026-07-07 Wave 1,连同 `infra/s3.py`、boto3/tqdm、`config.prod-legacy.yaml`)
 - **Postgres 三表结构 (2026-07-06, branch `feat/derived-postgres`)**: 因子数据落三张 PG 表(server-160 docker, host 15432),全部去掉 `library_id`(永远单库),`id SERIAL` 主键 + `name UNIQUE`:
   - `factor_info` — 身份信息 (author / discovery_method / created_at)。抽象层 `ops/infra/info/`。
   - `factor_state` — 生命周期状态 (status/version/时间戳/last_fail_*/check_history)。去掉了 author 和 submitted_by(移到 factor_info)。抽象层 `ops/infra/store/`。
@@ -224,11 +213,11 @@ AlphaXxx/
 完整路线图见 `.claude/plans.md`。
 
 **已完成的大事件**:
-- 2026-06-04 ops state 进 Redis (`config.juicefs.yaml` 切 Redis backend)
+- 2026-06-04 ops state 进 Redis (`config.juicefs.yaml` 切 Redis backend;2026-07-07 redis state 后端整体退役)
 - 2026-06-05 Redis Sentinel HA (3-node sentinel, 9.12s failover)
 - 2026-06-05 JFS 上线 + 默认 config 切 JFS (`config.yaml` = JFS, `config.prod-legacy.yaml` 回退)
 - 2026-07-04 Phase G: 派生层 (index/metrics/datasources/bcorr) 迁 Postgres (server-160 docker, host 15432), per-machine JSON 缓存退役; 读写数据流重构 (DerivedRecord 取代 FactorInfo god-object); **state (因子生命周期) 也迁 Postgres, PG 成唯一真相源** (state + derived 同库)。branch `feat/derived-postgres`, 部署 `scripts/postgres/`。**注意: 承载旧 state 的 Redis 同时是 JFS metadata 后端, 不可停 (停进程=挂因子库); ops 只是不再用它存 state。**
-- 2026-07-04 `factor_lock` 迁跨机 PG advisory lock (branch 同上): 原 per-machine fcntl 挡不住三机并发 check 同一因子 (state 共享 PG + staging 共享 JFS)。postgres 后端走 `pg_try_advisory_lock` (专用连接, session 级, 连接断开自动释放, 无死锁残留); json/redis 回退仍 fcntl。签名 `factor_lock(name, config)`。见 `ops/infra/lock.py` + memory [[project_factor_lock_cross_machine]]。
+- 2026-07-04 `factor_lock` 迁跨机 PG advisory lock (branch 同上): 原 per-machine fcntl 挡不住三机并发 check 同一因子 (state 共享 PG + staging 共享 JFS)。postgres 后端走 `pg_try_advisory_lock` (专用连接, session 级, 连接断开自动释放, 无死锁残留); json dev/test 后端 fcntl(2026-07-07 起 postgres 缺 conninfo 硬错误、锁键去 library_id 维,见 JOURNAL F4/F5)。签名 `factor_lock(name, config)`。见 `ops/infra/lock.py` + memory [[project_factor_lock_cross_machine]]。
 - 2026-07-04 CLI 子命令重审 (branch 同上): submit 吸收 resubmit (`--overwrite` 覆盖已入库因子, 默认跳过); recheck 改名 restage (名副其实, 只召回 staging 不跑 check); rm 改彻底硬删 + 移除 DELETED 状态/deleted_at 列 (因子要么存在要么删除, 删除不是状态); approve 正名为"数据覆盖多样性人工豁免"。见 memory [[project_cli_command_redesign]]。
 - 2026-07-06 Postgres 双表 → 三表重构 (branch 同上): `factor_derived` + 旧 `factor_state` (含 author/submitted_by) 拆成 `factor_info` (身份) + `factor_state` (纯状态) + `factor_snapshot` (入库时快照)，全部去掉 `library_id`。**metrics/datasources/bcorr 语义从"可刷新最新表现"变为"入库时不可变快照"** (`snapshot_at = entered_at`)；`ops refresh` 命令删除。新增 `ops/infra/info/` + `ops/infra/snapshot/` store 抽象 + `ops/infra/query.py` 联合读。生产库 `ops` 迁移已执行 (migrate_to_snapshot.sql + backfill_discovery_method.py): factor_info 7594 / factor_state 7594 / factor_snapshot 7485; discovery_method automated 7259 / manual 226 / NULL 109 (未入库); 迁移中清理 108 脏因子 + 2 空壳 + 补 20 hwang 孤儿 state。旧 `derived/` 层代码保留 (LibraryScanner 仍用其做 index 缓存)。
 
@@ -237,4 +226,4 @@ AlphaXxx/
 - Phase E: `.state` merge 逻辑简化(其实在 Redis 后大部分逻辑已不需要)
 - Phase F: checkpoint 落地(按设计原则放 JFS / 本地 SSD)
 - Phase G 剩余: ~~反查命令 `ops query --field/--table`~~ (已改造 `ops list --filter-by field=/tables=` 下推 SQL 吃 GIN, 未新增命令) / ~~refresh_* 从 list 独立成 ops refresh~~ (已废弃: 三表重构后 metrics/datasources/bcorr 改为入库时快照, `ops refresh` 命令删除, 不再有重算路径) / PG 密码正规化 (挪 /etc root-only + 分发 150/144) / 150/144 部署 (uv tool install 带 psycopg) / 分支合 main / 验稳后清 Redis 残留 state key (只 DEL state:*, 绝不 FLUSHDB — Redis 还扛 JFS) / 清理僵尸 derived 层 (index 缓存迁进 factor_snapshot 后可整层删) / `ops health` 命令计划删除 (待清) / **⚠ `list.py` 仍靠 `scanner.scan()` 扫盘界定因子集 (抵消 PG 迁移的严重缺陷, 应改 `factor_state.status != 'submitted'` 纯 PG 判据, 删 scan; 见 memory `project_list_still_scans_disk`)**
-- Phase C 上线后剩余: 写入重试 wrapper / sync deprecation warning / sudo NOPASSWD wrapper / MinIO key rotation / alpha_dump 退役
+- Phase C 上线后剩余: 写入重试 wrapper / ~~sync deprecation warning~~(sync 已删) / sudo NOPASSWD wrapper / **MinIO key rotation(紧急:密钥曾入库,虽已删文件但在 git 历史)** / alpha_dump 退役

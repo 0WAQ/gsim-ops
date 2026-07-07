@@ -189,8 +189,88 @@ skip,e2e 排除。
 
 | 项 | 内容 | 阻塞点 |
 |---|---|---|
-| **Wave 1 回退决断** | 删 config.prod-legacy.yaml + json/redis store + sync 栈 + fcntl 回退,或修好它们 | 运营决策:确认不再需要 S3 回退;**先轮换 S3/Feishu 密钥**(已在 git 历史) |
+| ~~**Wave 1 回退决断**~~ | **已执行(见下方 Wave 1 章节,F1-F6)**:删除路线 | ⚠ 密钥轮换仍未完成(git 历史),见 F1 |
 | **Wave 2 僵尸拆除** | list 改纯 PG 判据删 scan、删 derived 层、删 health | 依赖 list 判据切换在生产验证 |
 | **I2 测试基建** | per-schema 隔离 + info 种子行 + 契约测试补齐(含 R1 的行为测试) | 需要可达的 ops_test PG |
 | 死 config 键清理 | recycle/thres/stats/max_workers/authors/notification/users 等 | 触碰 Config 必填键集,与 G(Config 治理)一起做 |
 | bcorr.cpp 归属 | ops 仓里的 C++ 源与 gsim 部署二进制的关系 | 需要作者确认 |
+
+---
+
+# Wave 1 · 回退决断:删除假保险(2026-07-07,同分支)
+
+**决断**:按 full-review 建议选择**删除**而非修复。理由:三个"回退"路径
+(prod-legacy 配置 / redis state / json-as-rollback)经三轮审查确认**全部早已
+不可用**——修复它们等于为一个已被 JFS+PG 取代的世界重建两套存储栈,且每一套都
+需要持续维护与测试才能算"保险";而未经验证的回退不是冗余,是负债。
+
+## F1 · 删除 sync 栈 + S3 + prod-legacy 配置
+
+**删除**:`ops/services/sync/`(sync.py 546 行 + diff/merge/etag_cache + CLAUDE.md)、
+`ops/cli/sync.py`、`ops/infra/s3.py`、`config.prod-legacy.yaml`、boto3/tqdm 依赖;
+main.py 注销 sync 子命令。
+
+**为什么**:sync 只对 prod-legacy 配置有意义,而该配置在三表拆分后已不能运行
+大多数命令(query_factors 抛 NotImplementedError、info/snapshot store 抛
+ValueError);sync 自身还在推送再上一个世代的文件(metrics.json,其 merge 函数
+是空壳)。JFS 是多机共享的现役方案。
+
+**⚠ 遗留义务(不可跳过)**:`config.prod-legacy.yaml` 里的 MinIO
+access/secret key 与(已删的)feishu_send.py 里的 APP_SECRET **仍在 git 历史中**,
+删除文件≠撤销凭据,**必须在服务端轮换**。轮换前该 endpoint(公网可路由 + 明文
+HTTP)视同已泄露。
+
+## F2 · 删除 redis state 后端
+
+**删除**:`ops/infra/store/redis_store.py`、`default_store` 的 redis 分支、
+config.py 的 state.redis 解析(~35 行三层密码 fallback)、config.yaml 的
+state.redis 块、`ensure_redis_password` 钩子(sudo.py + main.py)、
+`OPS_STATE_REDIS_PASSWORD` 出 `_PRESERVE_ENV`、redis 依赖。
+
+**为什么**:三表拆分后 RedisStateStore 读写已删字段,每次 put 必 AttributeError
+——"回退"从未可用。**边界再次强调:redis-sentinel 实例是 JuiceFS metadata 后端,
+不可停;本次删除的只是 ops 侧代码/配置/依赖,对 JFS 零影响。**
+
+## F3 · json 后端正名为 dev/test
+
+**改动**:保留 `JsonStateStore`,文档从"紧急回退"改为"单机 dev/test 后端"。
+
+**为什么不删**:测试套件的无 PG 层建立在它之上(test_pure 全绿),且 I2 计划以
+同一模式补 Json info/snapshot store。它单机语义正确、有测试覆盖 —— 与另外两个
+假保险有本质区别。但它**不承诺**多机正确性,故明确"非生产回退"。
+
+## F4 · factor_lock:静默降级改硬错误
+
+**改动**:`state_backend=postgres` 但 conninfo 不可用时抛 RuntimeError,不再
+静默退回单机 fcntl;未知 backend 同样硬错误。
+
+**为什么**:静默降级 = 跨机互斥无声消失,三机并发 check 同一因子的防线在最需要
+它的时刻(配置/密码出问题)恰好失效,且无任何告警。宁可停下来让人修配置。
+
+## F5 · 锁键去 library_id 维(S18)
+
+**改动**:advisory lock 键从 `(hashtext(library_id), hashtext(name))` 改为
+`(hashtext('ops:factor_lock'), hashtext(name))` 固定命名空间。
+
+**为什么**:library_id 曾随 config 文件不同(alphalib vs alphalib-juicefs),
+两个进程锁的不是同一把锁 —— 跨机互斥在混用 config 的窗口期失效。单库世界里
+锁键不该有 library 维度。**部署注意**:新旧键不同,滚动升级期间新旧版本 ops
+互不互斥,升级时确保无 in-flight check。
+
+## F6 · sudo 顺带修复(与 F2 同文件)
+
+- `run` 补进 WRITE_COMMANDS(它改写 alpha_src XML + gsim 写 pnl/dump,一直缺席
+  → JFS 下非 root EACCES,full-review 第一部分确认的高危项);
+- sudo 去掉 `-E`(它保留整个用户环境,让 `--preserve-env=<白名单>` 形同虚设)。
+
+## Wave 1 验证
+
+- fast suite:14 passed / 0 failed(与 Wave 0 后一致);
+- 全模块 import 扫描零失败;15 个子命令 parser 正常,`ops sync` 确认消失;
+- `uv lock` 重锁,redis/boto3/tqdm 及其传递依赖移出。
+
+## Wave 1 后的世界(一句话)
+
+state 只有一个生产后端(PG)+ 一个声明过的 dev/test 后端(json);锁只有一种
+跨机语义;没有任何文档承诺不存在的回退。下一步 Wave 2(僵尸 derived 拆除 +
+list 纯 PG 判据)。

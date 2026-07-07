@@ -1,7 +1,7 @@
 """JSON 派生层后端 (回退/单机).
 
 单文件 ~/.cache/ops/lib/<lib>/derived.json,DerivedRecord 形态。作为 postgres
-的回退 (dev / 无 PG 环境 / config.prod-legacy)。不读旧的 metrics.json /
+的回退 (dev / 无 PG 环境 / config.dev/test(原 prod-legacy,该配置已删))。不读旧的 metrics.json /
 datasources.json / bcorr.json —— 那些由 ops/tools/derived_migrate.py 一次性灌进来,
 或直接 `ops list --refresh` 从 JFS 重建。
 
