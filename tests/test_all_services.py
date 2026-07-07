@@ -41,18 +41,18 @@ def test_query_factors():
     config = MockConfig()
 
     # 查询所有因子
-    rows = query_factors(config, has_index=False)
+    rows = query_factors(config)
     print(f"\n  查询到 {len(rows)} 个因子:")
     for row in rows:
         snap_info = f"ret={row.snapshot.ret:.1f}, shrp={row.snapshot.shrp:.1f}" if row.snapshot else "无 snapshot"
         print(f"    - {row.info.name}: status={row.status.value if row.status else '?'}, author={row.info.author}, {snap_info}")
 
     # 按 status 过滤
-    active_rows = query_factors(config, has_index=False, status="active")
+    active_rows = query_factors(config, status="active")
     print(f"\n  ✅ 过滤 ACTIVE 因子: {len(active_rows)} 个")
 
     # 按 author 过滤
-    user_rows = query_factors(config, has_index=False, author="wbai")
+    user_rows = query_factors(config, author="wbai")
     print(f"  ✅ 过滤 author=wbai: {len(user_rows)} 个")
 
 
@@ -99,8 +99,6 @@ def test_stores():
         fitness=0.85,
         fields={"field1": ["close", "volume"]},
         tables={"table1": ["data_a", "data_b"]},
-        has_pnl=True,
-        dump_days=250,
         delay=1,
         max_bcorr=0.65,
         max_bcorr_factor="AlphaOld123",

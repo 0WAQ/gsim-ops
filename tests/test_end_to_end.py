@@ -87,8 +87,6 @@ def test_end_to_end():
         fitness=0.78,
         fields=["close", "volume", "open"],
         tables=["ashareeodprices", "AShareMoneyFlow"],
-        has_pnl=True,
-        dump_days=250,
         delay=1,
         max_bcorr=0.68,
         max_bcorr_factor="AlphaProd123",

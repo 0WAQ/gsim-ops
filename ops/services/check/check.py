@@ -162,8 +162,8 @@ class CheckerPipeline:
         必须在 to_lib 之前调 —— datasources 依赖 factor.py_file(此时仍在 staging)。
         各组独立 try，互不阻断入库（快照缺失可运维补救，但入库不能失败）。
 
-        注意: index 组 (has_pnl/dump_days/delay) 暂时为 None，由 LibraryScanner 扫盘
-        后补全（需重新设计 scanner → snapshot 的更新路径，暂时留空）。
+        delay 从 XML 解析定死 (factor.delay)，与 metrics 同性质不可变。原 index 组的
+        has_pnl/dump_days 是可变物理事实，已从快照删除 (需实时状态走 LibraryScanner)。
         """
         snapshot_store = default_snapshot_store(self.config)
         state_store = default_store(self.config)
@@ -206,9 +206,7 @@ class CheckerPipeline:
                 fitness=fitness,
                 fields=fields,
                 tables=tables,
-                has_pnl=None,  # 由 LibraryScanner 扫盘后补全
-                dump_days=None,
-                delay=None,
+                delay=factor.delay,
                 max_bcorr=max_bcorr,
                 max_bcorr_factor=max_bcorr_factor,
                 snapshot_at=snapshot_at,

@@ -31,3 +31,4 @@
 - [Firewall 1D Instrument Vector](project_firewall_1d_instrument_vector.md) — DataFirewall 按 getData tag 白名单 (STATIC_TAGS={'ipodate'}) 排除框架级静态票维数据, 不注入 firewall; 2026-07-02 修 ipodate 误报 (否决了 ndim 一刀切)
 - [CLI Command Redesign](project_cli_command_redesign.md) — 子命令重审: submit 吸收 resubmit、recheck 改名 restage、rm 彻底硬删+移除 DELETED、approve 正名多样性豁免 已落地; status/clear 待议
 - [Factor Lock Cross-Machine](project_factor_lock_cross_machine.md) — factor_lock 从 per-machine fcntl 迁跨机 PG advisory lock; CHECKING 跨机互斥; json/redis 回退仍 fcntl
+- [List Still Scans Disk](project_list_still_scans_disk.md) — 严重待办: ops list 仍靠 scan() 扫盘界定因子集, 抵消 PG 迁移, 应改纯 PG 查询 (status != submitted)

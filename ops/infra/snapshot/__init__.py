@@ -3,7 +3,8 @@
 factor_snapshot 存储因子入库时（check 通过那一刻）的所有派生数据快照：
 - metrics: ret/shrp/mdd/tvr/fitness
 - datasources: fields/tables
-- index: has_pnl/dump_days/delay
+- delay: 入库时从 XML 解析定死（原 index 组的 has_pnl/dump_days 是可变物理事实，
+  与快照不可变语义冲突已删除；需实时状态走 LibraryScanner 扫盘）
 - bcorr: max_bcorr/max_bcorr_factor
 
 关键特性：

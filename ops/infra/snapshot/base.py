@@ -33,9 +33,9 @@ class FactorSnapshot:
     fields: list[str] | None = None
     tables: list[str] | None = None
 
-    # index 组 (入库时扫盘)
-    has_pnl: bool | None = None
-    dump_days: int | None = None
+    # index 组: delay 入库时从 XML 解析定死 (AlphaMetadata.delay), 与 metrics 同
+    # 性质不可变。has_pnl/dump_days 曾在此, 因是可变物理事实 (dump 每天涨) 与快照
+    # 不可变语义冲突已删除; 需实时物理状态走 LibraryScanner 扫盘。
     delay: int | None = None
 
     # bcorr 组 (入库时计算)
@@ -73,7 +73,6 @@ class SnapshotStore(ABC):
         *,
         field: str | None = None,
         table_glob: str | None = None,
-        has_index: bool = False,
         metrics: list[tuple[str, str, float]] | None = None,
         sort_by: str | None = None,
         limit: int | None = None,

@@ -46,7 +46,6 @@ def query_factors(
     author: str | None = None,
     field: str | None = None,
     table_glob: str | None = None,
-    has_index: bool = False,
     metrics: list[tuple[str, str, float]] | None = None,
     status: str | None = None,
     sort_by: str | None = None,
@@ -81,7 +80,6 @@ def query_factors(
     snapshots = snapshot_store.list(
         field=field,
         table_glob=table_glob,
-        has_index=has_index,
         metrics=metrics,
         sort_by=sort_by,
         limit=n,  # 暂时先下推，后面优化
@@ -91,7 +89,7 @@ def query_factors(
     result = []
     for info in infos:
         # 如果有 snapshot 过滤条件，只保留在 snapshots 里的
-        if field or table_glob or has_index or metrics:
+        if field or table_glob or metrics:
             if info.name not in snapshots:
                 continue
 

@@ -51,9 +51,9 @@ All ops state/cache files live under `~/.cache/ops/`.
 
 因子**入库时快照**存储层(2026-07-06,取代 derived 层的 metrics/datasources/bcorr 三组)。`factor_snapshot` 表。
 
-- `base.py` — `FactorSnapshot` dataclass(metrics 组 ret/shrp/mdd/tvr/fitness、datasources 组 fields/tables、index 组 has_pnl/dump_days/delay、bcorr 组 max_bcorr/max_bcorr_factor、`snapshot_at`)+ `SnapshotStore` ABC(`get` / `insert` / `delete` / `list(field/table_glob/has_index/metrics/sort_by/limit)`)
+- `base.py` — `FactorSnapshot` dataclass(metrics 组 ret/shrp/mdd/tvr/fitness、datasources 组 fields/tables、`delay`(入库时 XML 解析定死,与 metrics 同性质不可变)、bcorr 组 max_bcorr/max_bcorr_factor、`snapshot_at`)+ `SnapshotStore` ABC(`get` / `insert` / `delete` / `list(field/table_glob/metrics/sort_by/limit)`)。**注**:原 index 组的 has_pnl/dump_days 已删列(可变物理事实,与快照不可变冲突;需实时状态走 `LibraryScanner` 扫盘)。
 - **语义**:快照**不可变**——只有 `insert`(check 通过时一次性写)和 `delete`(`ops rm`),**没有 update**。`snapshot_at = factor_state.entered_at`。字段值是"入库时表现",非"最新表现";要最新须重跑 backtest。旧 `ops refresh` 重算路径已删除。
-- `pg_store.py` — `PostgresSnapshotStore`,`factor_snapshot` 表(`id SERIAL` 主键,`name UNIQUE`,外键引 factor_info)。GIN(fields/tables) 反查、ret/shrp B-tree 索引。`list(...)` 把 field/tables/has_index/metrics/sort_by/limit 拼成 WHERE/ORDER BY/LIMIT 下推 SQL(承接原 DerivedStore.get_all 的下推语义,metric 键 SQL 表达式在 `_METRIC_EXPR`)。
+- `pg_store.py` — `PostgresSnapshotStore`,`factor_snapshot` 表(`id SERIAL` 主键,`name UNIQUE`,外键引 factor_info)。GIN(fields/tables) 反查、ret/shrp B-tree 索引。`list(...)` 把 field/tables/metrics/sort_by/limit 拼成 WHERE/ORDER BY/LIMIT 下推 SQL(承接原 DerivedStore.get_all 的下推语义,metric 键 SQL 表达式在 `_METRIC_EXPR`)。has_pnl/dump_days 删列后,list 因子集改由 `LibraryScanner.scan()` 扫盘白名单界定(见 `services/list/`)。删列迁移 `scripts/postgres/migrate_drop_snapshot_index_cols.sql`。
 - `__init__.py` — `default_snapshot_store(config)`(用 `config.state_postgres_conninfo`,无 JSON 回退,永远 PG)
 - 写入方:`check` archive 阶段 `_persist_derived`(先 transition state 设 entered_at,再 insert snapshot)
 

@@ -45,8 +45,6 @@ CREATE TABLE IF NOT EXISTS factor_snapshot (
     fields JSONB,
     tables JSONB,
 
-    has_pnl BOOLEAN,
-    dump_days INT,
     delay INT,
 
     max_bcorr DOUBLE PRECISION,
@@ -90,7 +88,7 @@ class PostgresSnapshotStore(SnapshotStore):
             row = conn.execute(
                 """
                 SELECT name, ret, shrp, mdd, tvr, fitness,
-                       fields, tables, has_pnl, dump_days, delay,
+                       fields, tables, delay,
                        max_bcorr, max_bcorr_factor, snapshot_at
                 FROM factor_snapshot WHERE name = %s
                 """,
@@ -107,16 +105,16 @@ class PostgresSnapshotStore(SnapshotStore):
                 """
                 INSERT INTO factor_snapshot (
                     name, ret, shrp, mdd, tvr, fitness,
-                    fields, tables, has_pnl, dump_days, delay,
+                    fields, tables, delay,
                     max_bcorr, max_bcorr_factor, snapshot_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     snapshot.name,
                     snapshot.ret, snapshot.shrp, snapshot.mdd, snapshot.tvr, snapshot.fitness,
                     Jsonb(snapshot.fields) if snapshot.fields else None,
                     Jsonb(snapshot.tables) if snapshot.tables else None,
-                    snapshot.has_pnl, snapshot.dump_days, snapshot.delay,
+                    snapshot.delay,
                     snapshot.max_bcorr, snapshot.max_bcorr_factor,
                     _ts_in(snapshot.snapshot_at),  # 关键：转换时区
                 ),
@@ -131,7 +129,6 @@ class PostgresSnapshotStore(SnapshotStore):
         *,
         field: str | None = None,
         table_glob: str | None = None,
-        has_index: bool = False,
         metrics: list[tuple[str, str, float]] | None = None,
         sort_by: str | None = None,
         limit: int | None = None,
@@ -139,9 +136,6 @@ class PostgresSnapshotStore(SnapshotStore):
         """列出快照，支持下推过滤（复用原 DerivedStore.get_all 逻辑）。"""
         where_clauses = []
         params = []
-
-        if has_index:
-            where_clauses.append("has_pnl IS NOT NULL")
 
         if field:
             where_clauses.append("fields @> %s")
@@ -174,7 +168,7 @@ class PostgresSnapshotStore(SnapshotStore):
 
         query = f"""
             SELECT name, ret, shrp, mdd, tvr, fitness,
-                   fields, tables, has_pnl, dump_days, delay,
+                   fields, tables, delay,
                    max_bcorr, max_bcorr_factor, snapshot_at
             FROM factor_snapshot
             WHERE {where_sql}
@@ -197,10 +191,8 @@ class PostgresSnapshotStore(SnapshotStore):
             fitness=row[5],
             fields=row[6] if row[6] else None,
             tables=row[7] if row[7] else None,
-            has_pnl=row[8],
-            dump_days=row[9],
-            delay=row[10],
-            max_bcorr=row[11],
-            max_bcorr_factor=row[12],
-            snapshot_at=_ts_out(row[13]),
+            delay=row[8],
+            max_bcorr=row[9],
+            max_bcorr_factor=row[10],
+            snapshot_at=_ts_out(row[11]),
         )

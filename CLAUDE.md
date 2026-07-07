@@ -214,7 +214,7 @@ AlphaXxx/
 - **Postgres 三表结构 (2026-07-06, branch `feat/derived-postgres`)**: 因子数据落三张 PG 表(server-160 docker, host 15432),全部去掉 `library_id`(永远单库),`id SERIAL` 主键 + `name UNIQUE`:
   - `factor_info` — 身份信息 (author / discovery_method / created_at)。抽象层 `ops/infra/info/`。
   - `factor_state` — 生命周期状态 (status/version/时间戳/last_fail_*/check_history)。去掉了 author 和 submitted_by(移到 factor_info)。抽象层 `ops/infra/store/`。
-  - `factor_snapshot` — 入库时快照 (metrics + datasources + index + bcorr 四组 + snapshot_at)。抽象层 `ops/infra/snapshot/`。
+  - `factor_snapshot` — 入库时快照 (metrics + datasources + delay + bcorr + snapshot_at)。抽象层 `ops/infra/snapshot/`。(原 index 组的 has_pnl/dump_days 已删列 —— 可变物理事实与快照不可变冲突,需实时状态走 LibraryScanner 扫盘;delay 保留,入库时定死。)
   外键: `factor_state.name` / `factor_snapshot.name` 均 `REFERENCES factor_info(name) ON DELETE CASCADE`(删 info 级联删 state + snapshot)。联合读入口 `ops/infra/query.py:query_factors`(当前三次查 + 内存按 name JOIN,TODO 优化为单条 SQL LEFT JOIN)。
   - **语义变更**: metrics/datasources/bcorr 从"可 `ops refresh` 重算的最新表现"变为"入库时不可变快照"(`snapshot_at = factor_state.entered_at`);`ops refresh` 命令已删除,需最新表现须重跑 backtest。
   - **过渡状态**: 旧 `ops/infra/derived/` 层代码尚未删除,仍被 `LibraryScanner` 用作 index 缓存;metrics/datasources/bcorr 三组已被 snapshot 取代。部署见 `scripts/postgres/README.md`。
@@ -236,5 +236,5 @@ AlphaXxx/
 - Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/restage` 走 `git add/commit`(串行化复用现有 `factor_lock`,已是跨机 PG advisory lock)
 - Phase E: `.state` merge 逻辑简化(其实在 Redis 后大部分逻辑已不需要)
 - Phase F: checkpoint 落地(按设计原则放 JFS / 本地 SSD)
-- Phase G 剩余: ~~反查命令 `ops query --field/--table`~~ (已改造 `ops list --filter-by field=/tables=` 下推 SQL 吃 GIN, 未新增命令) / ~~refresh_* 从 list 独立成 ops refresh~~ (已废弃: 三表重构后 metrics/datasources/bcorr 改为入库时快照, `ops refresh` 命令删除, 不再有重算路径) / PG 密码正规化 (挪 /etc root-only + 分发 150/144) / 150/144 部署 (uv tool install 带 psycopg) / 分支合 main / 验稳后清 Redis 残留 state key (只 DEL state:*, 绝不 FLUSHDB — Redis 还扛 JFS) / 清理僵尸 derived 层 (index 缓存迁进 factor_snapshot 后可整层删) / `ops health` 命令计划删除 (待清) / `list.py` scanner.scan() 冗余调用 (待清)
+- Phase G 剩余: ~~反查命令 `ops query --field/--table`~~ (已改造 `ops list --filter-by field=/tables=` 下推 SQL 吃 GIN, 未新增命令) / ~~refresh_* 从 list 独立成 ops refresh~~ (已废弃: 三表重构后 metrics/datasources/bcorr 改为入库时快照, `ops refresh` 命令删除, 不再有重算路径) / PG 密码正规化 (挪 /etc root-only + 分发 150/144) / 150/144 部署 (uv tool install 带 psycopg) / 分支合 main / 验稳后清 Redis 残留 state key (只 DEL state:*, 绝不 FLUSHDB — Redis 还扛 JFS) / 清理僵尸 derived 层 (index 缓存迁进 factor_snapshot 后可整层删) / `ops health` 命令计划删除 (待清) / **⚠ `list.py` 仍靠 `scanner.scan()` 扫盘界定因子集 (抵消 PG 迁移的严重缺陷, 应改 `factor_state.status != 'submitted'` 纯 PG 判据, 删 scan; 见 memory `project_list_still_scans_disk`)**
 - Phase C 上线后剩余: 写入重试 wrapper / sync deprecation warning / sudo NOPASSWD wrapper / MinIO key rotation / alpha_dump 退役
