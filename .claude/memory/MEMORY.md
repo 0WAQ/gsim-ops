@@ -1,0 +1,33 @@
+- [User Profile](user_profile.md) — Junior quant engineer, Python/C++/Rust, factor ops + live trading
+- [Ops Roadmap Ideas](project_ops_roadmap_ideas.md) — Future features: quality monitoring (IC/IR), DAG orchestration, API, dashboard
+- [Reply Style](feedback_reply_style.md) — Chinese, terse, no emoji anywhere (chat / code / commits / CLI output)
+- [Commit Style](feedback_commit_style.md) — I draft commits on explicit ask; English, short, no emoji, no Co-Authored-By trailer
+- [Destructive Ops](feedback_destructive_ops.md) — Default behavior non-destructive; --force / gc / --apply for destructive paths
+- [Run It Yourself](feedback_run-it-yourself.md) — 能自己跑的本地命令直接 Bash tool 跑, 不要把命令贴给用户复制执行 (sudo/远端无凭证/push/交互 例外)
+- [Plan Mode](feedback_plan_mode.md) — Use EnterPlanMode for 3+ file changes; write durable plans into CLAUDE.md Plans section
+- [Session Management](feedback_session_management.md) — One session per goal; suggest fresh session on topic pivot or context degradation
+- [Factor Library System Design](reference_factor_library_system_design.md) — Open-source systems to study: Feast (feature registry), Dagster (pipeline), DVC (data versioning), plus supplementary references
+- [Alpha Dump Constraints](project_alpha_dump_constraints.md) — alpha_dump 小文件是 gsim 遗留; gsim 既产出又消费 dump; 消除小文件需先实现 gsim feature reader
+- [Gsim Architecture](reference_gsim_architecture.md) — gsim 回测框架目录结构、核心模块、工具链和数据缓存系统
+- [Alpha Dump to Feature Migration](project_alpha_dump_to_feature_migration.md) — alpha_dump 向 alpha_feature 迁移的背景、当前状态（2026-05-28 FeatureReader 已实现）
+- [Factor Validation Pipeline](reference_factor_validation_pipeline.md) — 因子入库检测流程（CheckBias, CheckPoint）和入库标准（年化、夏普、相关性、仓位）
+- [Factor State Machine](project_factor_state_machine.md) — 因子状态机设计:SUBMITTED/ACTIVE/REJECTED,转移规则,数据产物处理,版本控制方向
+- [Factor Command Semantics](project_factor_command_semantics.md) — submit(新因子, --overwrite 覆盖)/restage(原代码召回重跑)命令语义;resubmit 已并入 submit, recheck 已改名 restage
+- [Factor Business Context](project_factor_business_context.md) — alpha_src 权限模型、数据产物可再生性、REJECTED 多样性价值(approve)、当前无真正生产环境
+- [cc_all Data Layout](reference_cc_all_data_layout.md) — /datasvc/data/{cc, cc_2024, cc_2025, cc_all} 数据形状/快照机制/.meta 约束,因子挖掘前必读
+- [Server Topology](reference_server_topology.md) — 三地三机房物理拓扑 (本地 10.6 / 北京 10.9 / 上海中信 147), NFS owner+客户端, rawdata CSV 同步链, L2 在 160 产, JFS vs NFS 分工, 监控=人工
+- [Company Data Architecture](reference_company_data_architecture.md) — rawdata→cc→dm/feature 三层, 147→145 跨机房, owner 分工 (wbai/yifei/lhw...), .meta 双重契约 (ACL + 水位)
+- [Gsim Data Modules](reference_gsim_data_modules.md) — Dmgr/Umgr module 模板 (DataManagerMapped), NIO_MATRIX=memmap 套壳, tag 扁平 namespace 要手工 prefix, level2 read-only adapter 模式
+- [Gsim XML Config](reference_gsim_xml_config.md) — XML 骨架 (Constants/Universe/Modules), module 两种写法, niodatapath vs dataPath, niomapprivate 读写 flag, 静默 typo 坑
+- [INCIDENT: Gsim Code Drift](project_incident_gsim_code_drift.md) — **CRITICAL** 2026-06-06: 147 vs 160 gsim/ 同名源/.so 双向漂移 (alpha_node.so 6x 体积差, combo / Oputil / Universe / FeatureReader 不一致), 待上级决策, 本地不修
+- [INCIDENT: CC Data Drift](project_incident_cc_data_drift.md) — MEDIUM 2026-06-06: cc_all 160 vs 147 数据指纹比对, 91% 等价, 重点: pwang 在 160 缺 2011-2012 (487 天), Basedata/st.npy dtype 漂移, forecast 异步 build 差异 (是设计行为)
+- [INCIDENT: Interval5m Bugs](project_incident_interval5m_bugs.md) — MEDIUM 2026-06-07: Interval5m 派生字段 (pctchange/ret/vwap) 在 cc_all 全 0 (build 漏), 源码 3 处除零保护缺失 bug 致 inf/负 vwap, 待 wbai 重 build + 修代码
+- [NFS cc Migration SOP](reference_nfs_cc_migration_sop.md) — 跨 ZFS pool 替换 cc 副本 + 客户端 remount + NFSv4 idmapping; 详细 SOP 在 docs/ops/nfs-cc-migration.md
+- [INCIDENT: Redis maxclients](project_incident_redis_maxclients.md) — 2026-06-23: redis-jfs:6380 连接打满 (512 核 × juicefs 连接池, 非泄漏); ss -K 踢连接 + maxclients 50000 持久化 /etc/redis-jfs/redis.conf; 根因 (池上限/state 拆库) 待治; 诊断脚本 scripts/redis-*.sh
+- [JFS Client env-name Gotcha](project_jfs_client_env_name_gotcha.md) — 新接 JFS client 后 ops 报 redis AuthenticationError: join 写 alphalib.env, 但 config.yaml 要 alphalib-jfs.env; 接完补一份同密码文件
+- [Combo Test Pipeline](project-combo-test-pipeline.md) — combo 测试接口规范定型: QR 交 predict+models+config.<stats>.xml, ops 用最新数据代测; 占位符注入消除硬编码, 主产物固定 combo.npy, predict/backtest 逻辑分离, warmup 坑; 文档 docs/combo-*.md, 待实现 ops combo 子命令
+- [Factor Library Storage Architecture](project_factor_library_storage_architecture.md) — 存储长期方向 (2026-07-03): 三层分离, JFS 收窄不拆, Postgres 当真相源, Redis 降级缓存; 2026-07-06 双表→三表 (factor_info/state/snapshot), metrics 变入库时不可变快照, ops refresh 删除
+- [uv tool env deps](project_uv_tool_env_deps.md) — 生产 ops 走 uv tool 独立环境, 加依赖要 uv tool install --reinstall 否则 ModuleNotFoundError
+- [Firewall 1D Instrument Vector](project_firewall_1d_instrument_vector.md) — DataFirewall 按 getData tag 白名单 (STATIC_TAGS={'ipodate'}) 排除框架级静态票维数据, 不注入 firewall; 2026-07-02 修 ipodate 误报 (否决了 ndim 一刀切)
+- [CLI Command Redesign](project_cli_command_redesign.md) — 子命令重审: submit 吸收 resubmit、recheck 改名 restage、rm 彻底硬删+移除 DELETED、approve 正名多样性豁免 已落地; status/clear 待议
+- [Factor Lock Cross-Machine](project_factor_lock_cross_machine.md) — factor_lock 从 per-machine fcntl 迁跨机 PG advisory lock; CHECKING 跨机互斥; json/redis 回退仍 fcntl
