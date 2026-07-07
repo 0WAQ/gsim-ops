@@ -5,7 +5,6 @@ from psycopg_pool import ConnectionPool
 
 from .base import FactorInfo, InfoStore
 
-
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS factor_info (
     id SERIAL PRIMARY KEY,

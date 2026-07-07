@@ -1,15 +1,15 @@
 import ast
-import xmltodict
 from pathlib import Path
+
+import xmltodict
 
 from ops.core.factormeta import FactorMeta
 from ops.infra.config import Config
 from ops.services.list.datasource import (
+    _build_npy_index,
     parse_datasources,
     resolve_tables,
-    _build_npy_index,
 )
-
 
 INTRADAY_HINTS = ("Interval", "intraday", "tick", "5m", "1m", "15m", "30m")
 _GENERIC_AUTHORS = {"gsim_users", "unknown", ""}

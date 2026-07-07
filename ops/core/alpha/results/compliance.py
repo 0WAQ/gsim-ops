@@ -1,7 +1,9 @@
+
 import numpy as np
-from typing import Dict
-from .base import *
+
 from ..metadata import AlphaMetadata
+from .base import Result, Results, Status
+
 
 class CompStatus(Status):
     PASS = 1
@@ -21,7 +23,7 @@ class CompResult(Result):
 
 class CompResults(Results):
     def __init__(self):
-        self.results: Dict[AlphaMetadata, CompResult | str] = {}
+        self.results: dict[AlphaMetadata, CompResult | str] = {}
 
     def get(self, key: AlphaMetadata, default: CompResult | str | None):
         return self.results.get(key, default)

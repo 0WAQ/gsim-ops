@@ -1,15 +1,15 @@
+import fcntl
 import json
 import os
-import time
-import fcntl
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
-from .base import StateStore
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 
+from .base import StateStore
 
 STALE_TMP_AGE_SECONDS = 3600
 

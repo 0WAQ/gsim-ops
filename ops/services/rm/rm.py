@@ -13,10 +13,10 @@
 import shutil
 
 from ops.infra.config import Config
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.infra.store import default_store
 from ops.infra.info import default_info_store
-from ops.utils.printer import banner, bottom, info, error, highlight
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.store import default_store
+from ops.utils.printer import banner, bottom, error, highlight, info
 
 
 def _purge_artifacts(name: str, config: Config) -> list[str]:
@@ -52,7 +52,7 @@ def run_rm(args) -> None:
     info(f"    · alpha_pnl/{name}           (PNL)")
     info(f"    · alpha_dump/{name}/         (dump)")
     info(f"    · alpha_feature/{name}.*.npy (feature)")
-    info(f"    · factor_info + 级联 (state + snapshot)")
+    info("    · factor_info + 级联 (state + snapshot)")
 
     if not args.yes:
         ans = input("  确认彻底删除? 不可恢复 [y/N] ").strip().lower()
@@ -80,7 +80,7 @@ def run_rm(args) -> None:
 
             # factor_info (级联删除 state + snapshot)
             if default_info_store(config).delete(name):
-                info(f"  ✔ 已删除 factor_info (级联删除 state + snapshot)")
+                info("  ✔ 已删除 factor_info (级联删除 state + snapshot)")
     except FactorLocked:
         error(f"  ✘ {name} 被另一个进程占用,稍后再试")
         return

@@ -1,14 +1,13 @@
-import xmltodict
-from datetime import datetime
-from pathlib import Path
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
+from pathlib import Path
+
+import xmltodict
 
 from ops.infra.config import Config
-from ops.infra.gsim.runner import Runner, BacktestError
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.utils.printer import *
+from ops.infra.gsim.runner import BacktestError, Runner
+from ops.infra.lock import FactorLocked, factor_lock
 from ops.utils.log import logger
-from ops.core.alpha.metadata import AlphaMetadata
+from ops.utils.printer import banner, bottom, error, info, progress, warn
 
 from .find import scan_factors
 
@@ -137,9 +136,12 @@ def run_factors(args) -> None:
 
         for f in as_completed(futures):
             match f.result():
-                case "pass":   passed += 1
-                case "fail":   failed += 1
-                case "locked": locked += 1
+                case "pass":
+                    passed += 1
+                case "fail":
+                    failed += 1
+                case "locked":
+                    locked += 1
 
     banner("运行汇总")
     info(f"✔ 通过 : {passed:>4}")

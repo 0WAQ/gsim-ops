@@ -1,10 +1,10 @@
 import argparse
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
-from ops.utils.utils import LowerAction
 from ops.infra.config import get_default_config_path
 from ops.services.submit import run_submit
+from ops.utils.utils import LowerAction
 
 
 def add_submit_subparser(subparsers: argparse._SubParsersAction):

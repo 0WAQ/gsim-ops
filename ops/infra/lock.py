@@ -38,7 +38,6 @@ from pathlib import Path
 
 from ops.utils.log import logger
 
-
 LOCK_DIR = Path.home() / ".cache" / "ops" / "locks"
 
 # advisory lock 的固定 classid 命名空间(server 端 hashtext('ops:factor_lock'))。
@@ -83,11 +82,11 @@ def _pg_advisory_lock(name: str, conninfo: str):
 
     conn = psycopg.connect(conninfo, autocommit=True)
     try:
-        got = conn.execute(
+        row = conn.execute(
             "SELECT pg_try_advisory_lock(hashtext(%s), hashtext(%s))",
             (_LOCK_NAMESPACE, name),
-        ).fetchone()[0]
-        if not got:
+        ).fetchone()
+        if not (row and row[0]):
             raise FactorLocked(name)
         try:
             yield

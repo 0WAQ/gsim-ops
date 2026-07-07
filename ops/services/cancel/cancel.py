@@ -18,12 +18,12 @@
 """
 import shutil
 
-from ops.infra.config import Config
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.infra.store import default_store
-from ops.infra.info import default_info_store
 from ops.core.state import FactorRecord, FactorStatus
-from ops.utils.printer import banner, bottom, info, warn, error, highlight
+from ops.infra.config import Config
+from ops.infra.info import default_info_store
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.store import default_store
+from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 
 def _eligible_statuses(force: bool) -> set[FactorStatus]:

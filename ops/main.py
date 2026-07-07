@@ -1,20 +1,20 @@
 import argparse
 import sys
 
-from ops.cli.run import add_run_subparser
-from ops.cli.check import add_check_subparser
-from ops.cli.list import add_list_subparser
-from ops.cli.info import add_info_subparser
-from ops.cli.submit import add_submit_subparser
-from ops.cli.status import add_status_subparser
-from ops.cli.backfill import add_backfill_subparser
-from ops.cli.pack import add_pack_subparser
-from ops.cli.rm import add_rm_subparser
-from ops.cli.restage import add_restage_subparser
 from ops.cli.approve import add_approve_subparser
+from ops.cli.backfill import add_backfill_subparser
 from ops.cli.cancel import add_cancel_subparser
+from ops.cli.check import add_check_subparser
 from ops.cli.clear import add_clear_subparser
 from ops.cli.combo import add_combo_subparser
+from ops.cli.info import add_info_subparser
+from ops.cli.list import add_list_subparser
+from ops.cli.pack import add_pack_subparser
+from ops.cli.restage import add_restage_subparser
+from ops.cli.rm import add_rm_subparser
+from ops.cli.run import add_run_subparser
+from ops.cli.status import add_status_subparser
+from ops.cli.submit import add_submit_subparser
 from ops.infra.sudo import maybe_elevate
 from ops.utils.log import logger
 

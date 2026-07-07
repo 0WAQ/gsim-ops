@@ -13,14 +13,13 @@
 数据产物在 correlation 失败时已就位(check.py on_reject 保留 dump+pnl+feature),
 approve 不重跑任何阶段,只翻状态。
 """
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 from ops.infra.config import Config
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.infra.store import default_store
 from ops.infra.info import default_info_store
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.store import default_store
 from ops.infra.store.json_store import _now
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
-from ops.utils.printer import banner, bottom, info, warn, error, highlight
-
+from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 _CORRELATION = "correlation"
 

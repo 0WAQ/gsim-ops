@@ -1,10 +1,13 @@
 import ast
-import xmltodict
 from pathlib import Path
-from .base import *
-from ops.infra.config import Config
-from ops.infra.gsim.runner import Runner, BacktestError
+
+import xmltodict
+
 from ops.core.alpha.metadata import AlphaMetadata
+from ops.infra.config import Config
+from ops.infra.gsim.runner import BacktestError, Runner
+
+from .base import Checker, CheckFail, CheckSkip
 
 FIREWALL_FILE = Path(__file__).parent / "firewall.py"
 ALWAYS_GUARD = {'valid'}

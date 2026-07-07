@@ -24,7 +24,9 @@ ops = "ops.main:main"
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.411",
     "pytest>=8",
+    "ruff>=0.15.20",
 ]
 
 [tool.pytest.ini_options]
@@ -43,3 +45,14 @@ markers = [
 
 [tool.setuptools.packages.find]
 include = ["ops*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# 首批规则按 full-review 第二部分 A 挑选,对准本库实际病灶:
+#   F401/F841 死导入死变量, F403/F405 star import, E7 比较/裸 except 类,
+#   I import 排序, UP006/007/035/045 旧式 typing, B006/B008 可变默认参数。
+# 不开 pydocstyle(D)—— 与双语 docstring 约定冲突(风格守则 J10)。
+select = ["F", "E7", "I", "UP006", "UP007", "UP035", "UP045", "B006", "B008"]

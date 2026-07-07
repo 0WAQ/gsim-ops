@@ -7,7 +7,7 @@ import queue
 
 import pytest
 
-from ops.core.state import FactorStatus, FactorRecord
+from ops.core.state import FactorRecord, FactorStatus
 
 pytestmark = pytest.mark.pg
 

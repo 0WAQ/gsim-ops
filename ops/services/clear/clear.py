@@ -18,10 +18,10 @@ import shutil
 from pathlib import Path
 
 from ops.infra.config import Config
-from ops.infra.lock import factor_lock, FactorLocked
+from ops.infra.lock import FactorLocked, factor_lock
 from ops.infra.store import default_store
 from ops.services.submit.parser import _infer_author_from_dir
-from ops.utils.printer import banner, bottom, info, warn, error, highlight
+from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 
 def _scan_staging_orphans(config: Config, store) -> list[Path]:

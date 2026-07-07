@@ -1,9 +1,12 @@
-import numpy as np
 from pathlib import Path
-from .base import *
-from ops.infra.config import Config
+
+import numpy as np
+
 from ops.core.alpha.metadata import AlphaMetadata
-from ops.core.alpha.results.compliance import *
+from ops.core.alpha.results.compliance import CompResult
+from ops.infra.config import Config
+
+from .base import Checker, CheckFail, CheckSkip
 
 
 class ComplianceSkip(CheckSkip):

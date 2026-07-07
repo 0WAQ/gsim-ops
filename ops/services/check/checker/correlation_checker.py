@@ -1,10 +1,12 @@
 from pathlib import Path
 
-from .base import *
+from ops.core.alpha.metadata import AlphaMetadata
+from ops.core.alpha.results.correlation import CorrResult
+from ops.core.metrics import Metrics
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner, resolve_bcorr_pools
-from ops.core.alpha.metadata import AlphaMetadata
-from ops.core.alpha.results.correlation import *
+
+from .base import Checker, CheckFail, CheckSkip
 
 
 class CorrelationSkip(CheckSkip):

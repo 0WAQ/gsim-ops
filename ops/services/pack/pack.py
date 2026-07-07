@@ -10,16 +10,15 @@ Offset depends on each factor's `delay` (from meta.json):
 import json
 import os
 import random
-import shutil
-import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-from ops.infra.config import Config
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.utils.printer import banner, bottom, info, warn, error, highlight
-from ops.utils.log import logger
+import numpy as np
 
+from ops.infra.config import Config
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.utils.log import logger
+from ops.utils.printer import banner, bottom, error, info, warn
 
 DATES_FILE = "__universe/Dates.npy"
 INSTRUMENTS_FILE = "__universe/Instruments.npy"
@@ -93,7 +92,8 @@ def _atomic_write_memmap(target: Path, ram: np.ndarray) -> None:
         os.replace(tmp, target)
     except Exception:
         if tmp.exists():
-            try: tmp.unlink()
+            try:
+                tmp.unlink()
             except OSError as oe:
                 logger.warning("pack tmpfile cleanup failed tmp={} err={}", tmp, oe)
         raise
@@ -114,7 +114,7 @@ def verify_sample(name: str, factor_dump_dir: Path, alpha_feature: Path,
         return
     picks = random.sample(candidates, min(VERIFY_SAMPLES, len(candidates)))
 
-    mms: dict[tuple[str], np.memmap] = {}
+    mms: dict[str, np.memmap] = {}
     try:
         for date, version, src_path in picks:
             di = date_to_idx[date] + offset
@@ -258,8 +258,8 @@ def run_pack(args):
 
     # 按 user/status 过滤
     if user or status:
-        from ops.infra.store import default_store
         from ops.infra.info import default_info_store
+        from ops.infra.store import default_store
         store = default_store(config)
         info_store = default_info_store(config)
 

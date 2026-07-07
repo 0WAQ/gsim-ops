@@ -9,7 +9,6 @@ from ops.infra.info import default_info_store
 from ops.infra.snapshot import default_snapshot_store
 from ops.infra.store import default_store
 
-
 _console = Console(width=shutil.get_terminal_size((140, 50)).columns)
 
 

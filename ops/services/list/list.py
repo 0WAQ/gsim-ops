@@ -1,17 +1,16 @@
+import fnmatch
 import json
 import re
-import fnmatch
 import shutil
 
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
 from ops.core.state import FactorStatus
 from ops.infra.config import Config
-from ops.infra.query import query_factors, FactorRow
+from ops.infra.query import FactorRow, query_factors
 from ops.infra.snapshot import FactorSnapshot
-
 
 DASH = "—"
 
@@ -83,9 +82,12 @@ def print_table(rows: list[FactorRow], show_tables=False, show_fields=False):
     has_rejected = any(x.status == FactorStatus.REJECTED for x in rows)
 
     cols = list(_BASE_COLS)
-    if has_rejected: cols.append(_FAIL_COL)
-    if show_tables:  cols.append(_TABLES_COL)
-    if show_fields:  cols.append(_FIELDS_COL)
+    if has_rejected:
+        cols.append(_FAIL_COL)
+    if show_tables:
+        cols.append(_TABLES_COL)
+    if show_fields:
+        cols.append(_FIELDS_COL)
 
     table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", pad_edge=False)
     for header, justify, extras, _ in cols:

@@ -22,15 +22,14 @@ from pathlib import Path
 
 import xmltodict
 
-from ops.infra.config import Config
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.infra.store import default_store
-from ops.infra.info import default_info_store
-from ops.infra.snapshot import default_snapshot_store
 from ops.core.state import FactorRecord, FactorStatus
+from ops.infra.config import Config
+from ops.infra.info import default_info_store
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.snapshot import default_snapshot_store
+from ops.infra.store import default_store
 from ops.services.rm.rm import _purge_artifacts
-from ops.utils.printer import banner, bottom, info, warn, error, highlight
-
+from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 _SUPPORTED_STATUSES = {FactorStatus.ACTIVE, FactorStatus.REJECTED}
 
@@ -212,7 +211,7 @@ def run_restage(args) -> None:
     if missing:
         warn(f"  ⚠ {len(missing)} 个因子源缺失,将被跳过(可能需要 ops submit 重新提交)")
 
-    runnable = [r for r in targets if sources[r.name] is not None]
+    runnable = [(r, src) for r in targets if (src := sources[r.name]) is not None]
     if not runnable:
         error("  ✘ 没有可处理的因子")
         bottom()
@@ -226,10 +225,10 @@ def run_restage(args) -> None:
             return
 
     ok = fail = locked = 0
-    for rec in runnable:
+    for rec, src in runnable:
         try:
             with factor_lock(rec.name, config):
-                _restage_one(rec, sources[rec.name], config, store,
+                _restage_one(rec, src, config, store,
                              snapshot_store, purge=args.purge)
                 ok += 1
         except FactorLocked:

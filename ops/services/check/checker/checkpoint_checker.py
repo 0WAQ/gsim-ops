@@ -1,12 +1,13 @@
 import shutil
 from pathlib import Path
 
-from .base import *
-from ops.utils.func import md5sum
+from ops.core.alpha.metadata import AlphaMetadata
+from ops.core.alpha.results.checkpoint import PointResult
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner
-from ops.core.alpha.metadata import AlphaMetadata
-from ops.core.alpha.results.checkpoint import *
+from ops.utils.func import md5sum
+
+from .base import Checker, CheckFail, CheckSkip
 
 
 class CheckpointSkip(CheckSkip):

@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from ops.core.state import FactorStatus
 from ops.infra.config import Config
 from ops.infra.info import FactorInfo, default_info_store
-from ops.infra.store import default_store
 from ops.infra.snapshot import FactorSnapshot, default_snapshot_store
+from ops.infra.store import default_store
 
 
 @dataclass

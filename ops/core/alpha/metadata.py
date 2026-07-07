@@ -1,8 +1,11 @@
 import re
-import xmltodict
 from pathlib import Path
-from .key import AlphaKey
+
+import xmltodict
+
 from ops.infra.config import Config
+
+from .key import AlphaKey
 
 
 class AlphaMetadata:
@@ -53,7 +56,7 @@ class AlphaMetadata:
                         continue
                     for npy_file in sorted(month.glob("*v2.npy")):
                         npy_files.append(npy_file)
-        except Exception as e:
+        except Exception:
             ...
         return npy_files
 
@@ -63,7 +66,7 @@ class AlphaMetadata:
             last_month_dir = sorted(last_year_dir.glob("*"), reverse=True)[0]
             last_v1npy_file = sorted(last_month_dir.glob("*v1.npy"), reverse=True)[0]
             return last_v1npy_file
-        except Exception as e:
+        except Exception:
             return None
 
     def get_last_v2npy_file(self) -> Path | None:
@@ -72,5 +75,5 @@ class AlphaMetadata:
             last_month_dir = sorted(last_year_dir.glob("*"), reverse=True)[0]
             last_v2npy_file = sorted(last_month_dir.glob("*v2.npy"), reverse=True)[0]
             return last_v2npy_file
-        except Exception as e:
+        except Exception:
             return None

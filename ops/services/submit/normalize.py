@@ -18,11 +18,11 @@ The .py / .xml file basenames are NOT renamed (would break imports). A warning
 is printed if their stems don't carry the expected identifier.
 """
 
-import xmltodict
 from pathlib import Path
 
-from ops.utils.printer import info, warn
+import xmltodict
 
+from ops.utils.printer import info, warn
 
 MOD_SUFFIX = "Mod"
 

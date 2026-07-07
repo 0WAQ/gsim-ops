@@ -1,10 +1,10 @@
 import argparse
 from pathlib import Path
 
-from ops.utils.utils import LowerAction
 from ops.core.state import FactorStatus
 from ops.infra.config import get_default_config_path
 from ops.services.restage import run_restage
+from ops.utils.utils import LowerAction
 
 
 def add_restage_subparser(subparsers: argparse._SubParsersAction):

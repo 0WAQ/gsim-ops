@@ -16,7 +16,6 @@ import yaml
 
 from ops.infra.config import get_project_root
 
-
 # ---------------------------------------------------------------------------
 # Postgres 测试库连接
 # ---------------------------------------------------------------------------
@@ -305,8 +304,8 @@ def fake_checkers():
 @pytest.fixture
 def fake_metrics(monkeypatch):
     """monkeypatch Runner.run_simsummary 返回一个假 Metrics (pass 路径 archive 需要)。"""
-    from ops.core.metrics import Metrics
     import ops.services.check.check as check_mod
+    from ops.core.metrics import Metrics
 
     m = Metrics(ret=15.0, tvr=40.0, shrp=2.5, mdd=8.0, fitness=1.2)
     monkeypatch.setattr(check_mod.Runner, "run_simsummary", staticmethod(lambda *a, **k: m))

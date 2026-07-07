@@ -1,44 +1,48 @@
 import multiprocessing as mp
 import shutil
-import xmltodict
+from concurrent.futures import Future, ProcessPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 
-from ops.infra.config import Config
-from ops.infra.gsim.runner import Runner
-from ops.infra.store import default_store
-from ops.infra.info import default_info_store, FactorInfo
-from ops.infra.snapshot import default_snapshot_store, FactorSnapshot
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.services.list.datasource import (
-    parse_datasources,
-    resolve_tables,
-    _build_npy_index,
-)
-from ops.utils.printer import *
-from ops.utils.printer import _console as _printer_console
-from ops.utils.log import logger, STDERR_SINK_ID
+import xmltodict
+
 from ops.core.alpha.metadata import AlphaMetadata
 from ops.core.factormeta import FactorMeta
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
-from ops.core.alpha.results.compliance import *
-from ops.core.alpha.results.correlation import *
-from ops.core.alpha.results.checkpoint import *
-
-# Imported AFTER the `results.*` star imports so its Status doesn't get
-# shadowed by the stub Status enum in core/alpha/results/base.py.
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
+from ops.infra.config import Config
+from ops.infra.gsim.runner import Runner
+from ops.infra.info import FactorInfo, default_info_store
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.snapshot import FactorSnapshot, default_snapshot_store
+from ops.infra.store import default_store
+from ops.services.list.datasource import (
+    _build_npy_index,
+    parse_datasources,
+    resolve_tables,
+)
 from ops.utils.live_table import LiveDriver, Status, make_factor_rows
+from ops.utils.log import STDERR_SINK_ID, logger
+from ops.utils.printer import _console as _printer_console
+from ops.utils.printer import banner, bottom, error, info, warn
 
-from .xml_prepare import *
-from .report import write_check_report
-from .checker.base import *
-from .checker.validate_checker import ValidateChecker
+from .checker.base import Checker, CheckFail, CheckSkip
 from .checker.checkbias_checker import CheckbiasChecker
 from .checker.checkpoint_checker import CheckpointChecker
-from .checker.long_backtest_checker import LongBacktestChecker
 from .checker.compliance_checker import ComplianceChecker
 from .checker.correlation_checker import CorrelationChecker
+from .checker.long_backtest_checker import LongBacktestChecker
+from .checker.validate_checker import ValidateChecker
+from .report import write_check_report
+from .xml_prepare import (
+    prepare_for_archive,
+    prepare_for_checkbias,
+    prepare_for_checkpoint,
+    prepare_for_compliance,
+    prepare_for_correlation,
+    prepare_for_initial,
+    prepare_for_long_backtest,
+    prepare_for_validate,
+)
 
 # Stages whose failure is likely environmental/config — revert to SUBMITTED, leave in staging.
 _RETRYABLE_STAGES = {"validate", "long_backtest"}
@@ -245,7 +249,7 @@ class CheckerPipeline:
         # 按因子来源 (discovery_method) 把 pnl 额外分流一份到 pnl_automated / pnl_manual。
         # factor.pnl_file 此时已被 move 走,从入库后的 pnl_dst 拷。pnl 是单文件,copy2。
         bucket = {"automated": self.config.pnl_automated,
-                  "manual": self.config.pnl_manual}.get(factor.discovery_method)
+                  "manual": self.config.pnl_manual}.get(factor.discovery_method or "")
         if bucket is not None:
             bucket.mkdir(parents=True, exist_ok=True)
             shutil.copy2(pnl_dst, bucket / factor.name)

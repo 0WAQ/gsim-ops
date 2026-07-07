@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 
 
 class StateStore(ABC):

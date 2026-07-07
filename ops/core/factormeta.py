@@ -1,7 +1,6 @@
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
 import json
-
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 META_VERSION = 1
 

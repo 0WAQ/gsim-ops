@@ -1,10 +1,10 @@
 import argparse
 from pathlib import Path
 
-from ops.utils.utils import LowerAction
-from ops.infra.config import get_default_config_path
 from ops.core.state import FactorStatus
+from ops.infra.config import get_default_config_path
 from ops.services.list import run_list
+from ops.utils.utils import LowerAction
 
 
 def add_list_subparser(subparser: argparse._SubParsersAction):

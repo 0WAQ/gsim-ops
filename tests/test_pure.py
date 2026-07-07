@@ -5,9 +5,8 @@
 """
 import pytest
 
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 from ops.infra.store.json_store import JsonStateStore
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
-
 
 # ---------------------------------------------------------------------------
 # JsonStateStore

@@ -10,5 +10,7 @@ import argparse
 
 
 class LowerAction(argparse.Action):
-    def __call__(self, parser, namespace, values: str, option_string=None):
-        setattr(namespace, self.dest, values.lower())
+    def __call__(self, parser, namespace, values, option_string=None):
+        if isinstance(values, str):
+            values = values.lower()
+        setattr(namespace, self.dest, values)

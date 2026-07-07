@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from ops.infra.config import Config
 from ops.core.factormeta import FactorMeta
+from ops.infra.config import Config
 
 
 def find_factor_dir(name: str, config: Config) -> Path | None:

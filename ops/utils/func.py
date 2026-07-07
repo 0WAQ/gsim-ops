@@ -1,7 +1,7 @@
-import mmap
 import hashlib
-from pathlib import Path
+import mmap
 from datetime import datetime, timedelta
+from pathlib import Path
 
 
 def date_range(start: str, end: str):
@@ -16,5 +16,8 @@ def md5sum(file_path: str | Path) -> str | None:
         with open(file_path, "rb") as f, \
             mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
             return hashlib.md5(mm).hexdigest()
-    except:
+    except (OSError, ValueError):
+        # ValueError: mmap of a zero-length file. 原为裸 except(连
+        # KeyboardInterrupt 都吞,full-review 第二部分);None 由调用方
+        # (checkpoint_checker) 按 md5 缺失处理。
         return None

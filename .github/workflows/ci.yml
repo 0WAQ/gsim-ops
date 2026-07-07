@@ -19,5 +19,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Install
         run: uv sync --group dev
+      - name: Lint (ruff)
+        run: uv run ruff check ops tests
+      - name: Typecheck (pyright)
+        run: uv run pyright ops
       - name: Fast test suite
         run: uv run pytest -m "not slow" -q

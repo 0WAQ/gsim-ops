@@ -1,19 +1,19 @@
 import shutil
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
-from ops.infra.config import Config
-from ops.utils.func import date_range
-from ops.utils.printer import info, warn, error, highlight, banner, bottom, progress
-from ops.infra.store import default_store, StateStore
-from ops.infra.info import default_info_store, FactorInfo
-from ops.infra.snapshot import default_snapshot_store
-from ops.infra.lock import factor_lock, FactorLocked
 from ops.core.state import FactorRecord, FactorStatus
+from ops.infra.config import Config
+from ops.infra.info import FactorInfo, default_info_store
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.snapshot import default_snapshot_store
+from ops.infra.store import StateStore, default_store
 from ops.services.list.datasource import _build_npy_index
-from .parser import parse_factor
-from .normalize import normalize_factor_xml
+from ops.utils.func import date_range
+from ops.utils.printer import banner, bottom, error, info, progress, warn
 
+from .normalize import normalize_factor_xml
+from .parser import parse_factor
 
 META_FILENAME = "meta.json"
 

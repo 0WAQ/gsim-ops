@@ -13,7 +13,6 @@ Locks stay at ~/.cache/ops/locks/ — fcntl, per-machine, never synced.
 """
 from pathlib import Path
 
-
 CACHE_ROOT = Path.home() / ".cache" / "ops"
 
 

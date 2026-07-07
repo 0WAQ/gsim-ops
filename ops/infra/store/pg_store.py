@@ -21,9 +21,9 @@ from typing import Any
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
-from .base import StateStore
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 
+from .base import StateStore
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS factor_state (

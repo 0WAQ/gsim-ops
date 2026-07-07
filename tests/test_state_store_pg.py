@@ -10,7 +10,7 @@ test_library_id_isolation 随隔离模型一并删除(per-test 隔离改造为 p
 """
 import pytest
 
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 
 pytestmark = pytest.mark.pg
 

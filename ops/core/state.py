@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 
 
@@ -37,7 +37,7 @@ class FactorRecord:
     """
     name: str
     status: FactorStatus
-    updated_at: str
+    updated_at: str | None
     submitted_at: str | None = None
     entered_at: str | None = None
     rejected_at: str | None = None

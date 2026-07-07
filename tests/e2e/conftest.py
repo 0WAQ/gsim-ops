@@ -6,16 +6,13 @@ E2E 相反 —— 保留真实 gsim run_cp.py / simsummary / bcorr + 真实 /dat
 
 gsim / cc 数据不可达时,e2e_config fixture pytest.skip 整个 E2E 组。
 """
-import os
-import shutil
 import uuid
 from pathlib import Path
 
 import pytest
 import yaml
 
-from ops.infra.config import get_project_root, Config
-
+from ops.infra.config import Config, get_project_root
 
 _GSIM_RUN = Path("/usr/local/gsim/run_cp.py")
 _CC_DATA = Path("/datasvc/data/cc_2025")
@@ -128,6 +125,7 @@ def relax_thresholds(e2e_env):
     返回重载后的 Config。
     """
     import yaml as _yaml
+
     from ops.infra.config import Config as _Config
 
     cfg_path, _, _ = e2e_env

@@ -1,8 +1,9 @@
 import os
 import re
-import yaml
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
+
+import yaml
 
 
 def get_project_root() -> Path:
@@ -46,11 +47,11 @@ def get_default_config_path() -> Path:
 
 
 class Config:
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         # checker
-        self.compliance: Dict[str, Any] = config["checker"]["compliance"]
-        self.correlation: Dict[str, Any] = config["checker"]["correlation"]
-        self.checkpoint: Dict[str, Any] = config["checker"]["checkpoint"]
+        self.compliance: dict[str, Any] = config["checker"]["compliance"]
+        self.correlation: dict[str, Any] = config["checker"]["correlation"]
+        self.checkpoint: dict[str, Any] = config["checker"]["checkpoint"]
 
         # path
         self.dropbox_path = Path(config["path"]["dropbox_path"])
@@ -98,27 +99,27 @@ class Config:
         # library_id: ~/.cache/ops/lib/ 下的命名空间键。历史上住在 sync 段;
         # sync 栈已于 2026-07-07 退役 (Wave 1, JOURNAL F1),仅存此键
         # (G-wave 时迁到顶层)。
-        sync_cfg: Dict[str, Any] = config.get("sync") or {}
+        sync_cfg: dict[str, Any] = config.get("sync") or {}
         self.library_id: str = sync_cfg.get("library_id") or self.alpha_src.parent.name
 
         # state backend: postgres (生产真相源) | json (单机 dev/test)。
         # 2026-07-07 Wave 1: redis 后端删除 —— 三表拆分后它与 FactorRecord 不
         # 兼容,作为"紧急回退"是假保险 (full-review P0-2/G1)。承载它的
         # redis-sentinel 实例是 JFS metadata 后端,与 ops 无关,不受影响。
-        state_cfg: Dict[str, Any] = config.get("state") or {}
+        state_cfg: dict[str, Any] = config.get("state") or {}
         self.state_backend: str = state_cfg.get("backend") or "json"
 
         # state.postgres backend (single source of truth, migrated from redis
         # 2026-07-04). Password resolution:
         # postgres.password (literal) > password_env > password_file.
-        state_pg_cfg: Dict[str, Any] = state_cfg.get("postgres") or {}
+        state_pg_cfg: dict[str, Any] = state_cfg.get("postgres") or {}
         self.state_postgres_conninfo: str | None = self._build_pg_conninfo(state_pg_cfg)
 
         # (derived 层配置随僵尸层删除, 2026-07-07 Wave 2, JOURNAL V2:
         #  metrics/datasources/bcorr 在 factor_snapshot,index 缓存不复存在。)
 
     @staticmethod
-    def _build_pg_conninfo(pg_cfg: Dict[str, Any]) -> str | None:
+    def _build_pg_conninfo(pg_cfg: dict[str, Any]) -> str | None:
         """Assemble a libpq conninfo string from state.postgres.* config.
 
         Returns None when no host/dbname is configured (backend stays json).
@@ -158,7 +159,7 @@ class Config:
         return " ".join(parts)
 
     @staticmethod
-    def _resolve_vars(raw: Dict[str, Any]) -> Dict[str, Any]:
+    def _resolve_vars(raw: dict[str, Any]) -> dict[str, Any]:
         """Resolve ${var_name} references in config values.
 
         Variables are defined in the 'vars' block and can be overridden

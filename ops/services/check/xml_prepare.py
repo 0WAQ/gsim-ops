@@ -1,7 +1,7 @@
 import xmltodict
 
-from ops.infra.config import Config
 from ops.core.alpha.metadata import AlphaMetadata
+from ops.infra.config import Config
 
 
 def prepare_for_initial(factor: AlphaMetadata, config: Config):
@@ -82,7 +82,7 @@ def prepare_for_archive(factor: AlphaMetadata):
         factor.xml_config["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = "/tmp/alphalib/alpha_pnl"
         factor.xml_config["gsim"]["Portfolio"]["Alpha"]["@dumpAlphaDir"] = "/tmp/alphalib/alpha_dump"
         save_xml(factor)
-    except Exception as e:
+    except Exception:
         ...
 
 

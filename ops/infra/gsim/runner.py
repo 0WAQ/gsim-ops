@@ -2,9 +2,10 @@ import re
 import subprocess
 from pathlib import Path
 
-from ..config import Config
 from ops.core.metrics import Metrics
 from ops.utils.log import logger
+
+from ..config import Config
 
 
 class BacktestError(Exception):

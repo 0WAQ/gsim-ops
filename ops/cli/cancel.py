@@ -1,9 +1,9 @@
 import argparse
 from pathlib import Path
 
-from ops.utils.utils import LowerAction
 from ops.infra.config import get_default_config_path
 from ops.services.cancel import run_cancel
+from ops.utils.utils import LowerAction
 
 
 def add_cancel_subparser(subparsers: argparse._SubParsersAction):
