@@ -21,8 +21,8 @@ import shutil
 from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
 from ops.infra.info import default_info_store
-from ops.infra.lock import FactorLocked, factor_lock
 from ops.infra.store import default_store
+from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 
@@ -30,6 +30,15 @@ def _eligible_statuses(force: bool) -> set[FactorStatus]:
     if force:
         return {FactorStatus.SUBMITTED, FactorStatus.CHECKING}
     return {FactorStatus.SUBMITTED}
+
+
+def _ineligible_reason(rec: FactorRecord, force: bool) -> str | None:
+    """resolve 与锁内复验共用的资格谓词;返回 None=可 cancel,str=原因。"""
+    if rec.status not in _eligible_statuses(force):
+        return f"status={rec.status.value}"
+    if rec.entered_at:
+        return "曾入库(entered_at 非空),staging 或为唯一源码"
+    return None
 
 
 def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[tuple[FactorRecord, str]]]:
@@ -77,11 +86,9 @@ def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[
     targets: list[FactorRecord] = []
     skipped: list[tuple[FactorRecord, str]] = []
     for r in records:
-        if r.status not in eligible:
-            skipped.append((r, f"status={r.status.value}"))
-        elif r.entered_at:
-            # 曾入库(restage 召回态):staging 可能是唯一源码,批量里静默跳过并说明
-            skipped.append((r, "曾入库,staging 或为唯一源码,用 rm/check"))
+        reason = _ineligible_reason(r, args.force)
+        if reason:
+            skipped.append((r, reason))
         else:
             targets.append(r)
     return targets, skipped
@@ -110,8 +117,7 @@ def _print_plan(targets: list[FactorRecord],
         highlight("  --force: 同时允许 CHECKING(用于清理崩溃 / 中断的 check 残留)")
 
 
-def _cancel_one(rec: FactorRecord, config: Config, store, info_store) -> None:
-    name = rec.name
+def _cancel_one(name: str, config: Config, store, info_store) -> None:
     staging_dir = config.staging / name
 
     # 先删 staging,再删 state — 崩在中间留下 orphan state record(SUBMITTED、无文件)。
@@ -136,7 +142,7 @@ def _cancel_one(rec: FactorRecord, config: Config, store, info_store) -> None:
         info(f"    ✔ 已删除 factor_info {name}")
 
 
-def run_cancel(args) -> None:
+def run_cancel(args) -> BatchResult | None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
     info_store = default_info_store(config)
@@ -154,25 +160,20 @@ def run_cancel(args) -> None:
     banner(f"cancel · {len(targets)} 个因子")
     _print_plan(targets, skipped, info_store, force=args.force)
 
-    if not args.yes:
-        ans = input(f"  确认 cancel {len(targets)} 个因子? [y/N] ").strip().lower()
-        if ans not in ("y", "yes"):
-            info("  已取消")
-            bottom()
-            return
+    if not confirm_or_abort("cancel", len(targets), args.yes):
+        bottom()
+        return None
 
-    ok = fail = locked = 0
-    for rec in targets:
-        try:
-            with factor_lock(rec.name, config):
-                _cancel_one(rec, config, store, info_store)
-                ok += 1
-        except FactorLocked:
-            warn(f"  ⚠ {rec.name} 被另一个进程占用(check 正在运行?),跳过")
-            locked += 1
-        except Exception as e:
-            error(f"  ✘ {rec.name} 失败: {e}")
-            fail += 1
+    def _action(name: str) -> None:
+        # 锁内复验:确认提示挂起期间因子可能已被 check 转走 / 重新入库
+        fresh = store.get(name)
+        if fresh is None:
+            raise SkipFactor("state 记录已不存在")
+        reason = _ineligible_reason(fresh, args.force)
+        if reason:
+            raise SkipFactor(f"确认期间状态已变: {reason}")
+        _cancel_one(name, config, store, info_store)
 
-    info(f"  汇总: 成功={ok}  失败={fail}  占用={locked}  跳过={len(skipped)}")
+    result = apply_locked([r.name for r in targets], config, _action, verb="cancel")
     bottom()
+    return result

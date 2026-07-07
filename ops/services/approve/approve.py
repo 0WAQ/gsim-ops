@@ -16,9 +16,9 @@ approve 不重跑任何阶段,只翻状态。
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 from ops.infra.config import Config
 from ops.infra.info import default_info_store
-from ops.infra.lock import FactorLocked, factor_lock
 from ops.infra.store import default_store
-from ops.infra.store.json_store import _now
+from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
+from ops.utils.clock import now_iso as _now
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 _CORRELATION = "correlation"
@@ -91,13 +91,17 @@ def _print_plan(targets: list[FactorRecord],
             info(f"    · {r.name:<40}  {why}")
 
 
-def _approve_one(rec: FactorRecord, config: Config, store) -> None:
+def _approve_one(rec: FactorRecord, store) -> None:
     name = rec.name
 
     now = _now()
+    # CAS: 只允许 REJECTED → ACTIVE(FOR UPDATE 行锁内校验;expect 不符抛
+    # StateConflict,由批量骨架按'跳过'处理)。原 transition 无 from-status
+    # 守卫,任何状态都能被翻成 ACTIVE(full-review 第三部分 §3.2)。
     store.transition(
         name,
         FactorStatus.ACTIVE,
+        expect=FactorStatus.REJECTED,
         entered_at=rec.entered_at or now,
         last_fail_stage=None,
         last_fail_reason=None,
@@ -111,7 +115,7 @@ def _approve_one(rec: FactorRecord, config: Config, store) -> None:
     ))
 
 
-def run_approve(args) -> None:
+def run_approve(args) -> BatchResult | None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
     info_store = default_info_store(config)
@@ -129,26 +133,21 @@ def run_approve(args) -> None:
     banner(f"approve · {len(targets)} 个因子")
     _print_plan(targets, skipped, info_store)
 
-    if not args.yes:
-        ans = input(f"  确认 approve {len(targets)} 个因子? [y/N] ").strip().lower()
-        if ans not in ("y", "yes"):
-            info("  已取消")
-            bottom()
-            return
+    if not confirm_or_abort("approve", len(targets), args.yes):
+        bottom()
+        return None
 
-    ok = fail = locked = 0
-    for rec in targets:
-        try:
-            with factor_lock(rec.name, config):
-                _approve_one(rec, config, store)
-                info(f"  ✔ {rec.name} rejected → active")
-                ok += 1
-        except FactorLocked:
-            warn(f"  ⚠ {rec.name} 被另一个进程占用,跳过")
-            locked += 1
-        except Exception as e:
-            error(f"  ✘ {rec.name} 失败: {e}")
-            fail += 1
+    def _action(name: str) -> None:
+        # 锁内复验(TOCTOU):确认挂起期间因子可能已被 restage 召回 / rm 删除
+        fresh = store.get(name)
+        if fresh is None:
+            raise SkipFactor("state 记录已不存在")
+        if not _eligible(fresh):
+            raise SkipFactor(f"确认期间状态已变: status={fresh.status.value}, "
+                             f"fail_stage={fresh.last_fail_stage}")
+        _approve_one(fresh, store)
+        info(f"  ✔ {name} rejected → active")
 
-    info(f"  汇总: 成功={ok}  失败={fail}  占用={locked}  跳过={len(skipped)}")
+    result = apply_locked([r.name for r in targets], config, _action, verb="approve")
     bottom()
+    return result

@@ -1,5 +1,4 @@
 import shutil
-from datetime import datetime
 from pathlib import Path
 
 from ops.core.state import FactorRecord, FactorStatus
@@ -9,6 +8,7 @@ from ops.infra.lock import FactorLocked, factor_lock
 from ops.infra.snapshot import default_snapshot_store
 from ops.infra.store import StateStore, default_store
 from ops.services.list.datasource import _build_npy_index
+from ops.utils.clock import now_iso
 from ops.utils.func import date_range
 from ops.utils.printer import banner, bottom, error, info, progress, warn
 
@@ -81,7 +81,7 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
     Existing factor + overwrite=False -> "skip" (defensive; run_submit normally
                                         filters these out before copy).
     """
-    submitted_at = datetime.now().isoformat(timespec="seconds")
+    submitted_at = now_iso()
 
     py_files = sorted(staging_dir.glob("*.py"))
     xml_files = sorted(staging_dir.glob("*.xml"))

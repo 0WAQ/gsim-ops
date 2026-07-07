@@ -1,7 +1,6 @@
 import multiprocessing as mp
 import shutil
 from concurrent.futures import Future, ProcessPoolExecutor
-from datetime import datetime
 from pathlib import Path
 
 import xmltodict
@@ -20,6 +19,7 @@ from ops.services.list.datasource import (
     parse_datasources,
     resolve_tables,
 )
+from ops.utils.clock import now_iso
 from ops.utils.live_table import LiveDriver, Status, make_factor_rows
 from ops.utils.log import STDERR_SINK_ID, logger
 from ops.utils.printer import _console as _printer_console
@@ -315,7 +315,7 @@ class CheckerPipeline:
         meta_path = factor.dir / "meta.json"
         author = factor.key.user
         discovery_method = factor.discovery_method
-        submitted_at = datetime.now().isoformat(timespec="seconds")
+        submitted_at = now_iso()
         if meta_path.exists():
             try:
                 meta = FactorMeta.load(meta_path)
@@ -324,7 +324,7 @@ class CheckerPipeline:
                 submitted_at = meta.submitted_at or submitted_at
             except Exception:
                 pass
-        now = datetime.now().isoformat(timespec="seconds")
+        now = now_iso()
         info_store = default_info_store(self.config)
         info_store.upsert(FactorInfo(
             name=factor.name,
@@ -357,7 +357,7 @@ class CheckerPipeline:
     def _run_one_locked(self, factor: AlphaMetadata, q) -> str:
         store = default_store(self.config)
         self._ensure_record(factor, store)
-        check = CheckRecord(started_at=datetime.now().isoformat(timespec="seconds"))
+        check = CheckRecord(started_at=now_iso())
         store.transition(factor.name, FactorStatus.CHECKING)
 
         # Track which stage is currently running so the catch-all except clauses
@@ -417,7 +417,7 @@ class CheckerPipeline:
             metrics = Runner.run_simsummary(factor.pnl_file, self.config)
 
             # 先设置 entered_at (入库时间)，snapshot_at 依赖这个时间戳
-            now = datetime.now().isoformat(timespec="seconds")
+            now = now_iso()
             check.finished_at = now
             check.passed = True
             store.append_check(factor.name, check)
@@ -438,7 +438,7 @@ class CheckerPipeline:
                 _emit_stage_done(current_stage, Status.SKIPPED)
             logger.warning("check skipped factor={} stage={} reason={}",
                            factor.key, e.stage, str(e))
-            check.finished_at = datetime.now().isoformat(timespec="seconds")
+            check.finished_at = now_iso()
             check.passed = None
             check.failed_stage = e.stage
             check.fail_reason = str(e)
@@ -455,7 +455,7 @@ class CheckerPipeline:
                 logger.warning("check retryable failure factor={} stage={} reason={}",
                                factor.key, e.stage, str(e))
                 # Environmental/config failure — revert to SUBMITTED, keep in staging
-                check.finished_at = datetime.now().isoformat(timespec="seconds")
+                check.finished_at = now_iso()
                 check.passed = False
                 check.failed_stage = e.stage
                 check.fail_reason = str(e)
@@ -471,7 +471,7 @@ class CheckerPipeline:
                                factor.key, e.stage, str(e))
                 # Factor quality failure — REJECTED (src → alpha_src)
                 self.on_reject(factor, e)
-                now = datetime.now().isoformat(timespec="seconds")
+                now = now_iso()
                 check.finished_at = now
                 check.passed = False
                 check.failed_stage = e.stage
@@ -491,7 +491,7 @@ class CheckerPipeline:
             if current_stage:
                 _emit_stage_done(current_stage, Status.FAILED)
             logger.exception("check pipeline crashed factor={}", factor.key)
-            check.finished_at = datetime.now().isoformat(timespec="seconds")
+            check.finished_at = now_iso()
             check.passed = None
             check.fail_reason = f"unexpected: {e}"
             store.append_check(factor.name, check)

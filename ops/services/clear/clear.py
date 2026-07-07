@@ -18,8 +18,8 @@ import shutil
 from pathlib import Path
 
 from ops.infra.config import Config
-from ops.infra.lock import FactorLocked, factor_lock
 from ops.infra.store import default_store
+from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
 from ops.services.submit.parser import _infer_author_from_dir
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
@@ -91,7 +91,7 @@ def _clear_one(staging_dir: Path) -> None:
     info(f"    ✔ 已删除 staging/{staging_dir.name}/")
 
 
-def run_clear(args) -> None:
+def run_clear(args) -> BatchResult | None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
 
@@ -108,25 +108,22 @@ def run_clear(args) -> None:
     banner(f"clear · {len(targets)} 个 staging 孤儿")
     _print_plan(targets, skipped)
 
-    if not args.yes:
-        ans = input(f"  确认 clear {len(targets)} 个孤儿目录? [y/N] ").strip().lower()
-        if ans not in ("y", "yes"):
-            info("  已取消")
-            bottom()
-            return
+    if not confirm_or_abort("clear", len(targets), args.yes):
+        bottom()
+        return None
 
-    ok = fail = locked = 0
-    for d in targets:
-        try:
-            with factor_lock(d.name, config):
-                _clear_one(d)
-                ok += 1
-        except FactorLocked:
-            warn(f"  ⚠ {d.name} 被另一个进程占用,跳过")
-            locked += 1
-        except Exception as e:
-            error(f"  ✘ {d.name} 失败: {e}")
-            fail += 1
+    dirs = {d.name: d for d in targets}
 
-    info(f"  汇总: 成功={ok}  失败={fail}  占用={locked}  跳过={len(skipped)}")
+    def _action(name: str) -> None:
+        # 锁内复验(TOCTOU):确认挂起期间可能有 submit 给该目录补上了 state
+        # 记录 —— 那它就不再是孤儿,归 cancel 管
+        if store.get(name) is not None:
+            raise SkipFactor("确认期间出现 state 记录(不再是孤儿),改用 ops cancel")
+        d = dirs[name]
+        if not d.exists():
+            raise SkipFactor("目录已被外部清理")
+        _clear_one(d)
+
+    result = apply_locked(list(dirs), config, _action, verb="clear")
     bottom()
+    return result

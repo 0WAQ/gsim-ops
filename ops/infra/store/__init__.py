@@ -3,7 +3,7 @@ from pathlib import Path
 from ops.infra.cache import cache_path
 from ops.infra.config import Config
 
-from .base import StateStore
+from .base import StateConflict, StateStore
 from .json_store import JsonStateStore
 
 
@@ -39,4 +39,4 @@ def default_store(config: Config) -> StateStore:
     )
 
 
-__all__ = ["StateStore", "JsonStateStore", "default_store"]
+__all__ = ["StateConflict", "StateStore", "JsonStateStore", "default_store"]

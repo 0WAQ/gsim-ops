@@ -48,7 +48,13 @@
 
 ## 并发安全
 
-每个因子操作包裹在 `factor_lock`。被占用则跳过(warn + locked 计数)。
+每个因子操作包裹在 `factor_lock`;被占用则跳过(warn + locked 计数)。
+**2026-07-07 Wave 3**:批量骨架收敛到 `ops/services/_batch.py`(confirm / 锁循环 /
+汇总 / 失败双通道记录),并修复 TOCTOU —— 确认提示挂起期间状态可变,action 在
+**锁内重取记录复验资格**(不过则 SkipFactor 跳过);状态转移用
+`transition(expect=...)` CAS 双保险(FOR UPDATE 行锁内校验 from-status,冲突抛
+StateConflict 按跳过处理)。`run_*` 返回 `BatchResult`(done/skipped/failed/locked),
+测试可断言"正确拒绝"。行为测试见 `tests/test_batch.py`(json 后端,无需 PG)。
 
 ---
 

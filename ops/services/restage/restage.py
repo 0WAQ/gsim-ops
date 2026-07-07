@@ -25,9 +25,9 @@ import xmltodict
 from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
 from ops.infra.info import default_info_store
-from ops.infra.lock import FactorLocked, factor_lock
 from ops.infra.snapshot import default_snapshot_store
 from ops.infra.store import default_store
+from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
 from ops.services.rm.rm import _purge_artifacts
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
@@ -178,7 +178,8 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config, store,
                 pnl.unlink()
                 info(f"    ✔ 已删除 alpha_pnl/{name}")
 
-    store.transition(name, FactorStatus.SUBMITTED)
+    # CAS: 只允许从召回前状态(ACTIVE/REJECTED)翻 SUBMITTED
+    store.transition(name, FactorStatus.SUBMITTED, expect=rec.status)
 
     # 离库 → 旧快照失效。快照语义是"入库事件的不可变快照",re-check 通过后 archive
     # 会写新快照;不删则 insert 撞 name UNIQUE 被吞,反查/报告永远停在旧代码的指标
@@ -191,7 +192,7 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config, store,
     info(f"  ✔ {name} {prev_status} → submitted")
 
 
-def run_restage(args) -> None:
+def run_restage(args) -> BatchResult | None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
     info_store = default_info_store(config)
@@ -217,27 +218,26 @@ def run_restage(args) -> None:
         bottom()
         return
 
-    if not args.yes:
-        ans = input(f"  确认 restage {len(runnable)} 个因子? [y/N] ").strip().lower()
-        if ans not in ("y", "yes"):
-            info("  已取消")
-            bottom()
-            return
+    if not confirm_or_abort("restage", len(runnable), args.yes):
+        bottom()
+        return None
 
-    ok = fail = locked = 0
-    for rec, src in runnable:
-        try:
-            with factor_lock(rec.name, config):
-                _restage_one(rec, src, config, store,
-                             snapshot_store, purge=args.purge)
-                ok += 1
-        except FactorLocked:
-            warn(f"  ⚠ {rec.name} 被另一个进程占用,跳过")
-            locked += 1
-        except Exception as e:
-            error(f"  ✘ {rec.name} 失败: {e}")
-            fail += 1
+    src_by_name = {r.name: s for r, s in runnable}
 
-    skipped = len(missing)
-    info(f"  汇总: 成功={ok}  失败={fail}  占用={locked}  源缺失={skipped}")
+    def _action(name: str) -> None:
+        # 锁内复验(TOCTOU):确认挂起期间因子可能已被 check/rm/overwrite 动过
+        fresh = store.get(name)
+        if fresh is None:
+            raise SkipFactor("state 记录已不存在")
+        if fresh.status not in _SUPPORTED_STATUSES:
+            raise SkipFactor(f"确认期间状态已变: status={fresh.status.value}")
+        src = src_by_name[name]
+        if not src.exists():
+            raise SkipFactor("源目录已不存在")
+        _restage_one(fresh, src, config, store, snapshot_store, purge=args.purge)
+
+    result = apply_locked([r.name for r, _ in runnable], config, _action, verb="restage")
+    if missing:
+        info(f"  (另有 {len(missing)} 个源缺失,resolve 阶段已跳过)")
     bottom()
+    return result
