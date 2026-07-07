@@ -10,7 +10,7 @@
 
 - CHECKING 是 check 运行中的瞬态(代码中为独立状态值);reconcile 已下线,崩在半路的因子由下次 `ops check` 按 staging 目录扫到并重跑覆盖
 - 没有 DELETED 状态:一个因子要么存在(active/rejected/未来 decay 等),要么被 `ops rm` 彻底删除而不存在。删除不是一种状态。
-- DECAYING / RETIRED 暂未实现
+- DECAYING / RETIRED 已从 enum 移除(2026-07-07,曾是 DB 拒收的幽灵状态;要引入衰退生命周期时随 DB CHECK 约束一起加)
 
 ## 命令体系
 

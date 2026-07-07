@@ -6,6 +6,10 @@
 
 - 默认: `SUBMITTED`
 - `--force`: 同时允许 `CHECKING`,用于清理崩溃 / 中断的 check 残留
+- **`entered_at` 非空一律拒绝**(2026-07-07):曾入库因子被 restage 召回后也是
+  SUBMITTED,但 restage 是 move 不是 copy —— staging 里是**唯一源码副本**,cancel
+  的 rmtree 会毁掉它(full-review 第一部分 1.2)。此类因子要么 `ops rm` 彻底删,
+  要么 `ops check` 重新入库。批量模式归入 Skipped 段。
 
 ## 与 ops rm 的区别
 
@@ -26,6 +30,9 @@
 3. `_cancel_one`:
    - `shutil.rmtree(staging/<name>/)`
    - `store.delete(name)` 硬删
+   - `info_store.delete(name)`(2026-07-07:FK 级联方向是 info→state,不删则每次
+     cancel 泄漏一行孤儿 factor_info 且任何命令都够不到;entered_at 守卫保证走到
+     这里的因子从未入库,身份行可安全移除)
 
 ## 不动的产物
 

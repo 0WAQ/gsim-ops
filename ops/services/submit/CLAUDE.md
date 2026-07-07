@@ -4,7 +4,7 @@
 
 `SUBMITTED → CHECKING → ACTIVE | REJECTED`
 
-(没有 DELETED 状态:`ops rm` 彻底删除因子而非打标;DECAYING/RETIRED 暂未实现)
+(没有 DELETED 状态:`ops rm` 彻底删除因子而非打标;DECAYING/RETIRED 已于 2026-07-07 从 enum 移除)
 
 `ops cancel` / `ops clear` / `ops rm` 不是状态转移,而是把因子从生命周期里**完全移除**:
 - `ops cancel`: state 有 record (SUBMITTED / `--force` 含 CHECKING) → 删 staging + 硬删 state record(从未 ACTIVE,无产物)
@@ -29,7 +29,7 @@ staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
     │                ▼
     │            [回到 staging,等待下一次 ops check]
     ├── fail (validate/long_backtest)
-    │            → staging/ (kept in-place)            state→SUBMITTED  (retry via ops check --retry)
+    │            → staging/ (kept in-place)            state→SUBMITTED  (留在 staging,下次 ops check 自动重扫)
     └── fail (checkbias/checkpoint/compliance/correlation/archive)
                  → alpha_src/AlphaXxx/ (src 归档)      state=REJECTED
                      │  ops restage -s rejected         → staging/ + state→SUBMITTED
@@ -43,7 +43,7 @@ staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
 
 - **`meta.json`** inside each factor directory — the factor's *identity card*. Fields: name, author, birthday, universe, category, delay, backdays, dump_alpha, has_intraday_curve, operations, declared_data_modules, datasources (fields+tables), code_lines, frequency, discovery_method, submitted_by, submitted_at. Travels with the factor through staging → alpha_src. Defined in `ops/core/factormeta.py`. Persistent — must not be regenerated lossily. `discovery_method` (`automated`/`manual`) 来自 XML `<Description @discovery_method>`,由 `submit_one` 硬校验(缺失/非法拒收);legacy 存量因子该字段为 `None`。
 - **factor_info** (PG,`ops/infra/info/`) — 身份信息 (author / discovery_method / created_at)。submit 新因子时 `info_store.upsert`;`--overwrite` 不改 info(身份不变)。
-- **factor_state** (PG,`ops/infra/store/`) — 生命周期状态 (FactorRecord: name, status, version, updated_at, submitted_at, entered_at, ...)。**2026-07-06 起 FactorRecord 不含 author / submitted_by**(移到 factor_info)。新因子 `store.put`(version=1);`--overwrite` `store.transition → SUBMITTED, version += 1`。后端由 `default_store(config)` 按 `state.backend` 分发:生产是共享 Postgres(真相源),json 仅 `config.prod-legacy.yaml` 回退。
+- **factor_state** (PG,`ops/infra/store/`) — 生命周期状态 (FactorRecord: name, status, version, updated_at, submitted_at, entered_at, ...)。**2026-07-06 起 FactorRecord 不含 author / submitted_by**(移到 factor_info)。新因子 `store.put`(version=1);`--overwrite` `store.transition → SUBMITTED, version += 1` **并删除旧 factor_snapshot 行**(旧入库快照失效;不删则 re-archive 时 insert 撞 name UNIQUE 被吞,快照永远停在旧代码,full-review P0-1)。后端由 `default_store(config)` 按 `state.backend` 分发:生产是共享 Postgres(真相源),json 仅 `config.prod-legacy.yaml` 回退。
 
 **submit 写两表**:新因子先 `info_store.upsert(FactorInfo)` 再 `store.put(FactorRecord)`;`--overwrite` 只 `store.transition`(info 不动)。
 

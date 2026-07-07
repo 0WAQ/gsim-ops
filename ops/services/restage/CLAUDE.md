@@ -12,7 +12,14 @@
 1. `_resolve_targets` — 按 name / user / status 筛选目标(批量 `-u` 先 `info_store.list(author=...)` 取 name 集合,再与 `store.list(status=...)` 取交集;author 从 factor_info 读)
 2. `_locate_source` — 按状态定位因子源目录
 3. 显示计划，apt-install 风格确认 (`-y` 跳过)
-4. `_restage_one` — move src → staging, rewrite XML module path, transition state → SUBMITTED
+4. `_restage_one` — move src → staging, rewrite XML module path, transition state → SUBMITTED,
+   **删除 factor_snapshot 行**(2026-07-07:离库即旧快照失效;不删则 re-check 通过后
+   archive 的 insert 撞 name UNIQUE 被吞,快照永远停在旧代码,full-review P0-1。
+   删失败不阻断,archive 侧有 stale 自愈兜底)
+
+**批量守卫**(2026-07-07):`--status` 的 argparse 默认值是 None(不是 'active'),
+批量模式必须显式给 `-u` 和/或 `-s`,否则拒绝 —— 原先默认值让守卫永远不触发,
+裸 `ops restage -y` 会召回全库 ACTIVE 因子。name 与 `-u` 互斥(与 approve/cancel/clear 对齐)。
 
 ## 语义区分
 
