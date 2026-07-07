@@ -21,9 +21,8 @@ def get_default_config_path() -> Path:
     2. ./config.yaml (current directory)
     3. {project_root}/config.yaml
 
-    Phase C 上线 (2026-06-05) 之前默认是 config.prod.yaml; 现在 config.yaml
-    指向 JFS + sentinel-aware redis state. 旧的 prod 配置保留为
-    config.prod-legacy.yaml, 紧急回退用 `-c config.prod-legacy.yaml`.
+    config.yaml = 生产默认 (JFS 路径 + Postgres state)。没有回退配置 ——
+    config.prod-legacy.yaml 已于 2026-07-07 Wave 1 删除 (假保险)。
     """
     # 1. Environment variable
     env_config = os.environ.get("OPS_CONFIG")
@@ -110,24 +109,17 @@ class Config:
         self.state_backend: str = state_cfg.get("backend") or "json"
 
         # state.postgres backend (single source of truth, migrated from redis
-        # 2026-07-04). Reuses the same conninfo builder as derived; password
-        # resolution: postgres.password (literal) > password_env > password_file.
+        # 2026-07-04). Password resolution:
+        # postgres.password (literal) > password_env > password_file.
         state_pg_cfg: Dict[str, Any] = state_cfg.get("postgres") or {}
         self.state_postgres_conninfo: str | None = self._build_pg_conninfo(state_pg_cfg)
 
-        # derived-layer backend (index/metrics/datasources/bcorr).
-        # default json (~/.cache/ops/lib/<lib>/derived.json, per-machine fallback);
-        # set derived.backend: postgres + derived.postgres.{host,port,dbname,user,password*}
-        # for the shared, queryable store. Password resolution mirrors redis:
-        #   1. password (yaml literal) 2. password_env 3. password_file + password_key
-        derived_cfg: Dict[str, Any] = config.get("derived") or {}
-        self.derived_backend: str = derived_cfg.get("backend") or "json"
-        pg_cfg: Dict[str, Any] = derived_cfg.get("postgres") or {}
-        self.derived_postgres_conninfo: str | None = self._build_pg_conninfo(pg_cfg)
+        # (derived 层配置随僵尸层删除, 2026-07-07 Wave 2, JOURNAL V2:
+        #  metrics/datasources/bcorr 在 factor_snapshot,index 缓存不复存在。)
 
     @staticmethod
     def _build_pg_conninfo(pg_cfg: Dict[str, Any]) -> str | None:
-        """Assemble a libpq conninfo string from derived.postgres.* config.
+        """Assemble a libpq conninfo string from state.postgres.* config.
 
         Returns None when no host/dbname is configured (backend stays json).
         Password resolves in the same 3-tier order as redis (literal / env / file).

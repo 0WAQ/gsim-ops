@@ -3,7 +3,7 @@
 - cancel: SUBMITTED (--force + CHECKING) 删 staging + 硬删 state;其他状态拒绝
 - approve: 仅 correlation-rejected → ACTIVE;其他失败阶段 / 非 REJECTED 拒绝
 - clear:  仅 staging 孤儿 (state 无 record);有 record 报错让用 cancel
-- rm:     硬删全部落点 (src/pnl/dump/feature + state + derived 行)
+- rm:     硬删全部落点 (src/pnl/dump/feature + factor_info 级联 state/snapshot)
 """
 from types import SimpleNamespace
 
@@ -19,9 +19,9 @@ def _store(config):
     return default_store(config)
 
 
-def _derived(config):
-    from ops.infra.derived import default_derived_store
-    return default_derived_store(config)
+def _snapshot(config):
+    from ops.infra.snapshot import default_snapshot_store
+    return default_snapshot_store(config)
 
 
 def _args(cfg_path, **kw):
@@ -38,8 +38,7 @@ def test_cancel_submitted(test_config):
     from ops.services.cancel.cancel import run_cancel
     cfg_path, config = test_config
     (config.staging / "AlphaWbaiCan").mkdir(parents=True, exist_ok=True)
-    _store(config).put(FactorRecord(name="AlphaWbaiCan", author="wbai",
-                                    status=FactorStatus.SUBMITTED,
+    _store(config).put(FactorRecord(name="AlphaWbaiCan", status=FactorStatus.SUBMITTED,
                                     updated_at="2026-07-05T00:00:00"))
     run_cancel(_args(cfg_path, factor_name="AlphaWbaiCan", force=False))
     # staging 删 + state 硬删
@@ -51,8 +50,7 @@ def test_cancel_checking_needs_force(test_config):
     from ops.services.cancel.cancel import run_cancel
     cfg_path, config = test_config
     (config.staging / "AlphaWbaiChk").mkdir(parents=True, exist_ok=True)
-    _store(config).put(FactorRecord(name="AlphaWbaiChk", author="wbai",
-                                    status=FactorStatus.CHECKING,
+    _store(config).put(FactorRecord(name="AlphaWbaiChk", status=FactorStatus.CHECKING,
                                     updated_at="2026-07-05T00:00:00"))
     # 不带 --force → CHECKING 不被 cancel
     run_cancel(_args(cfg_path, factor_name="AlphaWbaiChk", force=False))
@@ -65,8 +63,7 @@ def test_cancel_checking_needs_force(test_config):
 def test_cancel_active_rejected(test_config):
     from ops.services.cancel.cancel import run_cancel
     cfg_path, config = test_config
-    _store(config).put(FactorRecord(name="AlphaWbaiActC", author="wbai",
-                                    status=FactorStatus.ACTIVE,
+    _store(config).put(FactorRecord(name="AlphaWbaiActC", status=FactorStatus.ACTIVE,
                                     updated_at="2026-07-05T00:00:00"))
     run_cancel(_args(cfg_path, factor_name="AlphaWbaiActC", force=False))
     # ACTIVE 不能 cancel → 保留
@@ -80,8 +77,7 @@ def test_cancel_active_rejected(test_config):
 def test_approve_correlation_rejected(test_config):
     from ops.services.approve.approve import run_approve
     cfg_path, config = test_config
-    _store(config).put(FactorRecord(name="AlphaWbaiApp", author="wbai",
-                                    status=FactorStatus.REJECTED,
+    _store(config).put(FactorRecord(name="AlphaWbaiApp", status=FactorStatus.REJECTED,
                                     updated_at="2026-07-05T00:00:00",
                                     last_fail_stage="correlation"))
     run_approve(_args(cfg_path, factor_name="AlphaWbaiApp"))
@@ -95,8 +91,7 @@ def test_approve_correlation_rejected(test_config):
 def test_approve_non_correlation_rejected(test_config):
     from ops.services.approve.approve import run_approve
     cfg_path, config = test_config
-    _store(config).put(FactorRecord(name="AlphaWbaiApp2", author="wbai",
-                                    status=FactorStatus.REJECTED,
+    _store(config).put(FactorRecord(name="AlphaWbaiApp2", status=FactorStatus.REJECTED,
                                     updated_at="2026-07-05T00:00:00",
                                     last_fail_stage="checkbias"))
     run_approve(_args(cfg_path, factor_name="AlphaWbaiApp2"))
@@ -107,8 +102,7 @@ def test_approve_non_correlation_rejected(test_config):
 def test_approve_active_rejected(test_config):
     from ops.services.approve.approve import run_approve
     cfg_path, config = test_config
-    _store(config).put(FactorRecord(name="AlphaWbaiApp3", author="wbai",
-                                    status=FactorStatus.ACTIVE,
+    _store(config).put(FactorRecord(name="AlphaWbaiApp3", status=FactorStatus.ACTIVE,
                                     updated_at="2026-07-05T00:00:00"))
     run_approve(_args(cfg_path, factor_name="AlphaWbaiApp3"))
     # 非 REJECTED → 报错不动
@@ -132,8 +126,7 @@ def test_clear_refuses_when_state_exists(test_config):
     from ops.services.clear.clear import run_clear
     cfg_path, config = test_config
     (config.staging / "AlphaWbaiHasRec").mkdir(parents=True, exist_ok=True)
-    _store(config).put(FactorRecord(name="AlphaWbaiHasRec", author="wbai",
-                                    status=FactorStatus.SUBMITTED,
+    _store(config).put(FactorRecord(name="AlphaWbaiHasRec", status=FactorStatus.SUBMITTED,
                                     updated_at="2026-07-05T00:00:00"))
     run_clear(_args(cfg_path, factor_name="AlphaWbaiHasRec"))
     # 有 state record → clear 拒绝,目录保留
@@ -154,10 +147,12 @@ def test_rm_hard_deletes_all(test_config):
     (config.alpha_pnl / name).write_text("pnl")
     (config.alpha_dump / name).mkdir(parents=True, exist_ok=True)
     (config.alpha_feature / f"{name}.v1.npy").write_bytes(b"x")
-    _store(config).put(FactorRecord(name=name, author="wbai", status=FactorStatus.ACTIVE,
+    _store(config).put(FactorRecord(name=name, status=FactorStatus.ACTIVE,
                                     updated_at="2026-07-05T00:00:00"))
-    _derived(config).upsert_metrics(name, {"ret": 1.0, "shrp": 1.0, "mdd": 1.0,
-                                           "tvr": 1.0, "fitness": 1.0})
+    from ops.infra.snapshot import FactorSnapshot
+    _snapshot(config).insert(FactorSnapshot(name=name, ret=1.0, shrp=1.0, mdd=1.0,
+                                            tvr=1.0, fitness=1.0,
+                                            snapshot_at="2026-07-05T00:00:00"))
 
     run_rm(_args(cfg_path, factor_name=name))
 
@@ -167,7 +162,7 @@ def test_rm_hard_deletes_all(test_config):
     assert not (config.alpha_dump / name).exists()
     assert not (config.alpha_feature / f"{name}.v1.npy").exists()
     assert _store(config).get(name) is None
-    assert _derived(config).get(name) is None
+    assert _snapshot(config).get(name) is None  # info 级联删 snapshot
 
 
 def test_rm_missing_factor(test_config):
@@ -187,11 +182,11 @@ def test_approve_batch_only_correlation(test_config):
     from ops.services.approve.approve import run_approve
     cfg_path, config = test_config
     s = _store(config)
-    s.put(FactorRecord(name="AlphaWbaiC1", author="wbai", status=FactorStatus.REJECTED,
+    s.put(FactorRecord(name="AlphaWbaiC1", status=FactorStatus.REJECTED,
                        updated_at="2026-07-05T00:00:00", last_fail_stage="correlation"))
-    s.put(FactorRecord(name="AlphaWbaiC2", author="wbai", status=FactorStatus.REJECTED,
+    s.put(FactorRecord(name="AlphaWbaiC2", status=FactorStatus.REJECTED,
                        updated_at="2026-07-05T00:00:00", last_fail_stage="checkbias"))
-    s.put(FactorRecord(name="AlphaWbaiC3", author="wbai", status=FactorStatus.ACTIVE,
+    s.put(FactorRecord(name="AlphaWbaiC3", status=FactorStatus.ACTIVE,
                        updated_at="2026-07-05T00:00:00"))
     run_approve(_args(cfg_path, user="wbai"))
     # 只有 correlation-rejected 被放行
@@ -207,9 +202,9 @@ def test_cancel_batch_only_eligible(test_config):
     s = _store(config)
     for n in ("AlphaWbaiS1", "AlphaWbaiS2"):
         (config.staging / n).mkdir(parents=True, exist_ok=True)
-    s.put(FactorRecord(name="AlphaWbaiS1", author="wbai", status=FactorStatus.SUBMITTED,
+    s.put(FactorRecord(name="AlphaWbaiS1", status=FactorStatus.SUBMITTED,
                        updated_at="2026-07-05T00:00:00"))
-    s.put(FactorRecord(name="AlphaWbaiS2", author="wbai", status=FactorStatus.ACTIVE,
+    s.put(FactorRecord(name="AlphaWbaiS2", status=FactorStatus.ACTIVE,
                        updated_at="2026-07-05T00:00:00"))
     run_cancel(_args(cfg_path, user="wbai", force=False))
     # SUBMITTED 删,ACTIVE 保留
@@ -224,9 +219,9 @@ def test_cancel_batch_does_not_touch_other_user(test_config):
     s = _store(config)
     (config.staging / "AlphaWbaiMine").mkdir(parents=True, exist_ok=True)
     (config.staging / "AlphaMheOther").mkdir(parents=True, exist_ok=True)
-    s.put(FactorRecord(name="AlphaWbaiMine", author="wbai", status=FactorStatus.SUBMITTED,
+    s.put(FactorRecord(name="AlphaWbaiMine", status=FactorStatus.SUBMITTED,
                        updated_at="2026-07-05T00:00:00"))
-    s.put(FactorRecord(name="AlphaMheOther", author="mhe", status=FactorStatus.SUBMITTED,
+    s.put(FactorRecord(name="AlphaMheOther", status=FactorStatus.SUBMITTED,
                        updated_at="2026-07-05T00:00:00"))
     run_cancel(_args(cfg_path, user="wbai", force=False))
     assert _store(config).get("AlphaWbaiMine") is None

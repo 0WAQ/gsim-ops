@@ -16,7 +16,6 @@ def add_list_subparser(subparser: argparse._SubParsersAction):
 Example:
     ops list              # List all factors
     ops list -u wbai      # List factors by author
-    ops list --refresh       # Force refresh index cache
     ops list --sort-by shrp  # Sort by Sharpe ratio
     ops list --format json
 """,
@@ -45,12 +44,7 @@ Example:
         choices=["table", "json"],
         help="Output format (default: table)",
     )
-    parser.add_argument(
-        "--refresh",
-        "-r",
-        action="store_true",
-        help="Force refresh index cache",
-    )
+    # --refresh 已删除 (2026-07-07 Wave 2): list 改纯 PG 查询,不再有扫盘索引缓存。
     parser.add_argument(
         "--show-tables",
         action="store_true",

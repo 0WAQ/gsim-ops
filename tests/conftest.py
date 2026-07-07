@@ -70,7 +70,7 @@ def library_id(pg_conninfo) -> str:
     # teardown: 清掉本 library_id 在三张表的所有行
     try:
         conn = psycopg.connect(pg_conninfo, autocommit=True, connect_timeout=5)
-        for tbl in ("factor_state", "factor_derived", "derived_meta"):
+        for tbl in ("factor_state",):  # 旧 library_id 分区清理,I2 重建时整体替换
             try:
                 conn.execute(f"DELETE FROM {tbl} WHERE library_id = %s", (lib,))
             except psycopg.errors.UndefinedTable:
@@ -94,21 +94,18 @@ def state_store(pg_conninfo):
     pytest.skip("PG store fixtures 待重建 (per-schema 隔离 + FK 种子行, full-review I2)")
 
 
-@pytest.fixture
-def derived_store(pg_conninfo):
-    # derived 层是待删僵尸 (full-review Wave 2),其测试随层退役;暂 skip。
-    pytest.skip("derived 层待删 (full-review Wave 2),测试随层退役")
+# derived_store fixture 已随 derived 层删除 (2026-07-07 Wave 2, JOURNAL V2)
 
 
 # ---------------------------------------------------------------------------
-# 隔离 Config (文件 → tmp_path, state+derived → ops_test)
+# 隔离 Config (文件 → tmp_path, state → ops_test)
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
 def test_config(tmp_path: Path, pg_conninfo, library_id):
     """基于真实 config.yaml 造一份隔离 config:
     - 所有数据路径重定位到 tmp_path
-    - state + derived backend=postgres 指向 ops_test + 本测试 library_id
+    - state backend=postgres 指向 ops_test + 本测试 library_id
 
     返回 (config_path, Config 实例)。
     """
@@ -148,7 +145,7 @@ def test_config(tmp_path: Path, pg_conninfo, library_id):
     base["sync"]["library_id"] = library_id
     base["sync"].pop("remote", None)
 
-    # state + derived 指向 ops_test
+    # state 指向 ops_test
     pw = _read_pg_password()
     pg_block = {
         "host": os.environ.get("OPS_TEST_PG_HOST", "10.9.100.160"),
@@ -159,7 +156,6 @@ def test_config(tmp_path: Path, pg_conninfo, library_id):
     if pw:
         pg_block["password"] = pw
     base["state"] = {"backend": "postgres", "postgres": dict(pg_block)}
-    base["derived"] = {"backend": "postgres", "postgres": dict(pg_block)}
 
     cfg_path = tmp_path / "config.test.yaml"
     cfg_path.write_text(yaml.safe_dump(base, allow_unicode=True))

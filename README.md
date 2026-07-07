@@ -17,7 +17,6 @@ uv run ops check --help
 uv run ops status --help
 uv run ops list --help
 uv run ops info --help
-uv run ops health --help
 uv run ops backfill --help
 ```
 
@@ -30,7 +29,6 @@ uv run ops backfill --help
 | `status`  | Query factor lifecycle state (submitted/active/rejected/...) |
 | `list`    | List factors in library (filter, sort, metrics, datasources) |
 | `info`    | Show factor details (metadata, metrics, data sources) |
-| `health`  | Factor library health check (orphans, missing PNL/metrics/datasources) |
 | `backfill`| One-shot: generate `meta.json` + ACTIVE state for existing factors in `alpha_src/` |
 
 ## Factor Workflow
@@ -66,8 +64,7 @@ uv run ops check                                           # Check everything in
 uv run ops status AlphaWbaiReversal                        # Query one factor's state
 uv run ops status -u wbai --status submitted               # Filter by author/state
 uv run ops backfill --dry-run                              # Preview backfill on alpha_src/
-uv run ops list --sort shrp -n 10                          # Top 10 by Sharpe
+uv run ops list --sort-by shrp -n 10                       # Top 10 by Sharpe
 uv run ops list --filter-by "ret>30,tables=ashare*"        # Filter by metrics/tables
 uv run ops info AlphaXxx                                   # Factor details
-uv run ops health --fix                                    # Auto-fix missing metrics
 ```

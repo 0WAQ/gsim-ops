@@ -1,11 +1,9 @@
-# JuiceFS PoC config.
+# ops 生产默认配置 (2026-06-05 JFS 上线起; `ops <cmd>` 不带 -c 即用本文件)。
 #
 # 把 alphalib 五条数据路径(alpha_src / alpha_dump / alpha_pnl / alpha_feature /
 # staging)指向 JuiceFS 挂载点 /tank/vault/alphalib,其它路径(dropbox / gsim /
-# /datasvc)保持本地。recycle 也放进 JuiceFS,保持入库链路全在同一卷上。
-#
-# 用法:uv run ops <cmd> -c config.juicefs.yaml ...
-# 不要拿来跑生产 —— sync 段被注释掉了,且仅供 JuiceFS PoC 第二轮使用。
+# /datasvc)保持本地。state/snapshot/info 三表在 server-160 Postgres。
+# (原头部自称 "PoC 不要拿来跑生产" 是文档谎言,2026-07-07 修正。)
 
 users:
   wbai: wenbo@graceim.ai
@@ -130,20 +128,6 @@ state:
     password_file: /home/wbai/gsim-ops/scripts/postgres/.env
     password_key: OPS_PG_PASSWORD
 
-# 派生层 (index/metrics/datasources/bcorr) 存 Postgres (server-160 docker, host 15432),
-# 三机共享 + 可查询, 替代 per-machine ~/.cache/ops/lib/<lib>/*.json.
-# 密码 fallback: postgres.password (yaml literal) > env OPS_DERIVED_PG_PASSWORD
-#              > password_file (key=OPS_PG_PASSWORD). 部署见 scripts/postgres/README.md.
-# 回退: 删掉本段 (或 backend: json) 即回到单机 JSON 缓存.
-# TODO(密码正规化): 现在 password_file 指向 repo 内 scripts/postgres/.env, 仅在 160 上存在.
-#   正式方案应像 redis 那样放 /etc/ 下 root-only 文件 + 分发到 150/144, 再由 ops sudo grep.
-#   150/144 上要跑 ops 前需先补密码文件.
-derived:
-  backend: postgres
-  postgres:
-    host: 10.9.100.160
-    port: 15432
-    dbname: ops
-    user: ops
-    password_file: /home/wbai/gsim-ops/scripts/postgres/.env
-    password_key: OPS_PG_PASSWORD
+# derived 段已删除 (2026-07-07 Wave 2, JOURNAL V2): 派生层僵尸表退役,
+# metrics/datasources/bcorr 在 factor_snapshot (state.postgres 同库)。
+# 生产库清理: scripts/postgres/migrate_drop_derived.sql (手动执行)。

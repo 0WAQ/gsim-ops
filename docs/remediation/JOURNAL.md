@@ -274,3 +274,72 @@ state.redis 块、`ensure_redis_password` 钩子(sudo.py + main.py)、
 state 只有一个生产后端(PG)+ 一个声明过的 dev/test 后端(json);锁只有一种
 跨机语义;没有任何文档承诺不存在的回退。下一步 Wave 2(僵尸 derived 拆除 +
 list 纯 PG 判据)。
+
+---
+
+# Wave 2 · 僵尸拆除:因子集正位 + derived 层退役(2026-07-07,同分支)
+
+## V1 · list/info 判据正位:因子集的正主是 PG
+
+**改动**:
+- `query_factors`(ops/infra/query.py)成为**"库内因子集"的唯一定义处**:
+  `status` 缺省 = `factor_state.status != 'submitted'`;合并逻辑改为以 state
+  为基、info 提供身份;**limit 不再下推**(P0-5 修复:旧实现无 ORDER BY 下推
+  LIMIT 进 snapshot 单表 → PG 返回任意 N 行 → 行数错乱 + metrics 空白;三表
+  内存合并模型下 limit 只能合并后截断,由 list.py 的 [:n] 执行)。
+- `run_list` 删除 `scanner.scan()` 白名单与 `--refresh` 旗标 —— **list 零扫盘,
+  纯 PG catalog 查询**(全库扫盘从每次 ~25s 降为 0)。
+- **JSON 输出变更(破坏性,需通知消费方)**:`has_pnl`/`dump_days` 键移除
+  (实时物理事实,唯一来源是全库扫盘,与 catalog 查询语义冲突;单因子看
+  `ops info`),新增 `status` 键。
+- `ops info` 存在性判据从"alpha_src 目录存在"改为 **factor_info 行存在**
+  (S5:原先同一因子可 status 存在、info not found);物理事实改单因子现场
+  stat,src 目录缺失时**显式提示漂移**而不是 not found;标题栏新增 status。
+
+**为什么**:"X 是不是库内因子"在代码里曾有 6 种答案(full-review S5)。收敛
+原则:**成员资格的正主是 PG**,磁盘是产物存储;PG 与磁盘的漂移是对账问题
+(未来 ops doctor),不该让每次查询付对账税。
+
+**行为变化点(验收时注意)**:list 现在会列出"PG 有记录但盘上目录被手工删了"
+的因子(以前被扫盘白名单静默吞掉)——这是故意的:漂移应当可见。
+
+## V2 · derived 僵尸层整层删除
+
+**删除**:`ops/infra/derived/`(~700 行)、LibraryScanner 的
+`_store/_load_index_from_store/_publish_index` 缓存路径、
+`services/list/metrics.py`(整个,唯一消费者是 health)、
+`services/list/datasource.py` 的 refresh/load 半边(纯解析函数保留——
+submit/check/backfill 在用)、config 的 `derived` 段与
+`derived_backend/derived_postgres_conninfo` 属性、`tests/test_derived_store_pg.py`
+与 test_pure 的 JsonDerivedStore/metric_get 测试段。
+
+**为什么**:该层唯一的"活"联系是 scanner 索引缓存——而它自三表迁移起就是坏的
+(derived_meta 被重建为无 library_id 形状,get_meta 每次 UndefinedColumn 被
+except 吞掉 → 缓存永久失效,每台机器每次 list 都白付 ~25s 扫盘,P0-4)。
+被"写者"而非"读者"续命,是反转的死代码。顺带消灭:rm 泄漏 factor_derived 行、
+metric_get/_METRIC_EXPR 的"三处不能 drift"注释契约少了一处。
+
+**生产库遗留**:`factor_derived`/`derived_meta` 两张表还在 ops 库里。清理脚本
+`scripts/postgres/migrate_drop_derived.sql`,**手动执行**,前置条件写在脚本头
+(三机 ops 均已更新 + snapshot 行数 spot-check)。
+
+## V3 · health 命令删除
+
+**删除**:`cli/health.py`、`services/health/`、main.py 注册。
+
+**为什么**:CLAUDE.md 早已标记"计划删除";其 `--fix` 读 snapshot、写僵尸
+derived 表,修复永不生效、问题每轮重现(S15)——比没有更糟的假修复。对账
+职能(盘面 vs PG 漂移、孤儿产物)归未来 `ops doctor`(设计输入见 full-review
+第三部分 Repository 产物面 orphans()/dump_stats())。
+
+## V4 · 空库 bootstrap 修复(P0-3/S2)
+
+**改动**:`scripts/postgres/init/01-schema.sql` 重写为三表结构(逐字镜像三个
+pg_store 的 `_SCHEMA`,FK 依赖序 info→state→snapshot),原文件是迁移前的
+两表旧世界,150/144 起新库会直接起错。文件头标注了"与 store 常量是镜像多
+真相源,G-wave 收敛"。
+
+**验证**:fast suite 绿(5 passed / 54 skipped;通过数下降是删掉了僵尸层
+自身的 9 个测试);全模块 import 零失败;15 个 parser 正常,health 确认消失。
+**待生产验证**:`ops list`(耗时应从 ~25s 降到亚秒级,且不再需要 --refresh)、
+`ops info <name>`、JSON 消费方对输出变更的适配。

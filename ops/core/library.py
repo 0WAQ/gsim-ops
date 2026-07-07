@@ -1,28 +1,32 @@
-"""Factor library scanner for querying factors in alphalib."""
+"""Factor library scanner — 磁盘视角的对账工具。
+
+2026-07-07 Wave 2 (JOURNAL V1/V2): 本类退出所有命令的热路径 —— list 的因子集
+判据改为 factor_state (PG),info 的存在性判据改为 factor_info (PG)。derived
+索引缓存整层删除(它自三表迁移起已坏:derived_meta 丢了 library_id 列,
+get_meta 每次 UndefinedColumn 被吞 → 缓存永久失效,每次 list 白付 ~25s 扫盘,
+full-review P0-4)。
+
+保留本类的唯一用途:**未来 ops doctor 的磁盘对账**(回答"盘上有什么、和 PG
+漂移了没有")+ info 的单因子现场 stat。scan() 现在是纯磁盘遍历,无缓存。
+注意 author 字段是目录名正则的**猜测**,非权威(权威在 factor_info 表)。
+"""
 
 import json
 import re
-import time
 from pathlib import Path
 from dataclasses import dataclass
 
 from ops.infra.config import Config
 
 
-INDEX_MAX_AGE_SECONDS = 7 * 24 * 3600  # 7 days -- belt-and-suspenders fallback;
-                                       # primary invalidation is alpha_src mtime
-                                       # vs the DerivedStore's index_built_at watermark
-
-
 @dataclass
 class FactorInfo:
-    """A factor as seen on the filesystem: identity + paths + index fields.
+    """A factor as seen on the filesystem: identity guess + paths + physical facts.
 
-    This is the *scan* product -- what a directory walk produces and what the
-    index group of the DerivedStore persists. Derived values (metrics /
-    datasources / bcorr) are NOT here; read those from the DerivedStore
-    directly (DerivedRecord). Paths are reconstructed from the live Config,
-    never persisted (they depend on the node's mount root)."""
+    This is the *scan* product -- what a directory walk produces. Paths are
+    reconstructed from the live Config, never persisted (they depend on the
+    node's mount root). ⚠ 与 infra/info 的表模型同名不同物(改名 ScannedFactor
+    属 Wave 4 领域模型工件)。"""
     name: str
     author: str
     src_path: Path
@@ -36,19 +40,16 @@ class FactorInfo:
 class LibraryScanner:
     AUTHOR_PATTERN = re.compile(r"^Alpha([A-Z][a-z]+)")
 
-    def __init__(self, config: Config, config_path: Path, use_cache: bool = True):
+    def __init__(self, config: Config, config_path: Path):
         self.config = config
         self.alpha_src = config.alpha_src
         self.alpha_dump = config.alpha_dump
         self.alpha_pnl = config.alpha_pnl
-        self.use_cache = use_cache
 
     @classmethod
-    def from_config_path(
-        cls, config_path: Path, use_cache: bool = True
-    ) -> "LibraryScanner":
+    def from_config_path(cls, config_path: Path) -> "LibraryScanner":
         config = Config.load(config_path)
-        return cls(config, config_path, use_cache=use_cache)
+        return cls(config, config_path)
 
     def _parse_author(self, name: str) -> str:
         match = self.AUTHOR_PATTERN.match(name)
@@ -101,78 +102,6 @@ class LibraryScanner:
             pass
         return None, None
 
-    # --- DerivedStore-backed index (shared across machines) ------------------
-    #
-    # The index (name/author/has_pnl/dump_days/delay) lives in the derived
-    # store alongside metrics/datasources/bcorr. Freshness is a single
-    # library-level watermark `index_built_at` (epoch seconds) compared against
-    # alpha_src's mtime -- which sits on shared JFS, so all machines see the
-    # same value. Whichever machine first notices alpha_src changed pays the
-    # ~25s directory scan and republishes; every other machine then reads the
-    # index straight from Postgres (~0.1s). No per-machine JSON, no per-machine
-    # rescan.
-
-    def _store(self):
-        from ops.infra.derived import default_derived_store
-        return default_derived_store(self.config)
-
-    def _record_to_info(self, rec) -> FactorInfo:
-        name = rec.name
-        return FactorInfo(
-            name=name,
-            author=rec.author if rec.author is not None else self._parse_author(name),
-            src_path=self.alpha_src / name,
-            dump_path=self.alpha_dump / name,
-            pnl_path=self.alpha_pnl / name,
-            has_pnl=bool(rec.has_pnl),
-            dump_days=rec.dump_days or 0,
-            delay=rec.delay,
-        )
-
-    def _load_index_from_store(self) -> list[FactorInfo] | None:
-        """Fast path: read index from the store if it's fresh vs alpha_src mtime."""
-        try:
-            store = self._store()
-            built_at_raw = store.get_meta("index_built_at")
-            if not built_at_raw:
-                return None
-            built_at = float(built_at_raw)
-            try:
-                src_mtime = self.alpha_src.stat().st_mtime
-                if src_mtime > built_at:
-                    return None  # alpha_src changed since last build -> stale
-            except OSError:
-                pass  # mount down: trust the store
-            if time.time() - built_at > INDEX_MAX_AGE_SECONDS:
-                return None  # TTL backstop (catches dump_days drift w/o mkdir)
-            recs = store.get_all()
-            if not recs:
-                return None
-            # Only surface factors that actually have index data (author set on
-            # scan); bcorr/metrics-only rows without an index shouldn't appear.
-            return [
-                self._record_to_info(r) for r in recs.values()
-                if r.author is not None or r.has_pnl is not None
-            ]
-        except Exception:
-            return None
-
-    def _publish_index(self, factors: list[FactorInfo]) -> None:
-        try:
-            store = self._store()
-            store.upsert_index({
-                f.name: {
-                    "author": f.author,
-                    "has_pnl": f.has_pnl,
-                    "dump_days": f.dump_days,
-                    "delay": f.delay,
-                }
-                for f in factors
-            })
-            store.set_meta("index_built_at", repr(time.time()))
-        except Exception:
-            pass
-
     def _read_delay(self, factor_dir: Path) -> int | None:
         meta_path = factor_dir / "meta.json"
         if not meta_path.exists():
@@ -216,27 +145,13 @@ class LibraryScanner:
 
         return factors
 
-    def scan(self, refresh: bool = False) -> list[FactorInfo]:
-        if self.use_cache and not refresh:
-            cached = self._load_index_from_store()
-            if cached is not None:
-                return cached
+    def scan(self) -> list[FactorInfo]:
+        """纯磁盘遍历 alpha_src(~25s 全库)。仅供对账/doctor 场景;
+        命令热路径一律走 PG(list=factor_state, info=factor_info)。"""
+        return self._scan_directory()
 
-        factors = self._scan_directory()
-
-        if self.use_cache:
-            self._publish_index(factors)
-
-        return factors
-
-    def get(self, name: str, use_cache: bool = True) -> FactorInfo | None:
-        if use_cache and self.use_cache:
-            cached = self._load_index_from_store()
-            if cached is not None:
-                for f in cached:
-                    if f.name == name:
-                        return f
-
+    def get(self, name: str) -> FactorInfo | None:
+        """单因子现场 stat(便宜:只碰该因子的 src/dump/pnl 路径)。"""
         src_path = self.alpha_src / name
         if not src_path.exists():
             return None
