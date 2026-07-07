@@ -20,8 +20,6 @@ destructive 为 opt-in:
 import shutil
 from pathlib import Path
 
-import xmltodict
-
 from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
 from ops.infra.info import default_info_store
@@ -29,31 +27,10 @@ from ops.infra.snapshot import default_snapshot_store
 from ops.infra.store import default_store
 from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
 from ops.services.rm.rm import _purge_artifacts
+from ops.utils.factor_dir import clean_pycache, rewrite_module_path
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 _SUPPORTED_STATUSES = {FactorStatus.ACTIVE, FactorStatus.REJECTED}
-
-
-def _clean_pycache(root: Path) -> None:
-    for p in root.rglob("__pycache__"):
-        if p.is_dir():
-            shutil.rmtree(p, ignore_errors=True)
-
-
-def _rewrite_module_path(d: Path) -> None:
-    xmls = list(d.glob("*.xml"))
-    pys = list(d.glob("*.py"))
-    if not xmls or not pys:
-        return
-    xml_file = xmls[0]
-    cfg = xmltodict.parse(xml_file.read_text(encoding="utf-8"))
-    modules_alpha = cfg.get("gsim", {}).get("Modules", {}).get("Alpha")
-    if isinstance(modules_alpha, dict):
-        modules_alpha["@module"] = str(pys[0])
-        xml_file.write_text(
-            xmltodict.unparse(cfg, pretty=True, encoding="utf-8", full_document=False),
-            encoding="utf-8",
-        )
 
 
 def _locate_source(rec: FactorRecord, config: Config) -> Path | None:
@@ -157,12 +134,12 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config, store,
         )
 
     config.staging.mkdir(parents=True, exist_ok=True)
-    _clean_pycache(src)
+    clean_pycache(src)
 
     # 先 move,再 transition:崩在中间留 orphan(reconcile 已下线),必要时人工处理
     prev_status = rec.status.value
     shutil.move(str(src), str(dst))
-    _rewrite_module_path(dst)
+    rewrite_module_path(dst)
 
     # REJECTED restage 自动清掉产物(无生产顾虑,check 会重新产出)
     # ACTIVE 仅在 --purge 时清

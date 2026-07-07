@@ -412,3 +412,123 @@ action 里,骨架只需要知道"跳过+原因";异常让 action 保持平铺直
 通过/冲突/无守卫兼容、四种结局路由、单因子失败不阻断批次、确认交互)——
 锁循环语义第一次有了可断言的测试。全套件 16 passed / ruff 0 / pyright 0 /
 四命令 parser 正常。
+
+---
+
+# Wave 4 · check 流水线内科手术:Stage 表 + XML I/O 收敛(2026-07-07,分支 claude/remediation-stage-table)
+
+## P1 · Stage 表:stage 身份收敛到 PIPELINE(full-review S11 / craft B2)
+
+**改动**:
+- 新增 `ops/services/check/stages.py`:`@dataclass(frozen=True) Stage(name,
+  make_checker, prepare, retryable, keep_artifacts_on_fail)` + `PIPELINE` 元组
+  (6 行,每行一个 stage 的全部身份);`STAGES` / `RETRYABLE_STAGES` /
+  `KEEP_ARTIFACTS_STAGES` 全部派生,`CORRELATION` 常量导出;
+- `check.py`:`__init__` 的 6 个命名 checker 属性 → `self.checkers: dict`
+  (按 PIPELINE 构造,DI 注入语义不变);`_run_one_locked` 的 **6 段复制粘贴
+  运行块 → for-loop**(emit_start → prepare → check → clean → emit_done,
+  correlation 的返回值捕获给 archive 落 bcorr);`on_reject` 内嵌的
+  `_LATE_STAGES` → 表派生的 `KEEP_ARTIFACTS_STAGES`,签名改
+  `(factor, failed_stage: str)`(它只需要 stage 名);
+- `clean()` 钩子从"只对 checkpoint 调"变为**每个 stage 通过后统一调**
+  (ABC 默认 no-op,只有 CheckpointChecker 实现 —— 行为不变,契约归一);
+- approve 的 `_CORRELATION = "correlation"` 手抄字面量 → import `CORRELATION`
+  (它判 last_fail_stage 用的本来就是 check 流水线的词汇,依赖显式化)。
+
+**为什么**:一个 stage 的身份原先散在 ≥5 处靠注释 "Must match" 手工同步
+(STAGES 元组 / _RETRYABLE / _LATE / 12 个异常子类字面量 / 6 段运行块),
+新增 stage 改 5 处漏 1 处即**静默路由错误**(不报错,只是走错 REJECTED/retry
+分支)。现在新增 stage = PIPELINE 加一行。
+
+**为什么不是别的方案**:
+- *Enum + 各处 match*:枚举只统一名字,顺序/重试策略/prepare 绑定仍散落;
+- *保留 6 段块只抽公共函数*:消不掉"新增 stage 要同时改块和集合"的双写;
+- *checker 自带 stage 属性*:身份仍写在 6 个文件里,表的意义(一眼看全流水线)
+  丢失。
+
+## P2 · 异常归因反转:流水线盖章,12 个异常子类删除
+
+**改动**:`CheckFail`/`CheckSkip` 构造签名去掉 stage 参数;12 个单行子类
+(ValidateFail/Skip … CorrelationFail/Skip)全删,checker 直接
+`raise CheckFail("原因")`;`_run_one_locked` 捕获时按 `current_stage` 归因
+(loop 外的 archive 段兜底归因 "archive")。顺带删掉三个坏 `__repr__`:
+`CheckFail.__repr__` 里有一行**遗留调试 print**(每次 repr 往 stdout 喷参数,
+会撕 Live 表)、CheckSkip/BacktestError 的 len 判断逻辑写反(`len>1` 返回
+`args[0]`);`CheckpointFail()` 原先不带消息 → 报告里 fail_reason 空串,
+现在给出 md5 摘要对比。
+
+**为什么**:stage 字符串硬编码在异常子类里是 S11 的主要漂移源 —— checker
+代码被复制到新 stage 时旧字符串跟着走,路由静默错位。流水线是这两个异常的
+**唯一捕获方**(全库 grep 验证无第三方 catch),且捕获点永远知道当前跑到哪个
+stage,由它归因**结构上不可能错位**。
+
+**为什么不是别的方案**:
+- *保留 stage 参数、raise 时手写*(`raise CheckFail("validate", ...)`):字面量
+  只是从子类挪到 raise 点,漂移源不灭;
+- *checker 基类注入 self.stage*:checker 与 stage 强绑定,而 checker 本可被
+  两个 stage 复用(validate/long_backtest 已经是同构的 Runner.run_backtest)。
+
+**兼容性**:CheckFail/CheckSkip 无外部消费方(测试 fake checker 同步改);
+`str(e)` 展示行为不变(Exception 默认 __str__)。
+
+## P3 · xml_prepare 响亮化(行为变更,验收注意)
+
+**改动**:
+- 4 个 stage prepare 的整段 `except Exception: ...` **吞错全部删除**;每个
+  prepare 缩成一行声明式 `_apply(factor, window=…, dump_pnl=…, dump_alpha=…)`;
+- 回测窗口从散落的裸字符串 → 命名常量(`VALIDATE_WINDOW` / `CHECKBIAS_WINDOW`
+  / `LONG_BACKTEST_WINDOW`),全流水线窗口只此三处定义;
+- `prepare_for_archive`:删掉写死 `/mnt/storage/alphalib`(旧库路径!)的
+  @module 写入 —— 它随后必被 `to_lib → rewrite_module_path` 覆盖,属无效写入,
+  且用的还是 JFS 迁移前的老路径;保留的 pnl/dump "拆雷" 目的地命名为
+  `ARCHIVED_XML_SCRATCH`(/tmp/alphalib,防手动重跑入库 XML 砸生产);
+- `save_xml(factor)` 的 `open("r+")+truncate` 写法 → 统一 `xmlio.save_xml`。
+
+**行为变更**:stage prepare 失败(XML 缺键 / JFS 写失败)原先被静默吞掉,
+stage 拿着**上一个 stage 的窗口**继续跑 —— validate 可能跑成全历史(30min+),
+checkbias 可能在错误区间做前视检查,**结果全不可信但显示 pass**。现在异常
+直接抛,走 unexpected 臂:revert SUBMITTED + 留 staging + 完整日志。恶性
+静默换良性响亮。注:恒定坏 XML 会反复 SUBMITTED↔error 循环,但这与其它
+unexpected 异常同性质,操作员看报告/日志即见,好过静默错跑。
+
+## P4 · XML I/O + 因子目录搬迁去重(full-review S 组手抄事实)
+
+**改动**:
+- 新增 `ops/utils/xmlio.py`:`load_xml` / `save_xml` —— unparse 参数
+  (`pretty=True, encoding, full_document=False`)从 **7 处手抄**收敛到 1 处
+  (check/restage/run/normalize/checkbias_checker/xml_prepare;漏抄
+  `full_document=False` 会给 XML 加声明头,gsim 不认);
+- 新增 `ops/utils/factor_dir.py`:`clean_pycache` / `rewrite_module_path` ——
+  check.py 与 restage.py 的两份克隆(S 组 clone-and-edit)合一;
+- `metadata.py` / `submit/parser.py` 的 xmltodict.parse 一并走 `load_xml`
+  (顺带统一了 metadata.py 原先依赖系统默认编码的 `open()` 读)。
+
+**为什么不是 edit_xml 上下文管理器**:考虑过 `with edit_xml(path) as cfg`,
+放弃 —— 一半调用点需要条件保存(normalize 只在 changed 时写)或异常包裹
+(run 的 restore 臂要 log 不抛),统一不了;两个函数 + 调用点显式 save
+反而诚实。
+
+## Wave 4 验证
+
+- ruff 0 / pyright 0;fast suite **23 passed**(16 → 23);14 个 parser 冒烟正常;
+- **新增 `tests/test_check_routing_json.py`(7 用例,json 后端,CI 常跑)**:
+  流水线 5 个非 pass 结局第一次进 CI —— PG 版 routing 测试自三表拆分起一直
+  skip(I2 未建),此前这台机器上流水线控制流是零覆盖。同时钉住 Wave 4 两个
+  行为点:归因盖章(fake checker 抛不带 stage 的异常,断言 last_fail_stage
+  正确)、prepare 失败响亮化(patch save_xml 抛 OSError → SUBMITTED +
+  checker 零调用)。conftest 抽出 `write_factor`(config 无关的因子模板工厂,
+  与 PG 组共用,防模板克隆)+ `json_config` fixture(CACHE_ROOT/LOCK_DIR
+  隔离到 tmp);
+- pass→archive 路径(需 PG snapshot store)仍归 PG 组,I2 后补;e2e(真 gsim)
+  待生产环境跑 `uv run pytest -m e2e` 验证。
+
+**Wave 4 遗留(记录,不在本分支做)**:
+- `_scan_factors` 构造 `AlphaMetadata` 不容错:staging 里**一个** XML 缺
+  Universe/Portfolio 节点的因子会让整个 `ops check` 在扫描期崩掉(本次写
+  smoke 时踩到)。修复属扫描健壮性,与 prepare 响亮化不同层,归 ops doctor /
+  scan 加固;
+- validate 与 long_backtest 的 checker 同构(仅窗口不同),可合一为参数化
+  BacktestChecker —— 等 Stage 表稳定后顺手做。
+
+(e2e 已 grep 验证:不 import 任何被删异常类,断言全走 state/文件落点,无需改;
+本地无 gsim 未跑,生产验证时照常 `uv run pytest -m e2e`。)

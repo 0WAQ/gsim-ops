@@ -9,15 +9,6 @@ from ops.infra.gsim.runner import Runner, resolve_bcorr_pools
 from .base import Checker, CheckFail, CheckSkip
 
 
-class CorrelationSkip(CheckSkip):
-    def __init__(self, *args: object):
-        super().__init__("correlation", *args)
-
-class CorrelationFail(CheckFail):
-    def __init__(self, *args: object):
-        super().__init__("correlation", *args)
-
-
 class CorrelationChecker(Checker):
     def __init__(self, config: Config):
         self.ret: float = config.correlation["ret%"]
@@ -79,19 +70,19 @@ class CorrelationChecker(Checker):
         # 1. 运行 bcorr
         corrs = Runner.run_bcorr(factor.pnl_file, self.config, pools=pools)
         if corrs is None:
-            raise CorrelationSkip("bcorr 运行失败")
+            raise CheckSkip("bcorr 运行失败")
         if not corrs:
-            raise CorrelationSkip("无相关性数据")
+            raise CheckSkip("无相关性数据")
 
         # 2. 获取当前因子指标
         metrics = Runner.run_simsummary(factor.pnl_file, self.config)
         if not metrics:
-            raise CorrelationSkip("无法获取因子指标")
-        
+            raise CheckSkip("无法获取因子指标")
+
         # 3. 判断是否满足要求
         violations = self._gate_violations(metrics, factor.delay)
         if violations:
-            raise CorrelationFail(f"{'; '.join(violations)} | {metrics}")
+            raise CheckFail(f"{'; '.join(violations)} | {metrics}")
 
         # 4. 找出最大相关系数 (bcorr 输出已排序，取最后一行)
         max_corr_factor, max_corr = corrs[-1]
@@ -112,7 +103,7 @@ class CorrelationChecker(Checker):
 
             # 未打败
             if not self._check_beat(metrics, competitor_metrices):
-                raise CorrelationFail(CorrResult(
+                raise CheckFail(CorrResult(
                                         metrics,
                                         max_corr, max_corr_factor,
                                         len(high_corr_factors),

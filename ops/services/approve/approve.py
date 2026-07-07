@@ -18,10 +18,9 @@ from ops.infra.config import Config
 from ops.infra.info import default_info_store
 from ops.infra.store import default_store
 from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
+from ops.services.check.stages import CORRELATION as _CORRELATION
 from ops.utils.clock import now_iso as _now
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
-
-_CORRELATION = "correlation"
 
 
 def _eligible(rec: FactorRecord) -> bool:

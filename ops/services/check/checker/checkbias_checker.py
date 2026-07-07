@@ -1,11 +1,10 @@
 import ast
 from pathlib import Path
 
-import xmltodict
-
 from ops.core.alpha.metadata import AlphaMetadata
 from ops.infra.config import Config
 from ops.infra.gsim.runner import BacktestError, Runner
+from ops.utils.xmlio import save_xml
 
 from .base import Checker, CheckFail, CheckSkip
 
@@ -102,15 +101,6 @@ class _GetDataAttrCollector(ast.NodeVisitor):
                 and node.attr == 'getData')
 
 
-class CheckbiasSkip(CheckSkip):
-    def __init__(self, *args: object):
-        super().__init__("checkbias", *args)
-
-class CheckbiasFail(CheckFail):
-    def __init__(self, *args: object):
-        super().__init__("checkbias", *args)
-
-
 class CheckbiasChecker(Checker):
     def __init__(self, config: Config):
         self.config = config
@@ -141,26 +131,20 @@ class CheckbiasChecker(Checker):
             # 2. Point XML at the firewall .py; save original @module to restore later
             original_module = factor.xml_config["gsim"]["Modules"]["Alpha"].get("@module")
             factor.xml_config["gsim"]["Modules"]["Alpha"]["@module"] = str(firewall_py)
-            factor.xml_file.write_text(
-                xmltodict.unparse(factor.xml_config, pretty=True, encoding="utf-8", full_document=False),
-                encoding="utf-8",
-            )
+            save_xml(factor.xml_file, factor.xml_config)
 
             # 3. Short Backtest
             Runner.run_backtest(factor.xml_file, self.config)
         except BacktestError as e:
-            raise CheckbiasFail(e)
+            raise CheckFail(e)
         except Exception as e:
-            raise CheckbiasSkip(e)
+            raise CheckSkip(e)
         finally:
             # Restore XML @module
             if original_module is not None:
                 factor.xml_config["gsim"]["Modules"]["Alpha"]["@module"] = original_module
                 try:
-                    factor.xml_file.write_text(
-                        xmltodict.unparse(factor.xml_config, pretty=True, encoding="utf-8", full_document=False),
-                        encoding="utf-8",
-                    )
+                    save_xml(factor.xml_file, factor.xml_config)
                 except Exception:
                     pass
             # Remove the firewall temp .py (safe even if it never got written)

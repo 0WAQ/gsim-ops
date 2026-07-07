@@ -26,7 +26,7 @@ c.execute('CREATE DATABASE ops_test OWNER ops'); c.close()
 PY
 ```
 
-表(factor_state / factor_derived / derived_meta)由 store 首次连接时的幂等
+三表(factor_info / factor_state / factor_snapshot)由 store 首次连接时的幂等
 `_init_schema` 自建,无需手工灌 schema。
 
 ## 隔离模型
@@ -42,10 +42,11 @@ PY
 
 | 文件 | 内容 | 需 PG |
 |---|---|---|
-| `test_pure.py` | `metric_get`/`sort_key` 逐键语义;Json{State,Derived}Store CRUD + get_all 下推 | 否 |
+| `test_pure.py` | `sort_key` 逐键语义;JsonStateStore CRUD | 否 |
+| `test_batch.py` | `_batch.py` 批量骨架(apply_locked 四种结局路由、失败不阻断)+ `transition(expect=)` CAS | 否 |
+| `test_check_routing_json.py` | pipeline 5 个非 pass 结局(retry/reject-late/reject-early/skip/crash)+ stage 归因盖章 + prepare 失败响亮化 + short-circuit(json 后端,CI 常跑)| 否 |
 | `test_state_store_pg.py` | PostgresStateStore:put/get round-trip、时间戳 tz 不偏 8h、transition、append_check、delete、list、library_id 隔离 | 是 |
-| `test_derived_store_pg.py` | PostgresDerivedStore:四组独立 upsert、get_all 各下推参、delete、meta | 是 |
-| `test_check_routing.py` | **主体**:pipeline 6 结局(pass/retry/reject-late/reject-early/skip/crash)+ pnl 分流 + short-circuit + 派生局部失败不阻断 | 是 |
+| `test_check_routing.py` | pipeline 6 结局含 **pass→archive**(snapshot 落库、pnl 分流)+ 派生局部失败不阻断 | 是 |
 | `test_check_scan.py` | `_scan_factors` 过滤、`_ensure_record` 补建/不覆盖、CHECKING 自愈、FactorLocked → locked | 是 |
 | `test_submit.py` | submit:新因子 version=1、已入库跳过、`--overwrite` version+1、文件数/syntax/discovery_method 校验失败回滚 staging | 是 |
 | `test_restage.py` | restage:ACTIVE/REJECTED 召回 → SUBMITTED、REJECTED 清 pnl、`--purge` 清 dump/feature、不支持状态/源缺失跳过 | 是 |

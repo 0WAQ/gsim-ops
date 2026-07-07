@@ -100,18 +100,9 @@ def state_store(pg_conninfo):
 # 隔离 Config (文件 → tmp_path, state → ops_test)
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-def test_config(tmp_path: Path, pg_conninfo, library_id):
-    """基于真实 config.yaml 造一份隔离 config:
-    - 所有数据路径重定位到 tmp_path
-    - state backend=postgres 指向 ops_test + 本测试 library_id
-
-    返回 (config_path, Config 实例)。
-    """
-    from ops.infra.config import Config
-
-    base = yaml.safe_load((get_project_root() / "config.yaml").read_text())
-
+def _isolated_paths(base: dict, tmp_path: Path, library_id: str) -> None:
+    """把 config 的全部数据路径重定位到 tmp_path(test_config / json_config 公用;
+    state 后端由调用方决定)。"""
     root = tmp_path / "alphalib"
     # vars 里的 alphalib_root 决定五条数据路径 + staging/recycle
     base.setdefault("vars", {})
@@ -144,6 +135,29 @@ def test_config(tmp_path: Path, pg_conninfo, library_id):
     base["sync"]["library_id"] = library_id
     base["sync"].pop("remote", None)
 
+
+def _mkdirs(config) -> None:
+    """预建数据目录(pipeline __init__ 只 mkdir 一部分)。"""
+    for d in (config.staging, config.alpha_src, config.alpha_dump, config.alpha_pnl,
+              config.alpha_feature, config.pnl_automated, config.pnl_manual,
+              config.pnl_path, config.alpha_path, config.checkpoint_path,
+              config.dropbox_path):
+        d.mkdir(parents=True, exist_ok=True)
+
+
+@pytest.fixture
+def test_config(tmp_path: Path, pg_conninfo, library_id):
+    """基于真实 config.yaml 造一份隔离 config:
+    - 所有数据路径重定位到 tmp_path
+    - state backend=postgres 指向 ops_test + 本测试 library_id
+
+    返回 (config_path, Config 实例)。
+    """
+    from ops.infra.config import Config
+
+    base = yaml.safe_load((get_project_root() / "config.yaml").read_text())
+    _isolated_paths(base, tmp_path, library_id)
+
     # state 指向 ops_test
     pw = _read_pg_password()
     pg_block = {
@@ -159,14 +173,34 @@ def test_config(tmp_path: Path, pg_conninfo, library_id):
     cfg_path = tmp_path / "config.test.yaml"
     cfg_path.write_text(yaml.safe_dump(base, allow_unicode=True))
     config = Config.load(cfg_path)
+    _mkdirs(config)
+    return cfg_path, config
 
-    # 预建数据目录(pipeline __init__ 只 mkdir 一部分)
-    for d in (config.staging, config.alpha_src, config.alpha_dump, config.alpha_pnl,
-              config.alpha_feature, config.pnl_automated, config.pnl_manual,
-              config.pnl_path, config.alpha_path, config.checkpoint_path,
-              config.dropbox_path):
-        d.mkdir(parents=True, exist_ok=True)
 
+@pytest.fixture
+def json_config(tmp_path: Path, monkeypatch):
+    """json 后端隔离 config(无 PG):路径重定位同 test_config,state backend=json,
+    json state 文件(CACHE_ROOT)与 fcntl 锁目录(LOCK_DIR)一并隔离到 tmp。
+
+    适用于不碰 info/snapshot store(PG-only)的控制流测试,
+    见 tests/test_check_routing_json.py。返回 (config_path, Config 实例)。
+    """
+    import ops.infra.cache as cache_mod
+    import ops.infra.lock as lock_mod
+    from ops.infra.config import Config
+
+    base = yaml.safe_load((get_project_root() / "config.yaml").read_text())
+    _isolated_paths(base, tmp_path, "jsontest")
+    base["state"] = {"backend": "json"}
+
+    # CACHE_ROOT/LOCK_DIR 是 import 时算好的模块常量,改 HOME 环境变量无效
+    monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path / "cache")
+    monkeypatch.setattr(lock_mod, "LOCK_DIR", tmp_path / "locks")
+
+    cfg_path = tmp_path / "config.json-backend.yaml"
+    cfg_path.write_text(yaml.safe_dump(base, allow_unicode=True))
+    config = Config.load(cfg_path)
+    _mkdirs(config)
     return cfg_path, config
 
 
@@ -213,21 +247,20 @@ def _minimal_xml(name: str, delay: int, discovery_method: str | None) -> str:
 
 
 @pytest.fixture
-def make_factor(test_config):
-    """在 staging 造一个合法因子 (含 meta.json)。
+def write_factor():
+    """底层工厂:往**给定 config** 的 staging 写一个合法因子(含 meta.json)。
 
-    返回 callable(name, author, delay, discovery_method, submitted_by) → factor_dir。
-    默认制造一个 submit 后应有的完整 staging 目录。
+    不依赖任何 PG fixture —— PG 组(make_factor)与 json 后端的控制流测试
+    (test_check_routing_json)共用同一份因子模板,避免 XML/py 模板克隆漂移。
     """
     from ops.core.factormeta import FactorMeta
 
-    _, config = test_config
-
-    def _make(name: str = "AlphaWbaiTest",
-              author: str = "wbai",
-              delay: int = 0,
-              discovery_method: str | None = "manual",
-              submitted_by: str | None = None) -> Path:
+    def _write(config,
+               name: str = "AlphaWbaiTest",
+               author: str = "wbai",
+               delay: int = 0,
+               discovery_method: str | None = "manual",
+               submitted_by: str | None = None) -> Path:
         d = config.staging / name
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{name}.py").write_text(_MINIMAL_PY.format(name=name))
@@ -242,6 +275,27 @@ def make_factor(test_config):
         )
         meta.save(d / "meta.json")
         return d
+
+    return _write
+
+
+@pytest.fixture
+def make_factor(test_config, write_factor):
+    """在 (PG) test_config 的 staging 造一个合法因子。
+
+    返回 callable(name, author, delay, discovery_method, submitted_by) → factor_dir。
+    默认制造一个 submit 后应有的完整 staging 目录。
+    """
+    _, config = test_config
+
+    def _make(name: str = "AlphaWbaiTest",
+              author: str = "wbai",
+              delay: int = 0,
+              discovery_method: str | None = "manual",
+              submitted_by: str | None = None) -> Path:
+        return write_factor(config, name=name, author=author, delay=delay,
+                            discovery_method=discovery_method,
+                            submitted_by=submitted_by)
 
     return _make
 
@@ -266,18 +320,19 @@ class _FakeChecker:
         from ops.services.check.checker.base import CheckFail, CheckSkip
         self.call_log.append(self.stage)
         if self.behavior == "fail":
-            raise CheckFail(self.stage, f"fake fail at {self.stage}")
+            # stage 由流水线捕获时按 current_stage 归因,exception 不携带
+            raise CheckFail(f"fake fail at {self.stage}")
         if self.behavior == "skip":
-            raise CheckSkip(self.stage, f"fake skip at {self.stage}")
+            raise CheckSkip(f"fake skip at {self.stage}")
         if self.behavior == "crash":
             raise RuntimeError(f"fake crash at {self.stage}")
-        # pass: checkpoint checker 还会被调 .clean();correlation 返回 corr_result
+        # pass: correlation 返回 corr_result 供 archive 落 bcorr 快照
         if self.stage == "correlation":
             return self.corr_result
         return None
 
     def clean(self, factor):
-        # 只有 checkpoint checker 有 clean();其余不会被调
+        # 流水线对每个 stage 统一调 clean()(默认 no-op)
         pass
 
 

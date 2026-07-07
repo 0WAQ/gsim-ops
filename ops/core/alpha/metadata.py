@@ -1,9 +1,8 @@
 import re
 from pathlib import Path
 
-import xmltodict
-
 from ops.infra.config import Config
+from ops.utils.xmlio import load_xml
 
 from .key import AlphaKey
 
@@ -18,8 +17,7 @@ class AlphaMetadata:
         self.xml_file = list(self.dir.glob("*.xml"))[0]
         self.py_file = list(self.dir.glob("*.py"))[0]
 
-        with open(self.xml_file) as f:
-            self.xml_config = xmltodict.parse(f.read())
+        self.xml_config = load_xml(self.xml_file)
 
         # TODO: name之后要依赖submit后的meta
         self.name: str = self.xml_config["gsim"]["Portfolio"]["Alpha"]["@id"]

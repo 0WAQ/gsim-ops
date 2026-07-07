@@ -5,29 +5,21 @@ from ops.core.alpha.results.base import Result
 
 
 class CheckFail(Exception):
-    def __init__(self, stage: str, *args: object):
-        self.stage = stage
-        super().__init__(*args)
-    
-    def __repr__(self):
-        if len(self.args) == 0:
-            return ""
-        if len(self.args) == 1:
-            print(self.args[0])
-            return repr(self.args[0])
-        return repr(self.args)
+    """因子质量失败信号 → REJECTED(retryable stage 除外)。
+
+    失败发生在哪个 stage 由流水线在捕获时按"当前正在跑的 stage"归因,
+    exception 自己不携带 stage —— 原先 12 个单行子类(ValidateFail …
+    CorrelationFail)各自硬编码 stage 字符串,checker 代码复制到新 stage
+    时旧字符串跟着走就是静默路由错误(full-review S11);流水线是唯一
+    捕获方且始终知道当前 stage,由它归因不可能错位。
+    """
+
 
 class CheckSkip(Exception):
-    def __init__(self, stage: str, *args: object):
-        self.stage = stage
-        super().__init__(*args)
+    """环境/数据不足、无法判定的信号 → revert SUBMITTED 待重跑。
 
-    def __repr__(self):
-        if len(self.args) == 0:
-            return ""
-        if len(self.args) == 1:
-            return repr(self.args[0])
-        return repr(self.args)
+    stage 归因同 CheckFail,由流水线在捕获时完成。
+    """
 
 
 class Checker(ABC):
@@ -36,6 +28,6 @@ class Checker(ABC):
         ...
 
     def clean(self, factor: AlphaMetadata) -> None:
-        """stage 结束后的清理钩子(默认 no-op)。pipeline 对 checkpoint 调用;
-        原先该方法不在 ABC 上、只有 CheckpointChecker 恰好实现 —— 未声明的契约
-        (full-review 第二部分)。"""
+        """stage 通过后的清理钩子(默认 no-op)。流水线对每个 stage 统一调用;
+        目前只有 CheckpointChecker 实现(清掉断点短回测的 dump/pnl/checkpoint
+        残留,防污染 long_backtest)。"""
