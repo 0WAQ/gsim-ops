@@ -128,10 +128,12 @@ def jstate(tmp_path):
     return JsonStateStore(tmp_path / "factor_state.json")
 
 
-def _rec(name="A", author="wbai", status=FactorStatus.SUBMITTED):
-    return FactorRecord(name=name, author=author, status=status,
+def _rec(name="A", status=FactorStatus.SUBMITTED):
+    # FactorRecord 2026-07-06 起是纯状态机,不含 author/submitted_by
+    # (身份在 factor_info)。旧签名让本套件在三表重构后红了三周无人察觉(无 CI)。
+    return FactorRecord(name=name, status=status,
                         updated_at="2026-07-05T00:00:00",
-                        submitted_at="2026-07-05T00:00:00", submitted_by=author)
+                        submitted_at="2026-07-05T00:00:00")
 
 
 def test_json_state_put_get(jstate):
@@ -171,9 +173,8 @@ def test_json_state_delete(jstate):
 
 
 def test_json_state_list_filters(jstate):
-    jstate.put(_rec("A", "wbai", FactorStatus.ACTIVE))
-    jstate.put(_rec("B", "mhe", FactorStatus.SUBMITTED))
-    jstate.put(_rec("C", "wbai", FactorStatus.SUBMITTED))
-    assert {r.name for r in jstate.list(author="wbai")} == {"A", "C"}
+    jstate.put(_rec("A", FactorStatus.ACTIVE))
+    jstate.put(_rec("B", FactorStatus.SUBMITTED))
+    jstate.put(_rec("C", FactorStatus.SUBMITTED))
+    assert {r.name for r in jstate.list()} == {"A", "B", "C"}
     assert {r.name for r in jstate.list(status=FactorStatus.SUBMITTED)} == {"B", "C"}
-    assert {r.name for r in jstate.list(author="wbai", status=FactorStatus.SUBMITTED)} == {"C"}

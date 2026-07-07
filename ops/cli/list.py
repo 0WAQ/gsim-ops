@@ -16,8 +16,8 @@ def add_list_subparser(subparser: argparse._SubParsersAction):
 Example:
     ops list              # List all factors
     ops list -u wbai      # List factors by author
-    ops list --refresh    # Force refresh index cache
-    ops list --sort shrp  # Sort by Sharpe ratio
+    ops list --refresh       # Force refresh index cache
+    ops list --sort-by shrp  # Sort by Sharpe ratio
     ops list --format json
 """,
     )
@@ -64,12 +64,15 @@ Example:
     parser.add_argument(
         "--filter-by",
         type=str,
-        help="Filter conditions separated by commas (e.g., table=ashareeodprices,ret>30,shrp>1.5)",
+        help="Filter conditions separated by commas (e.g., tables=ashareeodprices,ret>30,shrp>1.5)",
     )
+    # choices 与 list.py 的 _SORTABLE_KEYS 对齐:原先多一个 "delay",接受后
+    # 被服务层静默忽略(full-review 第三部分 S8)。delay 若要可排序,须同时
+    # 进 _SORTABLE_KEYS 与 snapshot _METRIC_EXPR。
     parser.add_argument(
         "--sort-by",
         type=str,
-        choices=["ret", "shrp", "mdd", "tvr", "fitness", "delay", "bcorr"],
+        choices=["ret", "shrp", "mdd", "tvr", "fitness", "bcorr"],
         help="Sort by field (descending)",
     )
     parser.add_argument(

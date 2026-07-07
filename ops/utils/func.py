@@ -4,11 +4,6 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 
-def debug(*args):
-    print(args)
-    while True:
-        pass
-
 def date_range(start: str, end: str):
     d =  datetime.strptime(start, "%Y%m%d").date()
     stop = datetime.strptime(end, "%Y%m%d").date()

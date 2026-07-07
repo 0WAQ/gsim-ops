@@ -18,8 +18,6 @@ _STATUS_STYLE = {
     FactorStatus.CHECKING:  "bold yellow",
     FactorStatus.ACTIVE:    "green",
     FactorStatus.REJECTED:  "red",
-    FactorStatus.DECAYING:  "yellow",
-    FactorStatus.RETIRED:   "dim",
 }
 
 

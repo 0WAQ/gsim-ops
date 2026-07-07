@@ -1,106 +1,14 @@
-import os
-import sys
-import paramiko
-import argparse
-import subprocess as sp
-from pathlib import Path
-from typing import Optional
+"""CLI 共享的 argparse 小件。
 
-from ops.infra.gsim.runner import BacktestError
-from ops.utils.log import logger
-from ops.utils.printer import info, warn, error
+2026-07-07 清理:原本这里还有 Remote(paramiko stub)/ Local / Gsim(硬编码
+/usr/local/gsim 路径的旧 runner,与 infra/gsim/runner.Runner 整段重复)三个
+cp/scp 时代的死类 —— 全部零 importer,且让 9 个 CLI 模块为一个 3 行的
+argparse Action 每次启动付 paramiko import 税(full-review 第三部分 G5/V)。
+现仅保留唯一被使用的 LowerAction;回测能力唯一的家是 ops/infra/gsim/runner.py。
+"""
+import argparse
 
 
 class LowerAction(argparse.Action):
     def __call__(self, parser, namespace, values: str, option_string=None):
         setattr(namespace, self.dest, values.lower())
-
-
-class Remote:
-    @staticmethod
-    # TODO: rename
-    def check_is_dir(ssh: paramiko.SSHClient, path: str):
-        _, stdout, _ = ssh.exec_command(f"file {path} 2>/dev/null")
-        is_dir = (stdout.read().decode('utf-8').strip().split(' ')[-1] == "directory")
-        return is_dir
-    
-    @staticmethod
-    def check_path_exists(ssh: paramiko.SSHClient, path: str):
-        pass
-
-    @staticmethod
-    def ensure_dir_exists(ssh: paramiko.SSHClient, path: str):
-        pass
-
-
-class Local:
-    @staticmethod
-    def check_is_dir(path: str):
-        return os.path.isdir(path)
-
-    @staticmethod
-    def check_path_exists(path: str):
-        if not os.path.exists(os.path.abspath(path)):
-            sys.exit(f"路径不存在: {path}")
-
-    @staticmethod
-    def ensure_dir_exists(path: str) -> None:
-        if not os.path.exists(path):
-            os.makedirs(path, exist_ok=True)
-
-
-class Gsim:
-    @staticmethod
-    def run_backtest(xml_path: Path):
-        try:
-            python = "/usr/local/gsim/.venv/bin/python"
-            run_py = "/usr/local/gsim/run.py"
-            sp.run([python, run_py, xml_path],
-                   stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE,
-                   text=True, check=True, timeout=3600)
-            info("✅ backtest succeed")
-        except sp.CalledProcessError as e:
-            raise BacktestError(f"❌ looking forward!!! ({xml_path}) {e.stderr}") from e
-        except sp.TimeoutExpired as e:
-            logger.warning("Gsim.run_backtest timeout xml={} after={}s", xml_path, e.timeout)
-            raise BacktestError(f"timeout after {e.timeout}s ({xml_path})") from e
-
-
-    @staticmethod
-    def run_simsummary(pnl_path: str) -> Optional[str]:
-        try:
-            python = "/usr/local/gsim/.venv/bin/python"
-            simsummary_py = "/usr/local/gsim/tools/simsummary.py"
-            sim_path = pnl_path + ".sim"
-            with open(sim_path, 'w+') as f:
-                proc = sp.run([python, simsummary_py, pnl_path],
-                              stdout=f, stderr=sp.PIPE, text=True)
-            if proc.stderr:
-                logger.warning("simsummary stderr pnl={} stderr={!r}", pnl_path, proc.stderr[:500])
-            info("✅ simsummary succeed")
-            return sim_path
-        except Exception as e:
-            logger.exception("Gsim.run_simsummary failed pnl={}", pnl_path)
-            error(f"❌ simsummary failed: {e}")
-            return None
-
-    
-    @staticmethod
-    def run_diff(lhs: str, rhs: str, out: str) -> Optional[str]:
-        try:
-            output_path = os.path.join(os.path.dirname(lhs), "diff.txt")
-            with open(output_path, 'w+') as f:
-                _ = sp.run(["diff", lhs, rhs], stdout=f, text=True)
-                info(f"running diff: {output_path}")
-                size = f.seek(0, 2)
-                if size != 0:
-                    with open(out, 'w+') as f1:
-                        f1.write(os.path.dirname(lhs))
-                        f1.writelines(f.readlines())
-                    error(f"❌ {os.path.dirname(output_path)} has forward looking!")
-                else:
-                    info(f"✅ {os.path.dirname(output_path)} doesn't have forward looking!")
-            return output_path
-        except sp.CalledProcessError as e:
-            logger.exception("Gsim.run_diff failed lhs={} rhs={}", lhs, rhs)
-            error(f"run diff failed: {e}")

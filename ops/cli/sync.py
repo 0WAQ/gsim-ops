@@ -27,10 +27,14 @@ Example:
     for act in ("push", "pull"):
         p = sub.add_parser(act, help=f"{act} between local and remote")
         p.add_argument("--dry-run", action="store_true", help="只展示,不传输")
-        p.add_argument("--force-state", action="store_true",
-                       help="跳过 merge,用本地 state 直接覆盖远端(factor_state/metrics/datasources)")
-        p.add_argument("--force-overwrite", action="store_true",
-                       help="强制覆盖远端 differ 文件(etag 不同也传)")
+        if act == "push":
+            # 仅 push 支持:原先 for 循环把这两个旗标盲目复制给了 pull,而
+            # pull() 的签名根本没有这两个参数 —— 解析通过、静默无效
+            # (full-review 第三部分 V 表)。
+            p.add_argument("--force-state", action="store_true",
+                           help="跳过 merge,用本地 state 直接覆盖远端(factor_state/metrics/datasources)")
+            p.add_argument("--force-overwrite", action="store_true",
+                           help="强制覆盖远端 differ 文件(etag 不同也传)")
         p.add_argument("--deep", action="store_true",
                        help="忽略本地 etag 缓存,强制重算所有本地 etag(慢)")
         p.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())

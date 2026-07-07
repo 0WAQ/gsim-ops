@@ -5,7 +5,6 @@ from .base import *
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner, BacktestError
 from ops.core.alpha.metadata import AlphaMetadata
-from ops.core.alpha.results.checkbias import *
 
 FIREWALL_FILE = Path(__file__).parent / "firewall.py"
 ALWAYS_GUARD = {'valid'}

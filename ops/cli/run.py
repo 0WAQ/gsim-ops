@@ -13,7 +13,6 @@ def add_run_subparser(subparsers: argparse._SubParsersAction):
 Example:
     ops run -f AlphaWbaiFoo                        # run one factor (full history)
     ops run -f AlphaWbaiFoo -s 20250101 -e 20250131   # custom date range
-    ops run -f AlphaWbaiFoo --pack                    # run + pack alpha_feature
     ops run -u wbai                                # run all factors by user
 """,
     )
@@ -22,7 +21,8 @@ Example:
     parser.add_argument("--factor-name", "-f", type=str, default=None, help="run one factor by name")
     parser.add_argument("--start-date", "-s", type=str, default="20100101", help="backtest start date (default: 20100101)")
     parser.add_argument("--end-date", "-e", type=str, default="20251231", help="backtest end date (default: 20251231)")
-    parser.add_argument("--pack", action="store_true", help="incremental pack after run")
+    # --pack 已删除:epilog 宣传 "run + pack" 但服务层从未读取该 dest(no-op 谎言,
+    # full-review 第三部分 V 表)。要打包用独立的 ops pack。
     parser.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
 
     parser.set_defaults(func=run_factors)

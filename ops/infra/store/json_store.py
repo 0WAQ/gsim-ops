@@ -90,13 +90,11 @@ class JsonStateStore(StateStore):
             records[record.name] = record
             self._atomic_write(records)
 
-    def list(self,
-             author: str | None = None,
-             status: FactorStatus | None = None) -> list[FactorRecord]:
+    def list(self, status: FactorStatus | None = None) -> list[FactorRecord]:
+        # author 过滤已删:FactorRecord 无 author 字段,原实现 r.author 直接
+        # AttributeError(坏回退的一部分,full-review P0-2)。author 走 InfoStore。
         with self._locked():
             out = list(self._read_records().values())
-        if author is not None:
-            out = [r for r in out if r.author == author]
         if status is not None:
             out = [r for r in out if r.status == status]
         return out

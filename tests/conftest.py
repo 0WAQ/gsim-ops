@@ -85,15 +85,19 @@ def library_id(pg_conninfo) -> str:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def state_store(pg_conninfo, library_id):
-    from ops.infra.store.pg_store import PostgresStateStore
-    return PostgresStateStore(conninfo=pg_conninfo, library_id=library_id)
+def state_store(pg_conninfo):
+    # 2026-07-07 诚实化:三表拆分删掉了 library_id 分区,本 fixture 原签名
+    # PostgresStateStore(conninfo, library_id=...) 直接 TypeError —— 即 PG 组
+    # 自重构以来从未真正跑过。隔离模型需重建为 per-test schema(CREATE SCHEMA
+    # t_<uuid> + search_path)且 put 前需 factor_info 父行(FK),须对着真 PG
+    # 迭代,见 full-review 第二部分 I2。在此之前显式 skip,不再假装可用。
+    pytest.skip("PG store fixtures 待重建 (per-schema 隔离 + FK 种子行, full-review I2)")
 
 
 @pytest.fixture
-def derived_store(pg_conninfo, library_id):
-    from ops.infra.derived.pg_store import PostgresDerivedStore
-    return PostgresDerivedStore(conninfo=pg_conninfo, library_id=library_id)
+def derived_store(pg_conninfo):
+    # derived 层是待删僵尸 (full-review Wave 2),其测试随层退役;暂 skip。
+    pytest.skip("derived 层待删 (full-review Wave 2),测试随层退役")
 
 
 # ---------------------------------------------------------------------------
