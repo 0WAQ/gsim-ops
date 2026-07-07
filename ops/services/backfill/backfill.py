@@ -3,6 +3,7 @@ from pathlib import Path
 
 from ops.infra.config import Config
 from ops.infra.store import default_store
+from ops.infra.info import default_info_store, FactorInfo
 from ops.core.state import FactorRecord, FactorStatus
 from ops.core.factormeta import FactorMeta
 from ops.services.submit.parser import parse_factor
@@ -51,6 +52,7 @@ def run_backfill(args):
 
     config = Config.load(config_path)
     store = default_store(config)
+    info_store = default_info_store(config)
 
     banner("存量回填" + (" (dry-run)" if dry_run else ""))
 
@@ -77,19 +79,31 @@ def run_backfill(args):
             failures.append((factor_dir.name, msg or ""))
             continue
 
-        # state record
+        # state record + info record
         name = msg or factor_dir.name
         if not dry_run and store.get(name) is None:
             meta_path = factor_dir / META_FILENAME
             try:
                 meta = FactorMeta.load(meta_path)
                 author = meta.author or "unknown"
+                discovery_method = meta.discovery_method or "backfill"
             except Exception:
                 author = "unknown"
-            store.put(FactorRecord(
+                discovery_method = "backfill"
+
+            # 先写 factor_info
+            info_store.upsert(FactorInfo(
                 name=name,
                 author=author,
+                discovery_method=discovery_method,
+                created_at=now,
+            ))
+
+            # 再写 factor_state
+            store.put(FactorRecord(
+                name=name,
                 status=FactorStatus.ACTIVE,
+                version=1,
                 updated_at=now,
                 entered_at=now,
             ))

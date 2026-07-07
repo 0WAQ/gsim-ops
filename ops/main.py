@@ -4,7 +4,6 @@ import sys
 from ops.cli.run import add_run_subparser
 from ops.cli.check import add_check_subparser
 from ops.cli.list import add_list_subparser
-from ops.cli.refresh import add_refresh_subparser
 from ops.cli.info import add_info_subparser
 from ops.cli.health import add_health_subparser
 from ops.cli.submit import add_submit_subparser
@@ -37,7 +36,6 @@ def main():
         add_run_subparser(subparsers)
         add_check_subparser(subparsers)
         add_list_subparser(subparsers)
-        add_refresh_subparser(subparsers)
         add_info_subparser(subparsers)
         add_health_subparser(subparsers)
         add_submit_subparser(subparsers)

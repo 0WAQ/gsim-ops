@@ -32,7 +32,7 @@
 
 1. `_resolve_targets` — 按 name / user 筛选
    - 单因子:状态或失败阶段不匹配 → 报错退出(明确指定的失败要响亮)
-   - 批量(`-u`):不匹配的归入 `Skipped` 段,不阻断
+   - 批量(`-u`):先 `info_store.list(author=...)` 取 name 集合,再与 `store.list(status=REJECTED)` 取交集;不匹配的归入 `Skipped` 段,不阻断。显示 author 从 `info_store.get(name)` 取(FactorRecord 已无 author 字段)
 2. apt 风格确认(`-y` 跳过)
 3. `_approve_one`:
    - `store.transition(name, ACTIVE, entered_at=..., last_fail_stage=None, last_fail_reason=None)`

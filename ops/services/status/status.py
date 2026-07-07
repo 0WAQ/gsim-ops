@@ -8,6 +8,7 @@ from rich import box
 from ops.core.state import FactorStatus, FactorRecord
 from ops.infra.config import Config
 from ops.infra.store import default_store
+from ops.infra.info import default_info_store
 
 
 _console = Console(width=shutil.get_terminal_size((140, 50)).columns)
@@ -34,16 +35,16 @@ def _outcome(c):
     return "[dim]SKIP[/]"
 
 
-def _print_detail(rec: FactorRecord) -> None:
+def _print_detail(rec: FactorRecord, author: str | None) -> None:
+    """打印单个因子的详细状态（author 从 factor_info 传入）。"""
     _console.print(Rule(f"[bold cyan]因子状态 · {rec.name}[/]", style="cyan", characters="━"))
     style = _STATUS_STYLE.get(rec.status, "")
     _console.print(_kv("name",         rec.name))
-    _console.print(_kv("author",       rec.author))
+    _console.print(_kv("author",       author or "—"))
     _console.print(_kv("status",       f"[{style}]{rec.status.value}[/]"))
-    _console.print(_kv("submitted_at", rec.submitted_at))
-    _console.print(_kv("submitted_by", rec.submitted_by))
-    _console.print(_kv("entered_at",   rec.entered_at))
-    _console.print(_kv("rejected_at",  rec.rejected_at))
+    _console.print(_kv("submitted_at", rec.submitted_at or "—"))
+    _console.print(_kv("entered_at",   rec.entered_at or "—"))
+    _console.print(_kv("rejected_at",  rec.rejected_at or "—"))
     _console.print(_kv("updated_at",   rec.updated_at))
     if rec.last_fail_stage:
         _console.print(_kv("last_fail", f"[red]{rec.last_fail_stage}[/] — {rec.last_fail_reason}"))
@@ -57,14 +58,15 @@ def _print_detail(rec: FactorRecord) -> None:
     _console.print(Rule(style="cyan", characters="━"))
 
 
-def _print_list(records: list[FactorRecord]) -> None:
+def _print_list(records: list[tuple[FactorRecord, str | None]]) -> None:
+    """打印因子列表（每项是 (FactorRecord, author) 元组）。"""
     table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", pad_edge=False)
     table.add_column("name", no_wrap=True)
     table.add_column("status", no_wrap=True)
     table.add_column("author", no_wrap=True)
     table.add_column("updated_at", no_wrap=True)
     table.add_column("note", overflow="fold")
-    for rec in records:
+    for rec, author in records:
         style = _STATUS_STYLE.get(rec.status, "")
         note = ""
         if rec.status == FactorStatus.REJECTED and rec.last_fail_stage:
@@ -72,7 +74,7 @@ def _print_list(records: list[FactorRecord]) -> None:
         table.add_row(
             rec.name,
             f"[{style}]{rec.status.value}[/]",
-            rec.author,
+            author or "—",
             str(rec.updated_at),
             note,
         )
@@ -82,25 +84,41 @@ def _print_list(records: list[FactorRecord]) -> None:
 def run_status(args) -> None:
     config = Config.load(args.config_path)
     store = default_store(config)
+    info_store = default_info_store(config)
+
     name: str | None = args.name
-    author: str | None = args.author
+    author_filter: str | None = args.author
     status_filter: str | None = args.status
 
     if name is not None:
+        # 单因子详情模式
         rec = store.get(name)
         if rec is None:
             _console.print(f"[yellow]未找到因子: {name}[/]")
             return
-        _print_detail(rec)
+        info = info_store.get(name)
+        author = info.author if info else None
+        _print_detail(rec, author)
         return
 
+    # 列表模式
     status_enum = FactorStatus(status_filter) if status_filter else None
-    records = store.list(author=author, status=status_enum)
-    records.sort(key=lambda r: r.name)
+    records = store.list(status=status_enum)
+
+    # 按 author 过滤（需要从 factor_info 读取）
+    if author_filter:
+        infos = {i.name: i for i in info_store.list(author=author_filter)}
+        records = [r for r in records if r.name in infos]
+    else:
+        infos = {i.name: i for i in info_store.list()}
+
+    # 附加 author 信息
+    records_with_author = [(r, infos.get(r.name).author if r.name in infos else None) for r in records]
+    records_with_author.sort(key=lambda x: x[0].name)
 
     _console.print(Rule("[bold cyan]因子状态[/]", style="cyan", characters="━"))
-    if not records:
+    if not records_with_author:
         _console.print("[yellow]没有匹配的因子记录[/]")
     else:
-        _print_list(records)
+        _print_list(records_with_author)
     _console.print(Rule(style="cyan", characters="━"))

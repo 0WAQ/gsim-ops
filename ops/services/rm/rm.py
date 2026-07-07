@@ -5,8 +5,7 @@
   - alpha_pnl/<name>            回测 PNL (单文件)
   - alpha_dump/<name>/          日频目标持仓目录
   - alpha_feature/<name>.*.npy  聚合 feature
-  - factor_derived PG 行        派生数据 (metrics/datasources/bcorr/index)
-  - factor_state PG 行          生命周期状态
+  - factor_info PG 行           身份信息 (级联删除 state + snapshot)
 
 没有软删/墓碑:因子被 rm 后即不存在 (要恢复只能重新 ops submit)。
 默认交互确认展示完整删除清单;-y 跳过。
@@ -16,7 +15,7 @@ import shutil
 from ops.infra.config import Config
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.infra.store import default_store
-from ops.infra.derived import default_derived_store
+from ops.infra.info import default_info_store
 from ops.utils.printer import banner, bottom, info, error, highlight
 
 
@@ -53,8 +52,7 @@ def run_rm(args) -> None:
     info(f"    · alpha_pnl/{name}           (PNL)")
     info(f"    · alpha_dump/{name}/         (dump)")
     info(f"    · alpha_feature/{name}.*.npy (feature)")
-    info(f"    · factor_derived             (派生数据行)")
-    info(f"    · factor_state               (状态行)")
+    info(f"    · factor_info + 级联 (state + snapshot)")
 
     if not args.yes:
         ans = input("  确认彻底删除? 不可恢复 [y/N] ").strip().lower()
@@ -80,13 +78,9 @@ def run_rm(args) -> None:
                 pnl.unlink()
                 info(f"  ✔ 已删除 alpha_pnl/{name}")
 
-            # 派生数据行
-            if default_derived_store(config).delete(name):
-                info(f"  ✔ 已删除 factor_derived 行")
-
-            # 状态行 (真相源,最后删)
-            if store.delete(name):
-                info(f"  ✔ 已删除 factor_state 行")
+            # factor_info (级联删除 state + snapshot)
+            if default_info_store(config).delete(name):
+                info(f"  ✔ 已删除 factor_info (级联删除 state + snapshot)")
     except FactorLocked:
         error(f"  ✘ {name} 被另一个进程占用,稍后再试")
         return

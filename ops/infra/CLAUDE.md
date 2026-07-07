@@ -36,9 +36,40 @@ All ops state/cache files live under `~/.cache/ops/`.
 - `cache_path(library_id, filename, legacy_hash=...)` resolves path + one-shot migrates legacy files
 - `library_cache_dir(library_id)` returns the dir, ensuring it exists
 - Locks at `~/.cache/ops/locks/` — fcntl, per-machine(**仅 json/redis 回退后端用**;postgres 后端走跨机 PG advisory lock,见 `lock.py`)
-- Index/metrics/datasources/bcorr **已迁 Postgres**(2026-07-04, 见 `derived/`)。`cache.py` 现仅剩 json 回退后端的 `derived.json` + locks 用;PG 后端下不再写这些缓存。
+- Index/metrics/datasources/bcorr **已迁 Postgres**(2026-07-04 迁 derived,2026-07-06 metrics/datasources/bcorr 再迁 `factor_snapshot`)。`cache.py` 现仅剩 json 回退后端 + `derived.json`(僵尸 index 缓存)+ locks 用;PG 后端下不再写这些缓存。
 
-## Derived (`derived/`)
+## Info (`info/`)
+
+因子**身份信息**存储层(2026-07-06 从 factor_state.author 拆出)。`factor_info` 表:身份是不可变属性,与生命周期状态、入库快照三表分离。
+
+- `base.py` — `FactorInfo` dataclass(name / author / discovery_method / created_at)+ `InfoStore` ABC(`get` / `upsert` / `delete` / `list(author=...)`)
+- `pg_store.py` — `PostgresInfoStore`,`factor_info` 表(`id SERIAL` 主键,`name UNIQUE`)。**三表的根**:`factor_state` / `factor_snapshot` 的 `name` 外键都 `REFERENCES factor_info(name) ON DELETE CASCADE`,删 info 级联删另两表(`ops rm` 走这条)。
+- `__init__.py` — `default_info_store(config)`(用 `config.state_postgres_conninfo`,与 state/snapshot 同库)
+- 写入方:`submit`(新因子 upsert)、`backfill`(legacy 因子补 author + discovery_method)
+
+## Snapshot (`snapshot/`)
+
+因子**入库时快照**存储层(2026-07-06,取代 derived 层的 metrics/datasources/bcorr 三组)。`factor_snapshot` 表。
+
+- `base.py` — `FactorSnapshot` dataclass(metrics 组 ret/shrp/mdd/tvr/fitness、datasources 组 fields/tables、index 组 has_pnl/dump_days/delay、bcorr 组 max_bcorr/max_bcorr_factor、`snapshot_at`)+ `SnapshotStore` ABC(`get` / `insert` / `delete` / `list(field/table_glob/has_index/metrics/sort_by/limit)`)
+- **语义**:快照**不可变**——只有 `insert`(check 通过时一次性写)和 `delete`(`ops rm`),**没有 update**。`snapshot_at = factor_state.entered_at`。字段值是"入库时表现",非"最新表现";要最新须重跑 backtest。旧 `ops refresh` 重算路径已删除。
+- `pg_store.py` — `PostgresSnapshotStore`,`factor_snapshot` 表(`id SERIAL` 主键,`name UNIQUE`,外键引 factor_info)。GIN(fields/tables) 反查、ret/shrp B-tree 索引。`list(...)` 把 field/tables/has_index/metrics/sort_by/limit 拼成 WHERE/ORDER BY/LIMIT 下推 SQL(承接原 DerivedStore.get_all 的下推语义,metric 键 SQL 表达式在 `_METRIC_EXPR`)。
+- `__init__.py` — `default_snapshot_store(config)`(用 `config.state_postgres_conninfo`,无 JSON 回退,永远 PG)
+- 写入方:`check` archive 阶段 `_persist_derived`(先 transition state 设 entered_at,再 insert snapshot)
+
+## Query (`query.py`)
+
+`query_factors(config, ...)` — **list / health 读三表的唯一入口**。返回 `FactorRow = (info, status, last_fail_stage, snapshot)`。
+
+- 参数语义同原 DerivedStore.get_all(author/field/table_glob/has_index/metrics/sort_by/n)外加 `status`(state 侧过滤)。
+- **当前实现**:三次独立查询(info_store.list + state_store.list + snapshot_store.list)+ 内存按 name 合并。**TODO**:优化为单条 SQL LEFT JOIN(见 `query.py` 注释)。
+- 只支持 Postgres 后端(单库永远 PG);非 PG 抛 `NotImplementedError`。
+
+## Derived (`derived/`) — 僵尸层,待清理
+
+**过渡状态(2026-07-06)**:metrics/datasources/bcorr 三组已迁 `snapshot/`,本层**只剩 index 组仍被 `LibraryScanner` 用作跨机 index 缓存**(`derived.json` / `factor_derived` 的 index 组 + `index_built_at` 水位)。代码尚未删除,是待清理僵尸层。下方描述保留原样供参考,但读侧 metrics/datasources/bcorr 已不走这里,而走 `query.py` / `snapshot/`。
+
+## Derived 内部(历史,index 缓存仍用)
 
 派生层 (index/metrics/datasources/bcorr) 的存储抽象,替代原 per-machine
 `~/.cache/ops/lib/<lib>/*.json`。三机共享 + 查询不扫盘。范式与 `store/` 一致。
@@ -48,7 +79,7 @@ All ops state/cache files live under `~/.cache/ops/`.
 - `join_state(...)` — 派生层 `LEFT JOIN factor_state`(同库同 library_id),一次查回 `(DerivedRecord, status, last_fail_stage)`,`--status` 精确下推 `s.status = %s`。**本 store 唯一跨表处**:明知 factor_state 的 schema,换 list 热路径一次 JOIN。仅 pg 后端可用(json 两个独立文件 JOIN 不成立)
 - `json_store.py` — `JsonDerivedStore`,单文件 `derived.json`,fcntl 锁 + 原子写,回退用;`get_all` 的下推参在内存里镜像同语义(复用 `base.metric_get`/`sort_key`,`_passes_metrics` + `_OP_FUNCS`)。无 `join_state`(回退走两次读)
 - `__init__.py` — `default_derived_store(config)` 按 `config.derived_backend` 分发 (json 默认 / postgres)
-- **联合读 (`../query.py`)**:`query_factors(config, ...)` 是 `list` 读 derived+state 的唯一入口,返回 `FactorRow = (DerivedRecord, status, last_fail_stage)`。后端探测 `_both_postgres_same_db`:同库 postgres → `join_state` 一条 JOIN;否则(json / 跨库)两次读 + 内存按 name 合并。limit 下推 gate 在此按后端判定。**唯一知道 derived/state 两张表能拼一起的地方**,store/ 与 derived/ 仍各管单表不互耦。`health` 只需派生层(单 `get_all`,不读 state),不走 `query_factors`
+- **联合读 (`../query.py`) — ⚠ 以下为迁移前历史,已不成立**:旧 `query_factors` 曾返回 `FactorRow = (DerivedRecord, status, last_fail_stage)`,同库 postgres 走 `join_state` 一条 JOIN。**三表重构后 (2026-07-06) query.py 改读 info+state+snapshot 三表,返回 `FactorRow = (info, status, last_fail_stage, snapshot)`,当前是三次查 + 内存合并 (无 join_state)。当前行为见上文 Query 节 / `core/CLAUDE.md`。** `health` 不走 `query_factors`(直接 `snapshot_store.list`)
 - **读写分离**:读侧 (list/info/health) 直接消费 `DerivedRecord`;写侧 `refresh_*`(services/list/)收 names 生产派生数据。index 由 `LibraryScanner.scan()` 扫盘后 publish,新鲜度靠 alpha_src mtime vs `index_built_at` 水位跨机判定
 - 迁移工具 `ops/tools/derived_migrate.py`;部署 `scripts/postgres/README.md`
 
@@ -68,7 +99,7 @@ Per-factor advisory lock. Serializes all ops mutations on a single factor. **两
 
 ### `pg_store.py` (default since 2026-07-04, 真相源)
 
-`PostgresStateStore` — 因子生命周期真相源,从 Redis 迁入。`factor_state` 表 (library_id,name) 主键,check_history 存 JSONB 列。原子性用 PG 事务 + `SELECT ... FOR UPDATE` 行级锁替代 Redis 的 WATCH/MULTI/EXEC(transition/append_check 锁行读改写,天然串行,无应用层重试)。时间戳列 TIMESTAMPTZ,读写边界做 ISO string ↔ 本地 tz 转换(`_ts_in`/`_ts_out`,与 Redis `_now()` 格式一致 —— naive datetime 必须打本地 tz 再入库,否则 PG 当 UTC 偏 8h)。连接池/UPSERT 范式同 `derived/pg_store.py`。迁移工具 `ops/tools/state_to_pg.py`。
+`PostgresStateStore` — 因子生命周期真相源,从 Redis 迁入。`factor_state` 表 `id SERIAL` 主键 + `name UNIQUE`(2026-07-06 去掉 library_id / author / submitted_by —— 永远单库,author 移到 factor_info)。`name` 外键 `REFERENCES factor_info(name) ON DELETE CASCADE`。`FactorRecord` 现为纯状态机(status/version/时间戳/last_fail_*/check_history),不含身份字段。原子性用 PG 事务 + `SELECT ... FOR UPDATE` 行级锁替代 Redis 的 WATCH/MULTI/EXEC(transition/append_check 锁行读改写,天然串行,无应用层重试)。时间戳列 TIMESTAMPTZ,读写边界做 ISO string ↔ 本地 tz 转换(`_ts_in`/`_ts_out`,与 Redis `_now()` 格式一致 —— naive datetime 必须打本地 tz 再入库,否则 PG 当 UTC 偏 8h)。连接池/UPSERT 范式同 `snapshot/pg_store.py`。迁移工具 `ops/tools/state_to_pg.py`(旧)+ `scripts/postgres/migrate_to_snapshot.sql`(三表迁移)。
 
 ### `redis_store.py` (回退, 且仍是 JFS metadata 后端)
 

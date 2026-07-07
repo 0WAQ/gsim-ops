@@ -12,16 +12,16 @@
 | | `ops cancel` | `ops rm` |
 |---|---|---|
 | 适用状态 | SUBMITTED (`--force` + CHECKING) | ACTIVE / REJECTED |
-| 删除范围 | staging 目录 + **硬删** state record | src/pnl/dump/feature + state + derived 全删 |
+| 删除范围 | staging 目录 + **硬删** state record | src/pnl/dump/feature + factor_info(级联 state + snapshot)全删 |
 | 因子曾入库 | 否(从未 ACTIVE) | 是 |
 
-因子从未 ACTIVE 过,没有产物/派生数据可清,只删 staging + state record。
+因子从未 ACTIVE 过,没有产物/快照可清,只删 staging + state record。
 
 ## 操作流程
 
 1. `_resolve_targets` — 按 name / user 筛选,状态不匹配
    - 单因子:报错退出
-   - 批量 (`-u`):归入 `Skipped` 段,不阻断
+   - 批量 (`-u`):先 `info_store.list(author=...)` 取 name 集合,与 `store.list()` 取交集;归入 `Skipped` 段,不阻断。显示 author 从 `info_store.get(name)` 取
 2. apt 风格确认 (`-y` 跳过)
 3. `_cancel_one`:
    - `shutil.rmtree(staging/<name>/)`

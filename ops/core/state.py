@@ -29,12 +29,15 @@ class CheckRecord:
 
 @dataclass
 class FactorRecord:
+    """因子生命周期状态（纯状态机，不含身份信息）。
+
+    author 已移到 FactorInfo，discovery_method 同理。
+    本 record 只管状态转移: SUBMITTED -> CHECKING -> ACTIVE/REJECTED。
+    """
     name: str
-    author: str
     status: FactorStatus
     updated_at: str
     submitted_at: str | None = None
-    submitted_by: str | None = None
     entered_at: str | None = None
     rejected_at: str | None = None
     last_fail_stage: str | None = None

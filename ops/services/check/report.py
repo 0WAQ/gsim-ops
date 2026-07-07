@@ -1,19 +1,21 @@
 """Structured check report.
 
 `ops check` 跑完落一份结构化 JSON 到 docs/reports/check/,给 QR 发失败原因用,
-也方便随仓库一起提交归档。完整 fail_reason(不截断)从 Redis check_history 读,
-不用 UI rows 里被截断的 note。
+也方便随仓库一起提交归档。完整 fail_reason(不截断)从 PG factor_state 的
+check_history 读,不用 UI rows 里被截断的 note。
 
-一次 run 一份,不 rotation。数据本身可再生(Redis + metrics.json),但报告随
+一次 run 一份,不 rotation。数据本身可再生(PG state + factor_snapshot),但报告随
 仓库版本化保留,方便回溯与转发。
 """
 import json
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
 from ops.infra.config import Config, get_project_root
 from ops.infra.store import default_store
-from ops.services.list.metrics import load_metrics
+from ops.infra.info import default_info_store
+from ops.infra.snapshot import default_snapshot_store
 from ops.utils.live_table import FactorRow
 
 
@@ -41,7 +43,8 @@ def write_check_report(config: Config, config_path: Path,
     pass 因子附 metrics。
     """
     store = default_store(config)
-    metrics = load_metrics(config_path)
+    info_store = default_info_store(config)
+    snapshot_store = default_snapshot_store(config)
 
     factors: list[dict] = []
     summary = {"pass": 0, "fail": 0, "error": 0, "locked": 0}
@@ -51,12 +54,24 @@ def write_check_report(config: Config, config_path: Path,
         summary[kind] = summary.get(kind, 0) + 1
 
         rec = store.get(name)
+        info_rec = info_store.get(name)
+        snapshot = snapshot_store.get(name) if kind == "pass" else None
         last = rec.check_history[-1] if rec and rec.check_history else None
-        m = metrics.get(name) if kind == "pass" else None
+
+        # 构造 metrics dict（只取 pass 因子的 snapshot 数据）
+        m = None
+        if snapshot:
+            m = {
+                "ret": snapshot.ret,
+                "shrp": snapshot.shrp,
+                "mdd": snapshot.mdd,
+                "tvr": snapshot.tvr,
+                "fitness": snapshot.fitness,
+            }
 
         factors.append({
             "name": name,
-            "author": rec.author if rec else None,
+            "author": info_rec.author if info_rec else None,
             "status": rec.status.value if rec else None,
             "outcome": kind,
             "check": {
@@ -66,7 +81,7 @@ def write_check_report(config: Config, config_path: Path,
                 "failed_stage": last.failed_stage if last else None,
                 "fail_reason": last.fail_reason if last else None,
             } if last else None,
-            "metrics": m.to_dict() if m else None,
+            "metrics": m,
         })
 
     factors.sort(key=lambda f: f["name"])

@@ -9,7 +9,7 @@
 
 ## 操作流程
 
-1. `_resolve_targets` — 按 name / user / status 筛选目标
+1. `_resolve_targets` — 按 name / user / status 筛选目标(批量 `-u` 先 `info_store.list(author=...)` 取 name 集合,再与 `store.list(status=...)` 取交集;author 从 factor_info 读)
 2. `_locate_source` — 按状态定位因子源目录
 3. 显示计划，apt-install 风格确认 (`-y` 跳过)
 4. `_restage_one` — move src → staging, rewrite XML module path, transition state → SUBMITTED

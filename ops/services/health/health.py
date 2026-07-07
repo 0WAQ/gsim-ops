@@ -81,18 +81,17 @@ def _check_missing_datasources(
 
 
 def _load_derived_maps(config) -> tuple[dict, dict]:
-    """One derived read -> (metrics_present, datasources) maps keyed by name.
-    Replaces the old load_metrics + load_datasources (two full-table scans) with
-    a single get_all: health only needs presence (metrics) + fields/tables
-    (datasources), both live on the same DerivedRecord."""
-    from ops.infra.derived import default_derived_store
+    """One snapshot read -> (metrics_present, datasources) maps keyed by name.
+    health only needs presence (metrics) + fields/tables (datasources), both
+    live on the same FactorSnapshot. 迁移到 snapshot 后 (原 derived 层退役)。"""
+    from ops.infra.snapshot import default_snapshot_store
     metrics: dict[str, bool] = {}
     datasources: dict[str, dict] = {}
-    for name, rec in default_derived_store(config).get_all().items():
-        if rec.ret is not None or rec.shrp is not None or rec.fitness is not None:
-            metrics[name] = True
-        if rec.fields is not None or rec.tables is not None:
-            datasources[name] = {"fields": rec.fields or [], "tables": rec.tables or []}
+    for snap in default_snapshot_store(config).list():
+        if snap.ret is not None or snap.shrp is not None or snap.fitness is not None:
+            metrics[snap.name] = True
+        if snap.fields is not None or snap.tables is not None:
+            datasources[snap.name] = {"fields": snap.fields or [], "tables": snap.tables or []}
     return metrics, datasources
 
 

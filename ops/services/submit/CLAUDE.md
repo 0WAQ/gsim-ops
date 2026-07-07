@@ -37,16 +37,19 @@ staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
                  [same flow as new factor]
 ```
 
-**A factor record is never deleted from state.json** — it transitions through statuses but stays. REJECTED records keep `last_fail_stage` / `last_fail_reason` for auditing. (reconcile 已下线;不再有自动 drop orphan 逻辑。)
+**A factor record is never deleted from state (PG factor_state)** — it transitions through statuses but stays. REJECTED records keep `last_fail_stage` / `last_fail_reason` for auditing. (reconcile 已下线;不再有自动 drop orphan 逻辑。)
 
-## Two Persistence Layers
+## Persistence Layers
 
 - **`meta.json`** inside each factor directory — the factor's *identity card*. Fields: name, author, birthday, universe, category, delay, backdays, dump_alpha, has_intraday_curve, operations, declared_data_modules, datasources (fields+tables), code_lines, frequency, discovery_method, submitted_by, submitted_at. Travels with the factor through staging → alpha_src. Defined in `ops/core/factormeta.py`. Persistent — must not be regenerated lossily. `discovery_method` (`automated`/`manual`) 来自 XML `<Description @discovery_method>`,由 `submit_one` 硬校验(缺失/非法拒收);legacy 存量因子该字段为 `None`。
-- **lifecycle state** (FactorRecord: name, author, status, updated_at, submitted_at/by, history of CheckRecord) — 后端由 `default_store(config)` 按 `state.backend` 分发:生产是共享 Postgres(真相源),json 仅 `config.prod-legacy.yaml` 回退(`~/.cache/ops/factor_state.json`,fcntl 锁,per-host)。可从 meta.json + 目录位置重建。
+- **factor_info** (PG,`ops/infra/info/`) — 身份信息 (author / discovery_method / created_at)。submit 新因子时 `info_store.upsert`;`--overwrite` 不改 info(身份不变)。
+- **factor_state** (PG,`ops/infra/store/`) — 生命周期状态 (FactorRecord: name, status, version, updated_at, submitted_at, entered_at, ...)。**2026-07-06 起 FactorRecord 不含 author / submitted_by**(移到 factor_info)。新因子 `store.put`(version=1);`--overwrite` `store.transition → SUBMITTED, version += 1`。后端由 `default_store(config)` 按 `state.backend` 分发:生产是共享 Postgres(真相源),json 仅 `config.prod-legacy.yaml` 回退。
+
+**submit 写两表**:新因子先 `info_store.upsert(FactorInfo)` 再 `store.put(FactorRecord)`;`--overwrite` 只 `store.transition`(info 不动)。
 
 ## Backfilled Factors
 
-The 2551 legacy entries have `submitted_at = null` and `submitted_by = null`. Their real submission time is not knowable — only `entered_at` (the moment backfill ran) is set. Code reading these fields must tolerate `None`.
+Backfill 的 legacy entries `submitted_at = null`(真实提交时间不可知),只 set `entered_at`(backfill 运行的时刻)。Code reading these fields must tolerate `None`。(`submitted_by` 已不在 state 记录里 —— 三表重构后 FactorRecord 无此字段;它仍是 meta.json 的字段,见 `factormeta.py`。)
 
 ## Author Resolution (`parser.py`)
 
@@ -83,7 +86,7 @@ orphan staging。`_build_npy_index` 在 batch 入口扫一次,传给每个 `pars
 
 ## Backfill (`services/backfill/backfill.py`)
 
-One-shot for legacy factors in `alpha_src/` (originally 2194, now 2551 in prod) — builds the npy_index once and reuses it across all `parse_factor()` calls (the optional `npy_index` param avoids 2551 redundant filesystem walks). Skips records that already exist in state.
+One-shot for legacy factors in `alpha_src/` (originally 2194, now 7594 in prod 三表迁移后) — builds the npy_index once and reuses it across all `parse_factor()` calls (the optional `npy_index` param avoids redundant filesystem walks). **同时写 `factor_info`(author + discovery_method,缺省 `backfill`)+ `factor_state`(不带 author,已入库因子 status=ACTIVE)**。Skips records that already exist in state.
 
 ---
 

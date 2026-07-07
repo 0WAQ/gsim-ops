@@ -8,7 +8,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 
 - **infra/config.py**: `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var -> `./config.yaml` -> project root `config.yaml`. Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables (`OPS_GSIM_HOME`, `OPS_STORAGE`, `OPS_WORKSPACE`).
 - **core/alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code. Constructor calls `_modify_always()` which modifies XML on disk (paths from config, not hardcoded). `_modify_always` also updates per-Data module `niodatapath` for L2 data (replaces `/datasvc/data/cc/` prefix with config's `nio_data_path`).
-- **core/library.py**: `LibraryScanner` scans `alpha_src/` and publishes the index (name/author/has_pnl/dump_days/delay) to the DerivedStore (see `infra/derived/`). Freshness = alpha_src mtime vs the store's `index_built_at` watermark (shared across machines); `--refresh` forces a rescan. `FactorInfo` is now a slim scan product (identity + paths + index only) — derived values live in `DerivedRecord`, not here.
+- **core/library.py**: `LibraryScanner` scans `alpha_src/` and publishes the index (name/author/has_pnl/dump_days/delay) to the DerivedStore (see `infra/derived/`). Freshness = alpha_src mtime vs the store's `index_built_at` watermark (shared across machines); `ops list --refresh` forces a rescan. 其扫描产物类也叫 `FactorInfo`(与 `infra/info/` 的 store dataclass 同名但不同物,一个是扫盘结果、一个是 factor_info 表模型)。**过渡状态**:三表重构后 metrics/datasources/bcorr 已迁 `factor_snapshot`,但 index 组仍暂存 DerivedStore(`derived/` 层未删,是待清理的僵尸层)。
 - **core/metrics.py**: `Metrics` dataclass (ret, tvr, shrp, mdd, fitness). Serialization keys use `ret%`, `tvr%`, `mdd%` to indicate percentage fields.
 - **infra/gsim/runner.py**: `Runner` static methods shell out to gsim tools (`run_backtest`, `run_simsummary`, `run_bcorr`) via `subprocess.run` with configurable timeout.
 - **infra/ssh.py**: Paramiko-based SSH client.
@@ -17,20 +17,26 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 
 | File | Purpose |
 |------|---------|
-| `core/state.py` | `FactorStatus` enum, `CheckRecord`, `FactorRecord` |
+| `core/state.py` | `FactorStatus` enum, `CheckRecord`, `FactorRecord`(纯状态机,2026-07-06 起不含 author / submitted_by) |
 | `core/factormeta.py` | `FactorMeta` dataclass + `META_VERSION` + load/save |
-| `infra/store/pg_store.py` | Postgres state backend (真相源 since 2026-07-04), `SELECT FOR UPDATE` + check_history JSONB |
+| `infra/info/` | `FactorInfo` dataclass + `InfoStore` ABC + `PostgresInfoStore`(factor_info 表:身份信息 author/discovery_method/created_at) |
+| `infra/snapshot/` | `FactorSnapshot` dataclass + `SnapshotStore` ABC + `PostgresSnapshotStore`(factor_snapshot 表:入库时不可变快照 metrics+datasources+index+bcorr) |
+| `infra/store/pg_store.py` | Postgres state backend (真相源 since 2026-07-04), `SELECT FOR UPDATE` + check_history JSONB;2026-07-06 去 library_id / author,`id SERIAL` 主键 + `name UNIQUE`,外键引 factor_info |
 | `infra/store/redis_store.py` | Redis state backend (回退; 实例仍是 JFS metadata 后端) |
 | `infra/store/json_store.py` | JSON state backend, fcntl cross-process lock, atomic write |
+| `infra/query.py` | `query_factors(config, ...)` — list 读 info+state+snapshot 三表的唯一入口,返回 `FactorRow = (info, status, last_fail_stage, snapshot)`(当前三次查 + 内存按 name JOIN,TODO 单条 SQL)。health 不走此入口(直接 LibraryScanner.scan + snapshot_store.list) |
 | `infra/lock.py` | Per-factor advisory lock (`factor_lock(name, config)` / `FactorLocked`);postgres 后端跨机 PG advisory lock,json/redis 回退 fcntl |
+
+**三表外键**:`factor_state.name` / `factor_snapshot.name` 均 `REFERENCES factor_info(name) ON DELETE CASCADE`。删 factor_info 级联删 state + snapshot(`ops rm` 走这条)。
 
 ## Factor Metrics
 
-Metrics (ret%, shrp, mdd%, tvr%, fitness) are obtained via `simsummary` and stored in the DerivedStore (`infra/derived/`, Postgres or json fallback), keyed by `(library_id, name)`.
+Metrics (ret%, shrp, mdd%, tvr%, fitness) 由 `simsummary` 算出,存 `factor_snapshot` 表(`infra/snapshot/`),按 `name` 键。
 
-**Two update paths**:
-- **Incremental (主路径)**: `ops check` — 因子通过所有检查后、archive 入库前,`_persist_derived` 跑 simsummary 并落库 metrics(连同 datasources/bcorr 三组一次性写)。入库即完整。
-- **Batch (运维/legacy)**: `ops refresh [--metrics]` — 对指定因子(或全库)重跑 simsummary upsert metrics。用于补 REJECTED / backfill 旧因子 / 派生库重建,不是常规路径。
+**语义(2026-07-06 变更)**:这些指标是**入库时不可变快照**(`snapshot_at = factor_state.entered_at`),不是"最新表现"。因子通过 check、archive 入库前,`_persist_derived` 跑 simsummary 并把 metrics + datasources + bcorr + index 四组一次性 insert 进 factor_snapshot,之后永不更新。如需最新表现须重跑 backtest。
+
+- **旧路径**:`ops refresh [--metrics]` 重算——**已废弃删除**(命令不存在)。快照不可刷新。
+- REJECTED 因子不写 snapshot(未入库)。
 
 **simsummary output columns** (whitespace-separated):
 ```

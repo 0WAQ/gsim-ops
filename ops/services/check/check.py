@@ -8,7 +8,8 @@ from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner
 from ops.infra.store import default_store
-from ops.infra.derived import default_derived_store
+from ops.infra.info import default_info_store, FactorInfo
+from ops.infra.snapshot import default_snapshot_store, FactorSnapshot
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.services.list.datasource import (
     parse_datasources,
@@ -153,38 +154,67 @@ class CheckerPipeline:
             )
 
     def _persist_derived(self, factor: AlphaMetadata, metrics, corr_result) -> None:
-        """入库前把四组派生数据里的三组落库(index 由 LibraryScanner 扫盘 publish):
-        - metrics: simsummary 结果
-        - datasources: AST parse getData() + npy index 解析出的 fields/tables
-        - bcorr: correlation stage 已算出的 max_bcorr(零额外计算,只是之前被丢弃)
+        """入库前把所有派生数据写入 factor_snapshot (入库时快照，不可变)。
+
+        2026-07-06 重构: 从四次 upsert (index/metrics/datasources/bcorr) 改为一次性
+        写入 factor_snapshot。snapshot_at = factor_state.entered_at (入库时间)。
 
         必须在 to_lib 之前调 —— datasources 依赖 factor.py_file(此时仍在 staging)。
-        派生库丢了不致命(可 ops refresh 重建),故各组独立 try,互不阻断入库。
+        各组独立 try，互不阻断入库（快照缺失可运维补救，但入库不能失败）。
+
+        注意: index 组 (has_pnl/dump_days/delay) 暂时为 None，由 LibraryScanner 扫盘
+        后补全（需重新设计 scanner → snapshot 的更新路径，暂时留空）。
         """
-        store = default_derived_store(self.config)
+        snapshot_store = default_snapshot_store(self.config)
+        state_store = default_store(self.config)
 
+        # 获取入库时间（factor_state.entered_at）
+        state = state_store.get(factor.name)
+        if not state or not state.entered_at:
+            logger.error("Cannot persist snapshot: factor {} has no entered_at", factor.name)
+            return
+
+        snapshot_at = state.entered_at
+
+        # 准备各组数据
+        ret = shrp = mdd = tvr = fitness = None
         if metrics:
-            try:
-                store.upsert_metrics(factor.name, {
-                    "ret": metrics.ret, "shrp": metrics.shrp, "mdd": metrics.mdd,
-                    "tvr": metrics.tvr, "fitness": metrics.fitness,
-                })
-            except Exception:
-                logger.exception("persist metrics failed factor={}", factor.name)
+            ret, shrp, mdd, tvr, fitness = (
+                metrics.ret, metrics.shrp, metrics.mdd, metrics.tvr, metrics.fitness
+            )
 
+        fields = tables = None
         try:
             fields = parse_datasources(factor.py_file)
             tables = resolve_tables(fields, _build_npy_index(self.config.nio_data_path))
-            store.upsert_datasources(factor.name, fields, tables)
         except Exception:
-            logger.exception("persist datasources failed factor={}", factor.name)
+            logger.exception("parse datasources failed factor={}", factor.name)
 
-        if corr_result is not None and corr_result.max_bcorr is not None:
-            try:
-                store.upsert_bcorr(factor.name, corr_result.max_bcorr,
-                                   corr_result.max_bcorr_factor)
-            except Exception:
-                logger.exception("persist bcorr failed factor={}", factor.name)
+        max_bcorr = max_bcorr_factor = None
+        if corr_result is not None:
+            max_bcorr = corr_result.max_bcorr
+            max_bcorr_factor = corr_result.max_bcorr_factor
+
+        # 一次性写入 snapshot
+        try:
+            snapshot_store.insert(FactorSnapshot(
+                name=factor.name,
+                ret=ret,
+                shrp=shrp,
+                mdd=mdd,
+                tvr=tvr,
+                fitness=fitness,
+                fields=fields,
+                tables=tables,
+                has_pnl=None,  # 由 LibraryScanner 扫盘后补全
+                dump_days=None,
+                delay=None,
+                max_bcorr=max_bcorr,
+                max_bcorr_factor=max_bcorr_factor,
+                snapshot_at=snapshot_at,
+            ))
+        except Exception:
+            logger.exception("persist snapshot failed factor={}", factor.name)
 
     def to_lib(self, factor: AlphaMetadata):
         self._clean_pycache(factor.dir)
@@ -269,27 +299,34 @@ class CheckerPipeline:
     def _ensure_record(self, factor: AlphaMetadata, store) -> None:
         if store.get(factor.name) is not None:
             return
-        # Try to recover author/submitted_by from meta.json if present
+        # state record 缺失（crash 恢复 / 直接 check staging 未经 submit）时补建。
+        # 三表结构：author/discovery_method 写 factor_info，状态机字段写 factor_state。
         meta_path = factor.dir / "meta.json"
         author = factor.key.user
-        submitted_by = factor.key.user
+        discovery_method = factor.discovery_method
         submitted_at = datetime.now().isoformat(timespec="seconds")
         if meta_path.exists():
             try:
                 meta = FactorMeta.load(meta_path)
                 author = meta.author or author
-                submitted_by = meta.submitted_by or submitted_by
+                discovery_method = meta.discovery_method or discovery_method
                 submitted_at = meta.submitted_at or submitted_at
             except Exception:
                 pass
         now = datetime.now().isoformat(timespec="seconds")
-        store.put(FactorRecord(
+        info_store = default_info_store(self.config)
+        info_store.upsert(FactorInfo(
             name=factor.name,
             author=author,
+            discovery_method=discovery_method,
+            created_at=submitted_at,
+        ))
+        store.put(FactorRecord(
+            name=factor.name,
             status=FactorStatus.SUBMITTED,
+            version=1,
             updated_at=now,
             submitted_at=submitted_at,
-            submitted_by=submitted_by,
         ))
 
     def run_one(self, factor: AlphaMetadata, i: int, q) -> str:
@@ -364,18 +401,24 @@ class CheckerPipeline:
             corr_result = self.correlation_checker.check(factor)
             _emit_stage_done("correlation", Status.PASSED)
 
-            # 6. Archive — simsummary + persist derived + move to lib
+            # 6. Archive — simsummary + mark ACTIVE (设置 entered_at) + persist snapshot + move to lib
             #    (no live column; folded into outcome)
             metrics = Runner.run_simsummary(factor.pnl_file, self.config)
-            self._persist_derived(factor, metrics, corr_result)
-            prepare_for_archive(factor)
-            self.to_lib(factor)
 
+            # 先设置 entered_at (入库时间)，snapshot_at 依赖这个时间戳
             now = datetime.now().isoformat(timespec="seconds")
             check.finished_at = now
             check.passed = True
             store.append_check(factor.name, check)
             store.transition(factor.name, FactorStatus.ACTIVE, entered_at=now)
+
+            # 再写入 snapshot (需要 entered_at 作为 snapshot_at)
+            self._persist_derived(factor, metrics, corr_result)
+
+            # 最后移动文件到 alpha_src
+            prepare_for_archive(factor)
+            self.to_lib(factor)
+
             q.put(("done", factor.name, "pass", "→ lib", "green"))
             return "pass"
 

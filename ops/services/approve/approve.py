@@ -16,6 +16,7 @@ approve 不重跑任何阶段,只翻状态。
 from ops.infra.config import Config
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.infra.store import default_store
+from ops.infra.info import default_info_store
 from ops.infra.store.json_store import _now
 from ops.core.state import FactorRecord, FactorStatus, CheckRecord
 from ops.utils.printer import banner, bottom, info, warn, error, highlight
@@ -28,7 +29,7 @@ def _eligible(rec: FactorRecord) -> bool:
     return rec.status == FactorStatus.REJECTED and rec.last_fail_stage == _CORRELATION
 
 
-def _resolve_targets(args, store) -> tuple[list[FactorRecord], list[tuple[FactorRecord, str]]]:
+def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[tuple[FactorRecord, str]]]:
     name: str | None = args.factor_name
 
     if name and args.user:
@@ -52,7 +53,15 @@ def _resolve_targets(args, store) -> tuple[list[FactorRecord], list[tuple[Factor
         error("  ✘ 必须指定 factor_name 或 -u")
         return [], []
 
-    records = store.list(author=args.user, status=FactorStatus.REJECTED)
+    # 批量模式：先从 info 获取符合 author 条件的 name 集合
+    info_records = info_store.list(author=args.user)
+    author_names = {i.name for i in info_records}
+
+    # 再从 state 获取 REJECTED 记录
+    records = store.list(status=FactorStatus.REJECTED)
+
+    # 取交集
+    records = [r for r in records if r.name in author_names]
     records.sort(key=lambda r: r.name)
     targets: list[FactorRecord] = []
     skipped: list[tuple[FactorRecord, str]] = []
@@ -65,10 +74,18 @@ def _resolve_targets(args, store) -> tuple[list[FactorRecord], list[tuple[Factor
 
 
 def _print_plan(targets: list[FactorRecord],
-                skipped: list[tuple[FactorRecord, str]]) -> None:
+                skipped: list[tuple[FactorRecord, str]],
+                info_store) -> None:
+    # 批量获取 author 信息
+    authors = {}
+    for r in targets:
+        info_rec = info_store.get(r.name)
+        authors[r.name] = info_rec.author if info_rec else "?"
+
     highlight(f"  将 approve {len(targets)} 个因子 → active:")
     for r in targets:
-        info(f"    · {r.name:<40}  author={r.author:<10}  rejected_at={r.rejected_at or '?'}")
+        author = authors.get(r.name, "?")
+        info(f"    · {r.name:<40}  author={author:<10}  rejected_at={r.rejected_at or '?'}")
     if skipped:
         highlight(f"  跳过 {len(skipped)} 个(非 correlation 失败):")
         for r, why in skipped:
@@ -98,19 +115,20 @@ def _approve_one(rec: FactorRecord, config: Config, store) -> None:
 def run_approve(args) -> None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
+    info_store = default_info_store(config)
 
-    targets, skipped = _resolve_targets(args, store)
+    targets, skipped = _resolve_targets(args, store, info_store)
     if not targets:
         if not skipped:
             warn("  没有匹配的因子")
         else:
             banner("approve · 0 个可处理")
-            _print_plan(targets, skipped)
+            _print_plan(targets, skipped, info_store)
             bottom()
         return
 
     banner(f"approve · {len(targets)} 个因子")
-    _print_plan(targets, skipped)
+    _print_plan(targets, skipped, info_store)
 
     if not args.yes:
         ans = input(f"  确认 approve {len(targets)} 个因子? [y/N] ").strip().lower()

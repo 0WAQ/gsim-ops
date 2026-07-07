@@ -22,7 +22,7 @@
 | `ops approve` | 多样性豁免:为数据覆盖放行 correlation-rejected 因子 | REJECTED 且 last_fail_stage=correlation | — | 不变 |
 | `ops cancel` | 撤回未入库的 SUBMITTED 因子 (删 staging + 硬删 state record) | SUBMITTED (或 CHECKING + `--force`) | — | — |
 | `ops clear` | 清 staging 孤儿目录 (state 无 record) | — | — | — |
-| `ops rm` | 彻底删除因子(src/pnl/dump/feature + state + derived,不可逆) | 任意状态 | — | — |
+| `ops rm` | 彻底删除因子(src/pnl/dump/feature + factor_info,级联删 state + snapshot,不可逆) | 任意状态 | — | — |
 
 ## 状态转移图
 

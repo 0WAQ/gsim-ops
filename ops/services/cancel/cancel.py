@@ -2,7 +2,7 @@
 
 针对场景: QR 提交后发现因子不合规,在 ops check 之前撤掉。因子从未 ACTIVE
 过,只需删 staging + 硬删 state record(无产物、无派生数据可清)。ops rm 则
-删已入库因子的全部落点(src/pnl/dump/feature + state + derived)。
+删已入库因子的全部落点(src/pnl/dump/feature + factor_info 级联 state + snapshot)。
 
 默认仅 SUBMITTED;--force 也允许 CHECKING(从崩溃 / 中断的 check 残留中清出)。
 真正在跑的 check 由 factor_lock 兜底拦截。
@@ -21,6 +21,7 @@ import shutil
 from ops.infra.config import Config
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.infra.store import default_store
+from ops.infra.info import default_info_store
 from ops.core.state import FactorRecord, FactorStatus
 from ops.utils.printer import banner, bottom, info, warn, error, highlight
 
@@ -31,7 +32,7 @@ def _eligible_statuses(force: bool) -> set[FactorStatus]:
     return {FactorStatus.SUBMITTED}
 
 
-def _resolve_targets(args, store) -> tuple[list[FactorRecord], list[tuple[FactorRecord, str]]]:
+def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[tuple[FactorRecord, str]]]:
     name: str | None = args.factor_name
     eligible = _eligible_statuses(args.force)
 
@@ -55,7 +56,15 @@ def _resolve_targets(args, store) -> tuple[list[FactorRecord], list[tuple[Factor
         error("  ✘ 必须指定 factor_name 或 -u")
         return [], []
 
-    records = store.list(author=args.user)
+    # 批量模式：先从 info 获取符合 author 条件的 name 集合
+    info_records = info_store.list(author=args.user)
+    author_names = {i.name for i in info_records}
+
+    # 再从 state 获取所有记录
+    records = store.list()
+
+    # 取交集并按 eligible 筛选
+    records = [r for r in records if r.name in author_names]
     records.sort(key=lambda r: r.name)
     targets: list[FactorRecord] = []
     skipped: list[tuple[FactorRecord, str]] = []
@@ -69,10 +78,18 @@ def _resolve_targets(args, store) -> tuple[list[FactorRecord], list[tuple[Factor
 
 def _print_plan(targets: list[FactorRecord],
                 skipped: list[tuple[FactorRecord, str]],
+                info_store,
                 force: bool) -> None:
+    # 批量获取 author 信息
+    authors = {}
+    for r in targets:
+        info_rec = info_store.get(r.name)
+        authors[r.name] = info_rec.author if info_rec else "?"
+
     highlight(f"  将 cancel {len(targets)} 个因子(删 staging + 删 state record):")
     for r in targets:
-        info(f"    · {r.name:<40}  {r.status.value:<9}  author={r.author:<10}  "
+        author = authors.get(r.name, "?")
+        info(f"    · {r.name:<40}  {r.status.value:<9}  author={author:<10}  "
              f"submitted_at={r.submitted_at or '?'}")
     if skipped:
         highlight(f"  跳过 {len(skipped)} 个(非 submitted{'/checking' if force else ''}):")
@@ -104,19 +121,20 @@ def _cancel_one(rec: FactorRecord, config: Config, store) -> None:
 def run_cancel(args) -> None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
+    info_store = default_info_store(config)
 
-    targets, skipped = _resolve_targets(args, store)
+    targets, skipped = _resolve_targets(args, store, info_store)
     if not targets:
         if not skipped:
             warn("  没有匹配的因子")
         else:
             banner("cancel · 0 个可处理")
-            _print_plan(targets, skipped, force=args.force)
+            _print_plan(targets, skipped, info_store, force=args.force)
             bottom()
         return
 
     banner(f"cancel · {len(targets)} 个因子")
-    _print_plan(targets, skipped, force=args.force)
+    _print_plan(targets, skipped, info_store, force=args.force)
 
     if not args.yes:
         ans = input(f"  确认 cancel {len(targets)} 个因子? [y/N] ").strip().lower()

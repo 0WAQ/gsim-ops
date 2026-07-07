@@ -12,6 +12,10 @@ def _default_state_path(config: Config) -> Path:
 
 
 def default_store(config: Config) -> StateStore:
+    """返回对应的 StateStore 实现。
+
+    2026-07-06 重构: Postgres 后端不再需要 library_id (永远单库)。
+    """
     backend = (getattr(config, "state_backend", None) or "json").lower()
     if backend == "json":
         return JsonStateStore(_default_state_path(config))
@@ -28,7 +32,7 @@ def default_store(config: Config) -> StateStore:
                 "config.state.postgres.{host,dbname,user,...} required when state_backend=postgres"
             )
         from .pg_store import PostgresStateStore
-        return PostgresStateStore(conninfo=conninfo, library_id=config.library_id)
+        return PostgresStateStore(conninfo=conninfo)
     raise ValueError(f"unknown state_backend: {backend!r} (json | redis | postgres)")
 
 

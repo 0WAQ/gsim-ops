@@ -6,6 +6,7 @@ from ops.infra.config import Config
 from ops.utils.func import date_range
 from ops.utils.printer import info, warn, error, highlight, banner, bottom, progress
 from ops.infra.store import default_store, StateStore
+from ops.infra.info import default_info_store, FactorInfo
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.core.state import FactorRecord, FactorStatus
 from ops.services.list.datasource import _build_npy_index
@@ -71,9 +72,11 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
                npy_index: dict | None = None) -> str:
     """Submit one factor from staging into state. Returns "pass" | "skip" | "fail".
 
-    New factor (no state record)     -> put, version=1.
-    Existing factor + overwrite=True -> transition to SUBMITTED, version += 1
-                                        (new code from dropbox; old alpha_src kept).
+    2026-07-06 重构: 拆分写入 factor_info (author/discovery_method) + factor_state (状态)。
+
+    New factor (no state record)     -> insert info + put state, version=1.
+    Existing factor + overwrite=True -> transition state to SUBMITTED, version += 1
+                                        (info 不变，只更新 state).
     Existing factor + overwrite=False -> "skip" (defensive; run_submit normally
                                         filters these out before copy).
     """
@@ -113,21 +116,28 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
     meta_path = staging_dir / META_FILENAME
     meta.save(meta_path)
 
+    info_store = default_info_store(config)
+
     if rec is None:
-        store.put(FactorRecord(
+        # 新因子: 写 factor_info + factor_state
+        info_store.upsert(FactorInfo(
             name=meta.name,
             author=meta.author or submitted_by,
+            discovery_method=meta.discovery_method,
+            created_at=submitted_at,
+        ))
+        store.put(FactorRecord(
+            name=meta.name,
             status=FactorStatus.SUBMITTED,
             updated_at=submitted_at,
             submitted_at=submitted_at,
-            submitted_by=submitted_by,
         ))
         info(f"  ✔  {meta.name} → submitted (version=1)")
     else:
+        # 已存在: 只更新 state (version += 1)，info 不变
         new_version = rec.version + 1
         store.transition(meta.name, FactorStatus.SUBMITTED,
                          submitted_at=submitted_at,
-                         submitted_by=submitted_by,
                          version=new_version)
         info(f"  ✔  {meta.name} → submitted (version={new_version},覆盖新代码)")
 

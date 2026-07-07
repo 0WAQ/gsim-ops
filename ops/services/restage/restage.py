@@ -1,7 +1,7 @@
 """ops restage — 把已入库因子召回 staging,等待重跑 check(原代码不变)。
 
 restage 本身不跑回测:它只把因子从 alpha_src 搬回 staging/<name>/、状态翻为
-SUBMITTED,让下一次 ops check 捡起重跑 8 阶段流水线。version 不变。
+SUBMITTED,让下一次 ops check 捡起重跑 7 阶段流水线。version 不变。
 
 支持的来源状态:
 - ACTIVE   (默认): 源 = alpha_src/<name>/
@@ -25,6 +25,7 @@ import xmltodict
 from ops.infra.config import Config
 from ops.infra.lock import factor_lock, FactorLocked
 from ops.infra.store import default_store
+from ops.infra.info import default_info_store
 from ops.core.state import FactorRecord, FactorStatus
 from ops.services.rm.rm import _purge_artifacts
 from ops.utils.printer import banner, bottom, info, warn, error, highlight
@@ -67,7 +68,7 @@ def _locate_source(rec: FactorRecord, config: Config) -> Path | None:
     return None
 
 
-def _resolve_targets(args, store, config: Config) -> list[FactorRecord]:
+def _resolve_targets(args, store, info_store, config: Config) -> list[FactorRecord]:
     name: str | None = args.factor_name
     status_enum = FactorStatus(args.status)
 
@@ -89,19 +90,40 @@ def _resolve_targets(args, store, config: Config) -> list[FactorRecord]:
         error("  ✘ 必须指定 factor_name 或 -u / -s")
         return []
 
-    records = store.list(author=args.user, status=status_enum)
+    # 批量模式：先从 info 获取符合 author 条件的 name 集合
+    if args.user:
+        info_records = info_store.list(author=args.user)
+        author_names = {i.name for i in info_records}
+    else:
+        author_names = None
+
+    # 再从 state 获取符合 status 条件的记录
+    records = store.list(status=status_enum)
+
+    # 取交集
+    if author_names is not None:
+        records = [r for r in records if r.name in author_names]
+
     records.sort(key=lambda r: r.name)
     return records
 
 
 def _print_plan(targets: list[FactorRecord],
                 sources: dict[str, Path | None],
+                info_store,
                 purge: bool) -> None:
+    # 批量获取 author 信息
+    authors = {}
+    for r in targets:
+        info_rec = info_store.get(r.name)
+        authors[r.name] = info_rec.author if info_rec else "?"
+
     highlight(f"  将 restage {len(targets)} 个因子 → submitted:")
     for r in targets:
         src = sources.get(r.name)
         src_str = str(src) if src else "✘ 源缺失"
-        info(f"    · {r.name:<40}  {r.status.value:<9}  author={r.author:<10}  ← {src_str}")
+        author = authors.get(r.name, "?")
+        info(f"    · {r.name:<40}  {r.status.value:<9}  author={author:<10}  ← {src_str}")
     if purge:
         highlight("  --purge: 同步清除 alpha_dump + alpha_feature(alpha_pnl 保留)")
     else:
@@ -154,8 +176,9 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config, store, purge: boo
 def run_restage(args) -> None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
+    info_store = default_info_store(config)
 
-    targets = _resolve_targets(args, store, config)
+    targets = _resolve_targets(args, store, info_store, config)
     if not targets:
         warn("  没有匹配的因子")
         return
@@ -163,7 +186,7 @@ def run_restage(args) -> None:
     sources: dict[str, Path | None] = {r.name: _locate_source(r, config) for r in targets}
 
     banner(f"restage · {len(targets)} 个因子")
-    _print_plan(targets, sources, purge=args.purge)
+    _print_plan(targets, sources, info_store, purge=args.purge)
 
     missing = [r.name for r in targets if sources[r.name] is None]
     if missing:

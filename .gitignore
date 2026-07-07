@@ -21,3 +21,5 @@ mlartifacts/
 # postgres deploy secrets / dumps
 scripts/postgres/.env
 scripts/postgres/dumps/
+# DB migration backups (local only)
+scripts/postgres/*backup*.sql

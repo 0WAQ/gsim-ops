@@ -16,9 +16,10 @@ Idempotent: re-running upserts in place. The four groups are written with
 the store's group-wise upsert methods, so partial caches migrate cleanly
 (a factor present only in metrics.json still lands, datasources left null).
 
-This is a convenience/accelerator only — the derived layer is fully
-rebuildable from JFS via `ops refresh` (metrics/datasources/bcorr). If a
-cache is missing or stale, prefer a rebuild.
+This is a convenience/accelerator only. NOTE(2026-07-06): the derived layer has
+been superseded by the three-table split (factor_info/state/snapshot); the old
+`ops refresh` rebuild path was removed. This tool is retained for historical
+reference only — new metrics are immutable snapshots written at archive time.
 """
 import argparse
 import json

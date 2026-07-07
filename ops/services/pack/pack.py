@@ -259,12 +259,21 @@ def run_pack(args):
     # 按 user/status 过滤
     if user or status:
         from ops.infra.store import default_store
+        from ops.infra.info import default_info_store
         store = default_store(config)
+        info_store = default_info_store(config)
+
         records = store.list()
+
+        # 如果需要按 user 过滤，先获取 author 信息
+        author_map = {}
+        if user:
+            info_records = info_store.list(author=user)
+            author_map = {i.name: i.author for i in info_records}
 
         filtered = set()
         for r in records:
-            if user and r.author != user:
+            if user and r.name not in author_map:
                 continue
             if status and r.status.value != status:
                 continue
