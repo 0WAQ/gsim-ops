@@ -79,18 +79,18 @@ def test_e2e_pass_to_active(e2e_env, make_e2e_factor, relax_thresholds):
     assert not (config.staging / "AlphaWbaiPass").exists()
     # pnl 按 discovery_method=manual 分流
     assert (config.pnl_manual / "AlphaWbaiPass").exists()
-    # derived 落库:metrics + datasources
-    from ops.infra.derived import default_derived_store
-    d = default_derived_store(config).get("AlphaWbaiPass")
-    assert d is not None and d.ret is not None
-    assert d.fields  # datasources 非空
+    # snapshot 落库:metrics + datasources(入库时不可变快照,derived 层已删 Wave 2)
+    from ops.infra.snapshot import default_snapshot_store
+    snap = default_snapshot_store(config).get("AlphaWbaiPass")
+    assert snap is not None and snap.ret is not None
+    assert snap.fields  # datasources 非空
 
-    # 3. rm 清理:验证生产 teardown 真删干净
+    # 3. rm 清理:验证生产 teardown 真删干净(info 级联 state + snapshot)
     from ops.services.rm.rm import run_rm
     run_rm(SimpleNamespace(config_path=cfg_path, factor_name="AlphaWbaiPass", yes=True))
     assert _store(config).get("AlphaWbaiPass") is None
     assert not (config.alpha_src / "AlphaWbaiPass").exists()
-    assert default_derived_store(config).get("AlphaWbaiPass") is None
+    assert default_snapshot_store(config).get("AlphaWbaiPass") is None
 
 
 # ---------------------------------------------------------------------------

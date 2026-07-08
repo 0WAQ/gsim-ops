@@ -7,7 +7,7 @@
 """
 import pytest
 
-from ops.core.state import FactorStatus, FactorRecord
+from ops.core.state import FactorStatus
 
 pytestmark = pytest.mark.pg
 
@@ -17,15 +17,13 @@ def _store(config):
     return default_store(config)
 
 
-def _seed_active(config, name="AlphaWbaiAct", author="wbai"):
-    """在 alpha_src 造一个 ACTIVE 因子 (src 目录 + state 行)。"""
+def _seed_src(config, name):
+    """在 alpha_src 造因子源目录(state/info 行由 seed_factor fixture 种)。"""
     src = config.alpha_src / name
     src.mkdir(parents=True, exist_ok=True)
     (src / f"{name}.py").write_text("x = 1\n")
     (src / f"Config.{name}.xml").write_text(
         '<gsim><Modules><Alpha id="M" module="old"></Alpha></Modules></gsim>')
-    _store(config).put(FactorRecord(name=name, author=author, status=FactorStatus.ACTIVE,
-                                    updated_at="2026-07-05T00:00:00"))
     return src
 
 
@@ -37,10 +35,11 @@ def _args(cfg_path, **kw):
     return SimpleNamespace(**d)
 
 
-def test_restage_active_moves_to_staging(test_config, make_args):
+def test_restage_active_moves_to_staging(test_config, seed_factor):
     from ops.services.restage.restage import run_restage
     cfg_path, config = test_config
-    _seed_active(config, "AlphaWbaiAct")
+    _seed_src(config, "AlphaWbaiAct")
+    seed_factor("AlphaWbaiAct", FactorStatus.ACTIVE)
     run_restage(_args(cfg_path, factor_name="AlphaWbaiAct"))
     rec = _store(config).get("AlphaWbaiAct")
     assert rec.status == FactorStatus.SUBMITTED
@@ -48,10 +47,11 @@ def test_restage_active_moves_to_staging(test_config, make_args):
     assert not (config.alpha_src / "AlphaWbaiAct").exists()
 
 
-def test_restage_active_keeps_artifacts(test_config):
+def test_restage_active_keeps_artifacts(test_config, seed_factor):
     from ops.services.restage.restage import run_restage
     cfg_path, config = test_config
-    _seed_active(config, "AlphaWbaiKeep")
+    _seed_src(config, "AlphaWbaiKeep")
+    seed_factor("AlphaWbaiKeep", FactorStatus.ACTIVE)
     # 预造 dump + feature
     (config.alpha_dump / "AlphaWbaiKeep").mkdir(parents=True, exist_ok=True)
     (config.alpha_feature / "AlphaWbaiKeep.v1.npy").write_bytes(b"x")
@@ -61,10 +61,11 @@ def test_restage_active_keeps_artifacts(test_config):
     assert (config.alpha_feature / "AlphaWbaiKeep.v1.npy").exists()
 
 
-def test_restage_active_purge_wipes_artifacts(test_config):
+def test_restage_active_purge_wipes_artifacts(test_config, seed_factor):
     from ops.services.restage.restage import run_restage
     cfg_path, config = test_config
-    _seed_active(config, "AlphaWbaiPurge")
+    _seed_src(config, "AlphaWbaiPurge")
+    seed_factor("AlphaWbaiPurge", FactorStatus.ACTIVE)
     (config.alpha_dump / "AlphaWbaiPurge").mkdir(parents=True, exist_ok=True)
     (config.alpha_feature / "AlphaWbaiPurge.v1.npy").write_bytes(b"x")
     (config.alpha_pnl / "AlphaWbaiPurge").write_text("pnl")
@@ -75,18 +76,12 @@ def test_restage_active_purge_wipes_artifacts(test_config):
     assert (config.alpha_pnl / "AlphaWbaiPurge").exists()
 
 
-def test_restage_rejected_wipes_pnl(test_config):
+def test_restage_rejected_wipes_pnl(test_config, seed_factor):
     from ops.services.restage.restage import run_restage
     cfg_path, config = test_config
     name = "AlphaWbaiRej"
-    src = config.alpha_src / name
-    src.mkdir(parents=True, exist_ok=True)
-    (src / f"{name}.py").write_text("x = 1\n")
-    (src / f"Config.{name}.xml").write_text(
-        '<gsim><Modules><Alpha id="M" module="old"></Alpha></Modules></gsim>')
-    _store(config).put(FactorRecord(name=name, author="wbai", status=FactorStatus.REJECTED,
-                                    updated_at="2026-07-05T00:00:00",
-                                    last_fail_stage="correlation"))
+    _seed_src(config, name)
+    seed_factor(name, FactorStatus.REJECTED, last_fail_stage="correlation")
     (config.alpha_pnl / name).write_text("pnl")
     run_restage(_args(cfg_path, factor_name=name, status="rejected"))
     assert _store(config).get(name).status == FactorStatus.SUBMITTED
@@ -94,37 +89,33 @@ def test_restage_rejected_wipes_pnl(test_config):
     assert not (config.alpha_pnl / name).exists()
 
 
-def test_restage_unsupported_status_rejected(test_config):
+def test_restage_unsupported_status_rejected(test_config, seed_factor):
     from ops.services.restage.restage import run_restage
     cfg_path, config = test_config
-    _store(config).put(FactorRecord(name="AlphaWbaiSub", author="wbai",
-                                    status=FactorStatus.SUBMITTED,
-                                    updated_at="2026-07-05T00:00:00"))
+    seed_factor("AlphaWbaiSub", FactorStatus.SUBMITTED)
     run_restage(_args(cfg_path, factor_name="AlphaWbaiSub"))
     # SUBMITTED 不支持 restage → 状态不变
     assert _store(config).get("AlphaWbaiSub").status == FactorStatus.SUBMITTED
 
 
-def test_restage_missing_source_skipped(test_config):
+def test_restage_missing_source_skipped(test_config, seed_factor):
     from ops.services.restage.restage import run_restage
     cfg_path, config = test_config
     # state ACTIVE 但 alpha_src 无目录
-    _store(config).put(FactorRecord(name="AlphaWbaiGone", author="wbai",
-                                    status=FactorStatus.ACTIVE,
-                                    updated_at="2026-07-05T00:00:00"))
+    seed_factor("AlphaWbaiGone", FactorStatus.ACTIVE)
     run_restage(_args(cfg_path, factor_name="AlphaWbaiGone"))
     # 源缺失 → 不动状态
     assert _store(config).get("AlphaWbaiGone").status == FactorStatus.ACTIVE
 
 
-def test_restage_batch_respects_author(test_config):
-    """批量 -u 路径:只召回指定作者的因子,不误动其他作者。"""
+def test_restage_batch_respects_author(test_config, seed_factor):
+    """批量 -u 路径:只召回指定作者的因子,不误动其他作者(author 在 factor_info)。"""
     from ops.services.restage.restage import run_restage
     cfg_path, config = test_config
     # 混入多作者因子:wbai 2 个 ACTIVE,mhe 1 个 ACTIVE
-    _seed_active(config, "AlphaWbaiA", author="wbai")
-    _seed_active(config, "AlphaWbaiB", author="wbai")
-    _seed_active(config, "AlphaMheX", author="mhe")
+    for n, a in (("AlphaWbaiA", "wbai"), ("AlphaWbaiB", "wbai"), ("AlphaMheX", "mhe")):
+        _seed_src(config, n)
+        seed_factor(n, FactorStatus.ACTIVE, author=a)
 
     # restage -u wbai
     run_restage(_args(cfg_path, user="wbai", status="active"))
