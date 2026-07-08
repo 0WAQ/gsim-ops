@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 
 from ops.cli.approve import add_approve_subparser
@@ -54,6 +55,13 @@ def main():
         args.func(args)
     except SystemExit:
         raise  # argparse --help / explicit sys.exit() are control flow, not bugs
+    except BrokenPipeError:
+        # 下游管道提前关闭(`ops list | head` / `| less` 退出)是正常 Unix 行为,
+        # 不是崩溃。把 stdout 换成 /dev/null 防解释器退出时二次 flush 再炸,
+        # 按管道约定以 141 (128+SIGPIPE) 退出,不打 traceback。
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(141)
     except BaseException:
         logger.exception("ops crashed argv={}", sys.argv)
         raise
