@@ -2,7 +2,34 @@
 
 > 执行者:server-160 上的 Claude(或人工)。本手册假定第 1-2 层已通过
 > (fast suite 51 passed / e2e 6 条路径全绿 / 只读冒烟通过,见 JOURNAL PV1-PV4)。
-> 分支:`claude/remediation-wave0`,HEAD 须包含 `b4cf81c`(BrokenPipe 修复)。
+> 分支:`claude/remediation-wave0`,HEAD 须包含 `5843345`(checkpoint 残留修复)。
+
+---
+
+## ⚡ 续跑指引(2026-07-08 更新 · 首次执行在 L3-6 中断后从这里继续)
+
+**首次执行记录**:L3-1 至 L3-5 全部通过(R2 ✅ / R3 ✅ / R1 前半 ✅)。L3-6 二次
+check 在 checkbias 被拒 —— **不是验证目标的 bug,而是金丝雀捕获了一个遗留 P1**:
+checkpoint 残留使 re-check 必炸(机制见文末附录,修复 = commit `5843345`,记录 =
+JOURNAL PV5)。金丝雀当前状态:REJECTED(last_fail_stage=checkbias)。
+
+**续跑步骤**:
+
+```bash
+cd ~/gsim-ops && git pull            # 应看到 5843345 fix(check): 每轮 check 开跑前清 checkpoint 残留
+export CANARY=AlphaWbaiCanary001
+export CDATE=20260708                # 与首次执行一致(dropbox 金丝雀所在日期目录)
+uv run ops rm $CANARY -y             # 清掉 REJECTED 残局(级联三表 + 全落点)
+sudo rm -f /tank/vault/alphalib/pnl_manual/$CANARY   # rm 不清分流副本(已知泄漏)
+```
+
+然后**从 L3-1 重新执行**(dropbox 金丝雀与 config.verify.yaml 首次执行已就位,
+阶段 0 只需重做"金丝雀无残留"检查;sudo 探测已配置过可跳过)。
+
+**报告要求**:把首次执行的中断记为一条独立结论 ——
+「L3 金丝雀捕获遗留 P1(checkpoint 残留使 restage/overwrite 后的 re-check 在
+checkbias 必炸,该路径此前零测试覆盖)→ 已修复(5843345)→ 本次复验」。
+首轮已通过的 L3-1..L3-5 结果仍需在复跑中重新记录(修复后的代码要完整走一遍)。
 
 **本层在验什么**:四个 P0 数据正确性修复在真实生产环境(真 gsim、真 JFS、真生产
 PG `ops` 库)的行为 —— 用一个金丝雀因子走完整生命周期:
@@ -219,6 +246,9 @@ uv run ops check -f $CANARY -c config.verify.yaml
 
 预期:再次全过 `→ lib`,**全程无 `NotADirectoryError` / `Errno 20`**(R4:对已
 存在的单文件 pnl 走 unlink)。
+(本步首次执行曾在 checkbias 崩 `io.UnsupportedOperation` —— checkpoint 残留遗留
+bug,已由 `5843345` 修复,机制见文末附录;若复跑仍在 checkbias 失败,记录 gsim
+错误原文并停止,那是新问题。)
 【速查】:state=(active, v1, entered_at#2 > entered_at#1);snap 非 None 且
 **snapshot_at#2 > snapshot_at#1**(R1:新入库事件拿到新快照)。
 另:翻日志看是否出现 `stale snapshot exists, replacing` —— **不出现**说明 L3-4
@@ -320,3 +350,34 @@ wbai 审阅)并在会话里汇报。逐步一行:
 warn、基线因子数前后对比、任何非预期输出的完整原文。全部 ✅ 即 wave0-2 生产验证
 完成,可进入多机升级窗口(见 JOURNAL 遗留决断:升级期间无 in-flight check、之后
 手动跑 migrate_drop_derived.sql)。
+
+---
+
+## 附录 · gsim checkpoint 机制与 L3-6 事件(背景知识,执行时无需操作)
+
+**机制(作者确认)**:XML 里设了 `checkpointDir` + `checkpointDays` 时,gsim 运行
+会生成 `checkpoint_path/<name>/archive.bin`;**下次**运行读取该 .bin + **pnl 文件
+的尾部几行**(按 checkpointDays 回读)做断点恢复,只增量跑尾部几天,不从头跑。
+恢复状态是**两半配套**的:archive.bin 与 pnl 尾行必须来自同一轮运行。
+
+check 流水线对它的两种用法:
+- **本轮之内(正常)**:checkbias 写 archive.bin + pnl → checkpoint 阶段带着两者
+  重跑同窗口,比较 v2 md5 验证断点续跑稳定性 —— 两半同轮配套,工作正常;
+- **跨轮(bug,已修)**:long_backtest(最后一个跑 gsim 的 stage)写的 archive.bin
+  **无人善后**(`CheckpointChecker.clean` 在它之前调用),而配套 pnl 在 archive 时
+  被 `to_lib` 搬进 alpha_pnl。因子 restage 重检时,checkbias 看到旧 archive.bin,
+  Stats 以写模式新开 pnl 输出、`checkpointLoad` 却要回读它的尾行 → 对 write-only
+  文件 read → `io.UnsupportedOperation: not readable`,checkbias 被拒。
+  validate 不崩是因为它 `dumpPnl=false`,Stats 的 checkpoint 路径不激活。
+
+**修复**(`5843345`,JOURNAL PV5):`_run_one_locked` 开跑前(锁内)
+`rmtree(factor.checkpoint_dir)` —— 每轮 check 从干净 checkpoint 目录开始,
+gsim 找不到 archive.bin 即全量跑;本轮内 checkbias → checkpoint 的续跑不受影响。
+
+**为什么此前从未暴露**:e2e 每个因子只 check 一次、routing 测试用 fake checker,
+"同一因子真 gsim 二检"路径零覆盖 —— 而它是 restage / `submit --overwrite` 的
+必经路径。这正是金丝雀层存在的意义。
+
+**相邻缺口(已记账,不在本次验证范围)**:`prepare_for_archive` 拆雷未摘
+checkpointDir/checkpointDays,入库 XML 仍带 checkpoint 配置;`ops run` 对入库
+因子重跑没有 wipe,存在同类错配风险。修法候选见 JOURNAL PV5 后记。
