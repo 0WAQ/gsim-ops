@@ -360,6 +360,14 @@ class CheckerPipeline:
         check = CheckRecord(started_at=now_iso())
         store.transition(factor.name, FactorStatus.CHECKING)
 
+        # 清上一轮 check 的 checkpoint 残留(锁内,开跑前)。long_backtest 写的
+        # checkpoint 无人善后(CheckpointChecker.clean 只清它之前的),restage
+        # 重检时 checkbias 的 gsim 会 load 上一轮全历史窗口的残留,
+        # StatsSimpleV6.checkpointLoad 直接崩 io.UnsupportedOperation
+        # (生产验证 L3-6 发现,JOURNAL PV5)。本轮内 checkbias → checkpoint
+        # 的断点续跑不受影响 —— 那些 checkpoint 在本次 wipe 之后才写。
+        shutil.rmtree(factor.checkpoint_dir, ignore_errors=True)
+
         # Track which stage is currently running so the catch-all except clauses
         # can mark it failed in the Live table.
         current_stage: str | None = None
