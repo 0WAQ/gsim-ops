@@ -412,3 +412,54 @@ action 里,骨架只需要知道"跳过+原因";异常让 action 保持平铺直
 通过/冲突/无守卫兼容、四种结局路由、单因子失败不阻断批次、确认交互)——
 锁循环语义第一次有了可断言的测试。全套件 16 passed / ruff 0 / pyright 0 /
 四命令 parser 正常。
+
+---
+
+# 生产验证第一轮(2026-07-08,server-160,分支 claude/remediation-wave0)
+
+## PV1 · 结果判读:27 处红全在测试侧,生产代码零失败
+
+用户在 160 跑第 1-2 层验证:fast suite 26 failed / 25 passed,e2e 5/6。
+**逐条归因后无一指向生产代码**:
+
+- ✅ 正面信号:`test_check_routing` 真 PG 上 **12/12 全绿**(流水线路由 + snapshot
+  落库 + pnl 分流);e2e 5 条失败路径(validate/checkbias/checkpoint/compliance/
+  correlation)全部按预期路由;**e2e pass 路径的流水线本身跑到了 ACTIVE**
+  (`AlphaWbaiPass → lib`),挂的是测试断言的 import。
+- ❌ 13 × `FactorRecord(author=)` TypeError:测试用三表拆分前的旧签名 —— 这些
+  pg-marked 测试在无 PG 环境永远 skip,旧签名从未被执行到(I2 预告的问题现形);
+- ❌ 11 × ForeignKeyViolation:测试裸 `store.put`,没先种 factor_info 父行;
+- ❌ 3 × 残留污染:ops_test 是**生产库克隆**(7607 行真因子 + 迁移期约束名
+  `factor_state_new_name_fkey`)+ 按 library_id 删行的 teardown 是 no-op,
+  上轮测试残留(AlphaEnsure/AlphaWbaiNew/AlphaWbaiNoDm)让断言前提破产;
+- ❌ 1 × e2e import:`ops.infra.derived` 已删(Wave 2),e2e 断言段漏改
+  (e2e 标 slow,开发容器跑不了,漏网)。
+
+## PV2 · 修复(相当于 I2-lite:让 PG 组第一次真正可跑)
+
+- **e2e 断言换正主**:derived store → `default_snapshot_store`(metrics/fields/
+  rm 级联三处);e2e conftest 删掉指向已删 derived 层的 config 块;
+- **conftest 三表引导**:`pg_conninfo` 可达后按 FK 依赖序 info → state →
+  snapshot 各连一次 —— 空库上 factor_state 的内联 FK 引用 factor_info,
+  state store 先连会 UndefinedTable(V4 只修了 docker 01-schema.sql,
+  没覆盖 store 自建路径);
+- **隔离模型过渡方案**:`library_id` fixture 的 teardown 从"按 library_id
+  删行"(no-op)改为**测试前后各清一次 ops_test 三表**(`wipe_test_db`:删
+  factor_info,FK 级联;带 `current_database()='ops_test'` 双保险,防误指
+  生产库)。串行安全;并行 per-schema 隔离仍归 I2 正式件。e2e conftest 同款
+  内联(pytest 非包模式跨 conftest import 不可靠,接受 10 行双胞胎);
+- **新增 `seed_factor` fixture**:种 factor_info + factor_state 一步到位;
+  四个测试文件 24 处裸 `store.put(FactorRecord(...))` 全部换装,author 断言
+  改读 factor_info(`test_ensure_record` 的 `rec.author` 在 DB 干净后本会换成
+  AttributeError 挂,一并修);批量 -u 测试的跨作者用例显式 `author="mhe"`。
+
+**为什么不是直接上 per-schema**:per-schema 要求三 store 支持 search_path 注入
+(构造器/池层面改生产代码),属 I2 正式件;当前目标是"验证期间让既有行为测试
+跑起来",清库隔离零生产代码改动即可达成。
+
+**前置要求(用户侧)**:ops_test 现在是生产克隆,里面 7607 行会被 wipe 清掉 ——
+重建为空库更干净:`DROP DATABASE ops_test; CREATE DATABASE ops_test OWNER ops`
+(表由 conftest 引导自建,schema 即三表新世界,不再带迁移期约束名)。
+
+**验证**:本地(无 PG)5 passed / collection 零 import 错;PG 组的真验证依赖
+160 复跑(测试基建改动本身没有无 PG 的自证路径 —— 这正是 I2 的病根,记录之)。

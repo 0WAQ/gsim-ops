@@ -7,7 +7,7 @@ import queue
 
 import pytest
 
-from ops.core.state import FactorRecord, FactorStatus
+from ops.core.state import FactorStatus
 
 pytestmark = pytest.mark.pg
 
@@ -79,18 +79,20 @@ def test_ensure_record_creates_submitted(test_config, make_factor):
     rec = store.get("AlphaEnsure")
     assert rec is not None
     assert rec.status == FactorStatus.SUBMITTED
-    assert rec.author == "wbai"
+    # author 在 factor_info(FactorRecord 已无该字段)
+    from ops.infra.info import default_info_store
+    info = default_info_store(config).get("AlphaEnsure")
+    assert info is not None and info.author == "wbai"
 
 
-def test_ensure_record_does_not_overwrite(test_config, make_factor):
+def test_ensure_record_does_not_overwrite(test_config, make_factor, seed_factor):
     cfg_path, config = test_config
     make_factor(name="AlphaExists", author="wbai")
     pipe = _pipeline(cfg_path, checkers={})
     factor = pipe.metadatas[0]
     store = _store(config)
     # 预置一个 ACTIVE record
-    store.put(FactorRecord(name="AlphaExists", author="wbai", status=FactorStatus.ACTIVE,
-                           updated_at="2026-07-05T00:00:00"))
+    seed_factor("AlphaExists", FactorStatus.ACTIVE)
     pipe._ensure_record(factor, store)
     # 不被覆盖
     assert store.get("AlphaExists").status == FactorStatus.ACTIVE
@@ -100,13 +102,12 @@ def test_ensure_record_does_not_overwrite(test_config, make_factor):
 # crash 自愈:CHECKING 残留可被重跑覆盖
 # ---------------------------------------------------------------------------
 
-def test_checking_residue_reruns(test_config, make_factor, fake_checkers, fake_metrics):
+def test_checking_residue_reruns(test_config, make_factor, fake_checkers,
+                                 fake_metrics, seed_factor):
     cfg_path, config = test_config
     make_factor(name="AlphaResidue")
     # 预置 CHECKING (模拟上次崩在半路)
-    _store(config).put(FactorRecord(name="AlphaResidue", author="wbai",
-                                    status=FactorStatus.CHECKING,
-                                    updated_at="2026-07-05T00:00:00"))
+    seed_factor("AlphaResidue", FactorStatus.CHECKING)
     # 预造 pass 路径产物
     (config.alpha_path / "AlphaResidue").mkdir(parents=True, exist_ok=True)
     (config.pnl_path / "AlphaResidue").write_text("pnl")

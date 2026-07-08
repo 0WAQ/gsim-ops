@@ -47,7 +47,12 @@ def _test_conninfo(dbname: str = "ops_test") -> str:
 
 @pytest.fixture(scope="session")
 def pg_conninfo() -> str:
-    """测试库 conninfo;不可达则 skip 整个 pg 组。"""
+    """测试库 conninfo;不可达则 skip 整个 pg 组。
+
+    可达时按 FK 依赖序 (info → state → snapshot) 引导三表:空库上
+    factor_state 的内联 FK 引用 factor_info,若 state store 先连,
+    CREATE TABLE 直接 UndefinedTable。
+    """
     import psycopg
 
     conninfo = _test_conninfo()
@@ -56,27 +61,50 @@ def pg_conninfo() -> str:
         conn.close()
     except Exception as e:  # noqa: BLE001 — 任何连接失败都 skip
         pytest.skip(f"ops_test PG 不可达,跳过 pg 测试: {e}")
+
+    from ops.infra.info.pg_store import PostgresInfoStore
+    from ops.infra.snapshot.pg_store import PostgresSnapshotStore
+    from ops.infra.store.pg_store import PostgresStateStore
+    PostgresInfoStore(conninfo)
+    PostgresStateStore(conninfo)
+    PostgresSnapshotStore(conninfo)
     return conninfo
+
+
+def wipe_test_db(conninfo: str) -> None:
+    """清空 ops_test 三表(删 factor_info,FK 级联 state/snapshot)。
+
+    只对 current_database() == 'ops_test' 生效 —— 双保险,防 OPS_TEST_PG_*
+    误指生产库时把生产清了。
+    """
+    import psycopg
+
+    try:
+        conn = psycopg.connect(conninfo, autocommit=True, connect_timeout=5)
+        db = conn.execute("SELECT current_database()").fetchone()[0]
+        if db == "ops_test":
+            try:
+                conn.execute("DELETE FROM factor_info")
+            except psycopg.errors.UndefinedTable:
+                pass  # 表还没被任何 store __init__ 建出来
+        conn.close()
+    except Exception:  # noqa: BLE001 — 清理尽力而为
+        pass
 
 
 @pytest.fixture
 def library_id(pg_conninfo) -> str:
-    """每个测试一个唯一 library_id,测后按 library_id 删三表行 (并行安全)。"""
-    import psycopg
+    """每个测试一个唯一 library_id(现仅用于 cache 路径命名)+ 表级隔离。
 
+    2026-07-08 过渡方案:三表已无 library_id 列,原"按 library_id 删行"的
+    teardown 自三表拆分起是 no-op(UndefinedColumn 被吞),残留跨 run 污染
+    (生产验证第一轮 26 failed 的一类根因)。改为**测试前后各清一次全库**
+    (ops_test 专用测试库,串行跑安全;并行隔离 per-schema 归 I2)。
+    """
     lib = f"test_{uuid.uuid4().hex[:12]}"
+    wipe_test_db(pg_conninfo)
     yield lib
-    # teardown: 清掉本 library_id 在三张表的所有行
-    try:
-        conn = psycopg.connect(pg_conninfo, autocommit=True, connect_timeout=5)
-        for tbl in ("factor_state",):  # 旧 library_id 分区清理,I2 重建时整体替换
-            try:
-                conn.execute(f"DELETE FROM {tbl} WHERE library_id = %s", (lib,))
-            except psycopg.errors.UndefinedTable:
-                pass  # 表还没被任何 store __init__ 建出来
-        conn.close()
-    except Exception:  # noqa: BLE001 — teardown 尽力而为
-        pass
+    wipe_test_db(pg_conninfo)
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +196,33 @@ def test_config(tmp_path: Path, pg_conninfo, library_id):
         d.mkdir(parents=True, exist_ok=True)
 
     return cfg_path, config
+
+
+@pytest.fixture
+def seed_factor(test_config):
+    """种一条 factor_info + factor_state(name, status, author=..., **state 字段)。
+
+    三表拆分后测试不能再裸 `store.put(FactorRecord(...))`:author 在
+    factor_info,且 factor_state.name 的外键要求 info 父行先在(直接 put →
+    ForeignKeyViolation,生产验证第一轮 11 个失败的根因)。
+    """
+    from ops.core.state import FactorRecord
+    from ops.infra.info import FactorInfo, default_info_store
+    from ops.infra.store import default_store
+
+    _, config = test_config
+    info_store = default_info_store(config)
+    store = default_store(config)
+
+    def _seed(name: str, status, author: str = "wbai",
+              discovery_method: str | None = "manual", **state_kw):
+        info_store.upsert(FactorInfo(name=name, author=author,
+                                     discovery_method=discovery_method,
+                                     created_at="2026-07-05T00:00:00"))
+        state_kw.setdefault("updated_at", "2026-07-05T00:00:00")
+        store.put(FactorRecord(name=name, status=status, **state_kw))
+
+    return _seed
 
 
 # ---------------------------------------------------------------------------
