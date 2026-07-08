@@ -658,3 +658,34 @@ ops_test 重建为空库后复跑:**fast suite 51 passed / 8 skipped / 0 failed*
 BrokenPipeError 臂:stdout 换 /dev/null(防解释器退出二次 flush 再炸)+
 退出码 141(128+SIGPIPE 管道约定),不打 traceback、不进 crashed 日志。
 历史遗留 bug(所有分支都有),在验证分支修复后合并前传。
+
+## PV5 · L3 金丝雀抓到遗留 P1:checkpoint 残留使 re-check 必炸(2026-07-08)
+
+**发现过程**:L3-1 至 L3-5 全过(R2 裸批量拒绝 ✅、R3 曾入库 cancel 拒绝且
+staging 完好 ✅、R1 前半离库删快照 ✅)。L3-6 二次 check 在 **checkbias 被拒**:
+gsim `StatsSimpleV6.checkpointLoad` 崩 `io.UnsupportedOperation: not readable`。
+
+**根因**(纠正执行者的两个误判:不是"alpha_dump sidecar 缺目录"——那是
+on_reject 早期 stage 清 dump 的预期行为;也不是"checkpoint 未实现"——Phase F
+是存放位置治理,机制本身工作):**首次 check 的 long_backtest 写的 checkpoint
+文件无人善后** —— `CheckpointChecker.clean` 在 checkpoint 阶段后调用,清不到
+其后 long_backtest 新写的;to_lib/on_reject 也不碰 checkpoint 目录。因子
+restage 重检时,checkbias(短窗口 + dumpPnl=true)的 gsim 去 load 上一轮
+全历史窗口的残留 → 崩。**为什么从未暴露**:e2e 每因子只 check 一次、routing
+测试用 fake checker,"同一因子真 gsim 二检"路径零覆盖;而它恰是 restage /
+submit --overwrite 的必经路径 —— 遗留 bug,非 R1-R4 引入,但堵死了 R1/R4
+要保护的 re-check 流程。
+
+**修复**:`_run_one_locked` 开跑前(锁内、transition CHECKING 后)
+`shutil.rmtree(factor.checkpoint_dir, ignore_errors=True)` —— 每轮 check 从
+干净 checkpoint 目录开始。本轮内 checkbias → checkpoint 阶段的断点续跑语义
+不受影响(那些文件在 wipe 之后才写)。
+
+**为什么放锁内而不是 prepare_for_initial**:prepare_for_initial 在 pipeline
+__init__ 扫描期执行、在 factor_lock **之外** —— 若另一进程正持锁 check 同一
+因子,这里 wipe 会毁掉它正在用的 checkpoint(prepare_for_initial 在锁外改
+staging XML 本身就是同族遗留隐患,记入遗留:归 pipeline 后续治理)。锁内
+wipe 与"谁检查谁负责清场"语义一致。
+
+**验证**:本地 fast suite 绿(fake checker 路径 rmtree 不存在目录无害);
+真验证 = 160 重跑 L3(rm 金丝雀后从 L3-1 重来,两次 check ~6 分钟)。
