@@ -25,7 +25,7 @@ Deep-dive into why a factor was rejected by the check pipeline.
    - Environmental/config issue, not factor quality
    - Check if XML paths are correct
    - Look for missing data dependencies
-   - Suggest: `ops check --retry`
+   - Suggest: re-run `ops check`(retryable 因子留在 staging,自动重扫;`--retry` flag 已删)
 
    **checkbias failure**:
    - Forward-looking data access detected
@@ -57,7 +57,7 @@ Deep-dive into why a factor was rejected by the check pipeline.
      下一次 `ops check` 扫 staging 时自动重跑，无需仲裁。
 
 5. **Actionable recommendations**
-   - If retriable (validate/long_backtest): `ops check --retry`
+   - If retriable (validate/long_backtest): fix the environment, then re-run `ops check`
    - If factor quality issue: specific code changes needed
    - If need to recall a rejected factor for re-check: `ops restage <name> -s rejected`
 

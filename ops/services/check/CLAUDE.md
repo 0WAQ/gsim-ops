@@ -35,7 +35,9 @@ unexpected-error 臂接住 → revert SUBMITTED + 完整日志。`prepare_for_ar
 与 restage 共用)唯一负责。XML 读写统一走 `ops/utils/xmlio.py`(unparse 参数
 只写一处)。
 
-## Archive 细节归档时先 `transition` state 设 `entered_at`(入库时间),再 `_persist_derived` 把四组派生数据一次性 **insert 进 `factor_snapshot`**(入库时不可变快照,`snapshot_at = entered_at`):**metrics**(simsummary)、**datasources**(AST parse `getData` + npy index)、**bcorr**(correlation stage 已算出的 `max_bcorr`,之前被丢弃,现捕获落库,零额外计算)。**index 组**(has_pnl/dump_days/delay)暂写 None,由 `LibraryScanner` 扫盘后补全(scanner→snapshot 更新路径待设计)。必须在 `to_lib` 之前调 —— datasources 依赖 `factor.py_file`(此时仍在 staging)。各组独立 try,快照丢了不阻断入库(但快照不可 refresh 重算,`ops refresh` 已删除)。
+## Archive 细节
+
+归档时先 `transition` state 设 `entered_at`(入库时间),再 `_persist_derived` 把四组派生数据一次性 **insert 进 `factor_snapshot`**(入库时不可变快照,`snapshot_at = entered_at`):**metrics**(simsummary)、**datasources**(AST parse `getData` + npy index)、**bcorr**(correlation stage 已算出的 `max_bcorr`,之前被丢弃,现捕获落库,零额外计算)、**delay**(XML 解析定死,入库时写真值;原 index 组的 has_pnl/dump_days 已删列)。必须在 `to_lib` 之前调 —— datasources 依赖 `factor.py_file`(此时仍在 staging)。各组独立 try,快照丢了不阻断入库(但快照不可 refresh 重算,`ops refresh` 已删除)。
 **stale 自愈**(2026-07-07):insert 前若已存在同名 snapshot 行(迁移期 REJECTED 存量 /
 restage 删失败残留)则先 delete 再 insert,并 warn 日志 —— 否则 UNIQUE 冲突被吞,
 快照永远停在旧代码(full-review P0-1)。正常路径下旧行已被 restage/--overwrite 删除。按 `discovery_method` 把 pnl 额外拷一份到 `pnl_automated/` 或 `pnl_manual/` (仅入库成功时,REJECTED 不拷;来源未知则 warn 跳过);Fail: mark REJECTED (src 归档到 alpha_src)
@@ -104,11 +106,11 @@ The delay value is read from the factor's XML: `<Alpha delay="0">`.
 
 ## State drift & crash recovery
 
-reconcile 已下线(state 上共享 redis 后,per-host 本地 `staging` 视图无权裁决全局 state)。
+reconcile 已下线(state 共享 PG 后,per-host 本地 `staging` 视图无权裁决全局 state)。
 crash 恢复靠两点自愈:`ops check` **按 staging 目录扫描**(不看 state status),崩在半路仍在
-staging 的因子下次照样重跑,并覆盖其 `CHECKING` 状态;redis state 原子写,drift 窗口只在
+staging 的因子下次照样重跑,并覆盖其 `CHECKING` 状态;PG state 事务原子写,drift 窗口只在
 "移动文件 → 改 state" 两步之间且极小。真正需要人工介入的残留用 `ops rm` / 后续 `ops doctor` 处理。
 
 ## Concurrency
 
-Every submit / check operation on a factor acquires a non-blocking per-factor lock (`factor_lock(name, config)`). postgres 后端用**跨机 PG advisory lock**(CHECKING 期间真正防三机并发 check 同一因子);json/redis 回退用 per-machine fcntl。If contended, the caller logs a warning and skips (no queueing). This is *advisory* — protects against two `ops` processes (跨机或同机) racing on the same factor, not against external rm/mv. 见 `infra/lock.py`。
+Every submit / check operation on a factor acquires a non-blocking per-factor lock (`factor_lock(name, config)`). postgres 后端用**跨机 PG advisory lock**(CHECKING 期间真正防三机并发 check 同一因子);json dev/test 后端用 per-machine fcntl。If contended, the caller logs a warning and skips (no queueing). This is *advisory* — protects against two `ops` processes (跨机或同机) racing on the same factor, not against external rm/mv. 见 `infra/lock.py`。

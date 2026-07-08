@@ -28,10 +28,11 @@
 
 ## Destructive 行为
 
-- 默认仅搬源 + 翻状态；dump / feature / pnl 保留
-- `--purge`: 清除 dump + feature（pnl 始终保留）
+- **ACTIVE** 召回默认全保留:仅搬源 + 翻状态,dump / feature / pnl 不动
+- **ACTIVE + `--purge`**: 清除 dump + feature（pnl 保留,作历史对照）
+- **REJECTED** 召回**一律自动清** dump + feature（与 `--purge` 无关;无生产顾虑,check 会重新产出），并额外清 `alpha_pnl/<name>` 单文件（离开 REJECTED 后 pnl 无意义）
 - purge 复用 `rm.py` 的 `_purge_artifacts`
-- REJECTED restage 额外清 `alpha_pnl/<name>` 单文件（离开 REJECTED 后 pnl 无意义）
+- 搬源是 `shutil.move`:召回后 staging 是 src **唯一副本**（cancel 的 entered_at 守卫由此而来）
 
 ## 并发安全
 

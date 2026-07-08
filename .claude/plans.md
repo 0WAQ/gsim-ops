@@ -2,7 +2,9 @@
 
 Deferred / not-yet-started plans. See `CLAUDE.md` for current architecture.
 
-## Architecture Refactor (Not Started)
+## Architecture Refactor (已基本落地 — 保留作历史设计记录)
+
+> 状态注 (2026-07-08):分层架构已是现状(`cli/` → `services/` → `core/` + `infra/`,`utils/` 共享),`common/` 已不存在,构造器写盘副作用已拆到 `services/check/xml_prepare.py`。下文细节(notify/ssh 模块、cp 子命令等)与现状不符,勿按此文施工。
 
 Restructure from current flat layout to layered architecture. All existing commands must keep working. No new features, no new dependencies.
 
@@ -96,7 +98,7 @@ Enhance factor management: data source parsing, PNL metrics extraction, health c
 - PNL metrics extraction via `simsummary` (ret/shrp/dd/fitness)
 - Enhanced `ops info` with data sources and PNL metrics
 - Enhanced `ops list` with Sharpe column and `--sort` parameter
-- New `ops health` command for library integrity checks
+- New `ops health` command for library integrity checks(曾落地,2026-07-07 Wave 2 退役;对账职能归未来 ops doctor)
 
 **getData call patterns** (observed from real code):
 1. Simple: `dr.getData('ashareeodprices.s_dq_close')`
@@ -114,7 +116,7 @@ Enhance factor management: data source parsing, PNL metrics extraction, health c
 |------|-------|-------------|
 | 1 | 1-2 | Data source parser (`ops/common/datasource.py`), ~~enhance `Metrics` with `dd` field and `from_pnl()` class method~~ ✅ done |
 | 2 | 3-5 | ~~Integrate into `LibraryScanner` (new fields + cache version bump), enhance `ops info` and `ops list` output~~ ✅ done |
-| 3 | 6-7 | New `ops health` command: orphan factors, dump gaps, PNL missing, source missing, file integrity |
+| 3 | 6-7 | New `ops health` command: orphan factors, dump gaps, PNL missing, source missing, file integrity(曾落地,2026-07-07 Wave 2 退役 → 未来 ops doctor)|
 
 **Health check output format**:
 ```
@@ -155,7 +157,7 @@ Implemented `ops submit` / `ops status` / `ops backfill`, state tracking in `Che
 
 ## `ops factor` Namespace (Not Started) — soft-delete 部分已废弃见下
 
-The CLI surface has grown flat: `submit / check / list / info / health / pack / sync / rm / status / backfill`. The factor-lifecycle ones (`submit`, `check`, `rm`, `info`, `list`, `status`, `backfill`) all act on a single factor (or a query over factors) and naturally belong under one namespace. Plan: introduce `ops factor <verb>` as the canonical home, keep flat aliases for back-compat during transition.
+The CLI surface has grown flat: `submit / check / list / info / health / pack / sync / rm / status / backfill`(注:health/sync 已于 2026-07-07 退役). The factor-lifecycle ones (`submit`, `check`, `rm`, `info`, `list`, `status`, `backfill`) all act on a single factor (or a query over factors) and naturally belong under one namespace. Plan: introduce `ops factor <verb>` as the canonical home, keep flat aliases for back-compat during transition.
 
 **Target shape**:
 ```
@@ -168,7 +170,7 @@ ops factor list            # alias: ops list
 ops factor status [name]   # alias: ops status   (until folded into info, see prior plan)
 ```
 
-`pack`, `sync`, `health` stay top-level — they operate on the library, not a single factor.
+`pack`, `sync`, `health` stay top-level — they operate on the library, not a single factor.(注:sync/health 已于 2026-07-07 退役,顶层现仅 pack。)
 
 **Why**: discoverability (`ops factor --help` enumerates everything one can do *to* a factor), and prepares the codebase for similar groupings later (`ops dataset ...`, `ops job ...`).
 
@@ -191,7 +193,7 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 - 是 Phase E 切到 JuiceFS 后,日更场景成本的主要决定因素
 
 **为什么暂缓**:
-- 现有 `ops sync` 模型下,即使做了增量 pack,sync 那侧仍按文件级 size+mtime 比对,等大小判断会漏掉(等做完 JuiceFS 迁移再做才能真正吃到收益)
+- 现有 `ops sync` 模型下,即使做了增量 pack,sync 那侧仍按文件级 size+mtime 比对,等大小判断会漏掉(等做完 JuiceFS 迁移再做才能真正吃到收益)(注:sync 已于 2026-07-07 Wave 1 退役,此条顾虑已消)
 - Phase B-2 第二轮 PoC 可以用一次性脚本量化 chunk 增量(不需要正式集成到 ops),数据足够支撑 Phase C 决策
 
 **已实现部分**:
@@ -241,7 +243,7 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 
 事故详情见 memory `project_incident_redis_maxclients`。已治标 (maxclients 10000→50000 + 持久化到 `/etc/redis-jfs/redis.conf`),根因未除。
 
-**根因**: 160/150 是 512 核机器,juicefs (go-redis) 连接池按核数 × 倍数算,单 mount 进程持有 5000+ socket 连到共生的 6380 (JFS metadata + ops state)。默认 maxclients 10000 对这规模从一开始就低。不是泄漏,是配置/硬件规模不匹配。
+**根因**: 160/150 是 512 核机器,juicefs (go-redis) 连接池按核数 × 倍数算,单 mount 进程持有 5000+ socket 连到共生的 6380 (JFS metadata + 事发时的 ops state;2026-07-04 起 state 已迁 PG,6380 现仅 JFS metadata)。默认 maxclients 10000 对这规模从一开始就低。不是泄漏,是配置/硬件规模不匹配。
 
 **待办 (按性价比排序)**:
 
@@ -250,11 +252,11 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
    - 若支持: 在所有 mount 点 (160/150/144) 显式设一个合理上限 (如 256/512),重挂生效。重挂会短暂中断该机 JFS,排期做。
    - 若不支持: 只能靠 maxclients 留足余量 + 监控。
 
-2. **评估 ops state 从 6380 拆到独立 redis** —— 消除"juicefs 池打满 → ops 跟着挂"的共生耦合。
+2. ~~**评估 ops state 从 6380 拆到独立 redis**~~ —— **已过时 (2026-07-08 注)**: ops state 已迁 Postgres (2026-07-04,redis state 后端 2026-07-07 Wave 1 删除,`state.redis.url` 配置项不复存在),6380 只剩 JFS metadata,共生耦合已消。原设计留档:
    - ops state 量极小 (state hash + index set + checks list),单独跑个轻量 redis (甚至复用 6379) 即可。
    - 改 `config.yaml` 的 `state.redis.url` 指向新实例 + 数据迁移 (state-* key 量小,SCAN+MIGRATE 或重建)。
    - 权衡: 多一个要维护的 redis vs 故障隔离。优先级看共生事故是否再发。
 
 3. **连接数监控告警** —— 当前打满前无告警 (跟 server-topology "监控=人工" 一致)。
    - 简单版: cron 每 5min `redis-cli INFO clients` 的 `connected_clients` 超阈值 (如 40000) 发飞书。
-   - 复用 `ops/infra/notify/feishu_send.py`。
+   - 通知实现待定(原 `ops/infra/notify/feishu_send.py` 已随 notify/ 删除,2026-07-07)。

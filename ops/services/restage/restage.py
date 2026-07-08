@@ -7,15 +7,16 @@ SUBMITTED,让下一次 ops check 捡起重跑 7 阶段流水线。version 不变
 - ACTIVE   (默认): 源 = alpha_src/<name>/
 - REJECTED        : 源 = alpha_src/<name>/(REJECTED src 与 ACTIVE 同库)
 
-destructive 为 opt-in:
-- 默认仅搬源 + 翻状态;alpha_dump / alpha_feature / alpha_pnl 保留
-- --purge:清除 alpha_dump + alpha_feature(alpha_pnl 始终保留,作为历史对照)
+destructive 行为按来源状态区分:
+- ACTIVE 默认仅搬源 + 翻状态(dump / feature / pnl 保留);--purge 时清
+  dump + feature(pnl 保留,作为历史对照)
+- REJECTED 一律自动清 dump + feature + pnl(无须 --purge:离开 REJECTED 后
+  产物无意义,check 会重新产出)
 
 批量模式(-u / -s)采用 apt-install 风格交互:列出受影响因子后询问 y/N;
 -y / --yes 跳过确认。
 
-跨机:状态变更通过 ops sync push 的 state merge 传播;sync 不会删 remote
-源目录(rclone copy 是 additive)。其他机器若需召回需自行 restage。
+跨机:state 在共享 PG、staging 在共享 JFS,任一节点 restage 全局立即生效。
 """
 import shutil
 from pathlib import Path
@@ -112,7 +113,10 @@ def _print_plan(targets: list[FactorRecord],
     if purge:
         highlight("  --purge: 同步清除 alpha_dump + alpha_feature(alpha_pnl 保留)")
     else:
-        info("  (默认保留 alpha_dump / alpha_feature / alpha_pnl)")
+        info("  (ACTIVE 默认保留 alpha_dump / alpha_feature / alpha_pnl)")
+    # 确认提示必须与 _restage_one 的实际行为一致:REJECTED 不看 --purge 一律清产物
+    if any(r.status == FactorStatus.REJECTED for r in targets):
+        highlight("  REJECTED 因子将自动清除 alpha_dump + alpha_feature + alpha_pnl")
 
 
 def _restage_one(rec: FactorRecord, src: Path, config: Config, store,

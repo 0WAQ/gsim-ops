@@ -41,7 +41,7 @@ uv run ops status -u wbai --status submitted     # Filter by author/state
 uv run ops backfill --dry-run                    # Preview backfill on alpha_src/
 uv run ops backfill                              # Generate meta.json + ACTIVE for legacy factors
 uv run ops list                      # List factors (default config.yaml → JFS)
-uv run ops list --author wbai        # Filter by author
+uv run ops list -u wbai              # Filter by author
 uv run ops list --format json        # JSON output
 uv run ops info <factor-name>        # Show factor details (入库时快照 metrics + snapshot_at)
 uv run ops pack                      # Aggregate alpha_dump → alpha_feature (skip already-packed)
@@ -51,7 +51,7 @@ uv run ops rm AlphaXxx               # 彻底删除因子(src/pnl/dump/feature +
 uv run ops rm AlphaXxx -y            # 跳过确认
 uv run ops restage AlphaXxx          # 原代码不变,召回 staging 待重跑 check
 uv run ops restage AlphaXxx -s rejected   # 召回 rejected 因子
-uv run ops restage AlphaXxx --purge  # 同时清除 dump + feature(保留 src/pnl)
+uv run ops restage AlphaXxx --purge  # ACTIVE 召回时同时清 dump + feature(pnl 保留;REJECTED 召回一律自动清 dump/feature/pnl)
 uv run ops restage -u wbai           # 批量:wbai 所有 active 因子(apt 风格确认)
 uv run ops restage -u wbai -y        # 批量,跳过确认
 uv run ops approve AlphaXxx          # 多样性豁免:放行 correlation-rejected 因子 (REJECTED → ACTIVE)
@@ -71,7 +71,7 @@ uv run ops combo run <dir> --start 20241210 --end 20241231 --predict-start 20241
 Test suite in `tests/` (pytest, dev group). Covers the check pipeline's control flow
 (routing outcomes, on_reject artifact policy, scan/self-heal/lock), the factor-lifecycle
 write commands (submit/restage/cancel/approve/clear/rm state transitions + artifact
-handling), and state/derived PG storage. `tests/e2e/` runs the real pipeline end-to-end
+handling), and state PG storage. `tests/e2e/` runs the real pipeline end-to-end
 (real gsim + cc data) with fake factors that deterministically blow up at each stage —
 marked `slow`+`e2e`, run via `uv run pytest -m e2e` (~85s). `uv sync --group dev &&
 uv run pytest -m "not slow"` for the fast suite. PG tests need an isolated `ops_test` db
@@ -181,21 +181,19 @@ AlphaXxx/
 
 ## Key Dependencies
 
-- **paramiko** / **scp** - SSH connections and file transfer
-- **pandas** / **numpy** - Data processing
-- **lxml** / **xmltodict** - XML config manipulation
-- **colorama** - Terminal colors
-- **tqdm** - Progress bars
+(2026-07-07 依赖大扫除后,见 `pyproject.toml` 注释)
+
+- **numpy** - Data processing
+- **xmltodict** - XML config manipulation
 - **pyyaml** - Config parsing
-- **psycopg** - Postgres client (state + info + snapshot 真相源, `ops/infra/store/pg_store.py` / `ops/infra/info/pg_store.py` / `ops/infra/snapshot/pg_store.py`)
+- **loguru** - Logging
+- **rich** - Terminal output (tables / live progress)
+- **psycopg** / **psycopg-pool** - Postgres client (state + info + snapshot 真相源, `ops/infra/store/pg_store.py` / `ops/infra/info/pg_store.py` / `ops/infra/snapshot/pg_store.py`)
 
 ## Known Technical Debt (Deferred)
 
-- **Stub files**: `core/alpha/results/base.py`, `results/checkpoint.py`, `results/checkbias.py`
-- **Dead code**: `infra/notify/email.py` is commented out
-- **Debug residual**: `utils/func.py` has a `debug()` with infinite loop
-- **Feishu credentials hardcoded**: `infra/notify/feishu_send.py` — move to config/env later
-- **`core/alpha/metadata.py` has I/O**: `_modify_always()`, `save()`, `get_v2npy_files()` — extract to services/infra
+- **Stub files**: `core/alpha/results/base.py`, `results/checkpoint.py`(空壳 Enum/class)
+- **`core/alpha/metadata.py` has I/O**: `get_v2npy_files()` / `get_last_v*npy_file()` 扫 alpha_dump 目录 — extract to services/infra
 - ~~`ops sync` legacy fallback~~ **已退役删除**(2026-07-07 Wave 1,连同 `infra/s3.py`、boto3/tqdm、`config.prod-legacy.yaml`)
 - **Postgres 三表结构 (2026-07-06, branch `feat/derived-postgres`)**: 因子数据落三张 PG 表(server-160 docker, host 15432),全部去掉 `library_id`(永远单库),`id SERIAL` 主键 + `name UNIQUE`:
   - `factor_info` — 身份信息 (author / discovery_method / created_at)。抽象层 `ops/infra/info/`。
@@ -216,7 +214,7 @@ AlphaXxx/
 - 2026-07-04 Phase G: 派生层 (index/metrics/datasources/bcorr) 迁 Postgres (server-160 docker, host 15432), per-machine JSON 缓存退役; 读写数据流重构 (DerivedRecord 取代 FactorInfo god-object); **state (因子生命周期) 也迁 Postgres, PG 成唯一真相源** (state + derived 同库)。branch `feat/derived-postgres`, 部署 `scripts/postgres/`。**注意: 承载旧 state 的 Redis 同时是 JFS metadata 后端, 不可停 (停进程=挂因子库); ops 只是不再用它存 state。**
 - 2026-07-04 `factor_lock` 迁跨机 PG advisory lock (branch 同上): 原 per-machine fcntl 挡不住三机并发 check 同一因子 (state 共享 PG + staging 共享 JFS)。postgres 后端走 `pg_try_advisory_lock` (专用连接, session 级, 连接断开自动释放, 无死锁残留); json dev/test 后端 fcntl(2026-07-07 起 postgres 缺 conninfo 硬错误、锁键去 library_id 维,见 JOURNAL F4/F5)。签名 `factor_lock(name, config)`。见 `ops/infra/lock.py` + memory [[project_factor_lock_cross_machine]]。
 - 2026-07-04 CLI 子命令重审 (branch 同上): submit 吸收 resubmit (`--overwrite` 覆盖已入库因子, 默认跳过); recheck 改名 restage (名副其实, 只召回 staging 不跑 check); rm 改彻底硬删 + 移除 DELETED 状态/deleted_at 列 (因子要么存在要么删除, 删除不是状态); approve 正名为"数据覆盖多样性人工豁免"。见 memory [[project_cli_command_redesign]]。
-- 2026-07-06 Postgres 双表 → 三表重构 (branch 同上): `factor_derived` + 旧 `factor_state` (含 author/submitted_by) 拆成 `factor_info` (身份) + `factor_state` (纯状态) + `factor_snapshot` (入库时快照)，全部去掉 `library_id`。**metrics/datasources/bcorr 语义从"可刷新最新表现"变为"入库时不可变快照"** (`snapshot_at = entered_at`)；`ops refresh` 命令删除。新增 `ops/infra/info/` + `ops/infra/snapshot/` store 抽象 + `ops/infra/query.py` 联合读。生产库 `ops` 迁移已执行 (migrate_to_snapshot.sql + backfill_discovery_method.py): factor_info 7594 / factor_state 7594 / factor_snapshot 7485; discovery_method automated 7259 / manual 226 / NULL 109 (未入库); 迁移中清理 108 脏因子 + 2 空壳 + 补 20 hwang 孤儿 state。旧 `derived/` 层代码保留 (LibraryScanner 仍用其做 index 缓存)。
+- 2026-07-06 Postgres 双表 → 三表重构 (branch 同上): `factor_derived` + 旧 `factor_state` (含 author/submitted_by) 拆成 `factor_info` (身份) + `factor_state` (纯状态) + `factor_snapshot` (入库时快照)，全部去掉 `library_id`。**metrics/datasources/bcorr 语义从"可刷新最新表现"变为"入库时不可变快照"** (`snapshot_at = entered_at`)；`ops refresh` 命令删除。新增 `ops/infra/info/` + `ops/infra/snapshot/` store 抽象 + `ops/infra/query.py` 联合读。生产库 `ops` 迁移已执行 (migrate_to_snapshot.sql + backfill_discovery_method.py): factor_info 7594 / factor_state 7594 / factor_snapshot 7485; discovery_method automated 7259 / manual 226 / NULL 109 (未入库); 迁移中清理 108 脏因子 + 2 空壳 + 补 20 hwang 孤儿 state。旧 `derived/` 层代码当时保留 (LibraryScanner 仍用其做 index 缓存)(注: derived 层已于 2026-07-07 Wave 2 删除)。
 
 **仍在路上**:
 - Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/restage` 走 `git add/commit`(串行化复用现有 `factor_lock`,已是跨机 PG advisory lock)

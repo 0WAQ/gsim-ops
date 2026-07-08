@@ -104,7 +104,7 @@ state 2026-07-04 迁 PG 后 redis 仅名义回退;三表拆分后它读写已删
 - Single fcntl lock over the full read-modify-write window
 - Atomic write via tempfile + `os.replace`
 - Stale `.tmp` cleanup (> 1h) on lock acquisition
-- Methods: `get`, `list`, `upsert`, `transition`, `bulk_upsert`
+- Methods: `get`, `put`, `list`, `transition`, `append_check`, `delete`
 
 ## S3 — 已删除(2026-07-07 Wave 1)
 
@@ -119,8 +119,3 @@ Static methods shell out to gsim tools via `subprocess.run`:
 - `run_bcorr(pnl_file, config, pools=None)` → `list[(factor, corr)] | None`;对 `pools` 里每个 pnl 目录各跑一次 bcorr 合并结果,缺省 `pools=[pnl_prod_path, pnl_alphalib]`(全库)。`resolve_bcorr_pools(config, discovery_method)` 按因子来源返回同类池(automated/manual 各比各的,legacy 回退全库)。
 
 Configurable timeout from `config.timeout`.
-
-## Notify (`notify/`)
-
-- `feishu_send.py` — Feishu (Lark) webhook notifications (APP_ID/APP_SECRET hardcoded, tech debt)
-- `email.py` — commented out, placeholder

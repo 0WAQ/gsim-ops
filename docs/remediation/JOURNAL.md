@@ -532,3 +532,45 @@ unexpected 异常同性质,操作员看报告/日志即见,好过静默错跑。
 
 (e2e 已 grep 验证:不 import 任何被删异常类,断言全走 state/文件落点,无需改;
 本地无 gsim 未跑,生产验证时照常 `uv run pytest -m e2e`。)
+
+## D1 · 文档漂移清扫(audit-driven,2026-07-08)
+
+**起因**:用户问"之前的分支有没有更新文档"。docs-auditor 全量核对(16 个
+CLAUDE.md + docs/ + plans.md + tests/README,对照代码逐条验证)结论:四波主体
+文档更新到位(11/16 CLAUDE.md 零漂移),但扫出 **4 条高危 + ~20 条中低危**,
+集中在三类死角:低频维护段(根 CLAUDE.md 依赖表/技术债表)、旧稿复制的
+crash-recovery 段(还把 state 说成 redis)、面向研究员的 docs/(没跟上
+restage-move 语义与 --retry 删除)。
+
+**修复**(docs-updater 执行 + 人工收尾,13 个文件):
+- **高危 4 条**:factor-state-machine 的 restage 行改"移入 staging,alpha_src
+  不再保留"(原文"拷贝保留"会诱导删掉唯一源码 —— 正是 R3 cancel 守卫防的事故);
+  根 CLAUDE.md `list --author` 死 flag → `-u`;core/CLAUDE.md 的
+  `_modify_always()` 构造函数写盘描述重写(现实:构造无写盘,niodatapath 由
+  prepare_for_initial 落盘);gsim-factor-validation 的 `ops check --retry`
+  死 flag → 裸 check 重扫。
+- **中低危**:依赖表换 pyproject 实际七项;技术债表删指向已删代码的条目;
+  两处 redis crash-recovery 段 → PG;restage 文档与 confirm 提示的
+  "REJECTED 默认保留产物"谎言修正(代码一律自动清 dump+feature+pnl);
+  infra JsonStateStore 方法表对齐;Notify 节删除;tests/README 隔离模型
+  诚实化(library_id 分区已随三表失效,PG fixtures 待 I2);plans.md 全部
+  **加注不删史**(Architecture Refactor 标已落地、health/sync 待办标已退役、
+  "拆独立 redis" 标过时);check/CLAUDE.md 遗留的"index 组扫盘补全"矛盾句删除;
+  `.claude/` 两个 skill/agent 的 --retry 建议修正;combo 决策文档加注。
+- **唯一代码改动**:restage.py 模块 docstring(删 sync 传播段,改 PG/JFS
+  跨机语义)+ `_print_plan` 确认提示 —— 原提示在即将自动清 REJECTED 产物时
+  打印"默认保留 dump/feature/pnl",确认时刻对操作员说谎,按实际行为分状态提示。
+
+**明确不动**:两处部署事实待用户确认(alpha_dump 是否有 .local sidecar
+bind-mount vs config.yaml 指 JFS;/mnt/storage/alphalib 是 JFS 软链还是待清理
+旧数据 —— docs/README 与根 CLAUDE.md 互斥,仓库内无法裁决);docs/reports/ 与
+本 JOURNAL(历史记录,漂移即历史);plans.md 的未来设计段原样保留。
+
+**验证**:ruff 0 / pyright 0 / 23 passed;残留词自查(--retry / _modify_always /
+--author / bulk_upsert / infra/ssh / infra/notify / redis state)在非历史文档中
+清零。
+
+**教训(进遗留决断)**:文档漂移集中在"没有对应代码 owner 的文档"(docs/ 面向
+研究员的两份、plans.md、根 CLAUDE.md 的表格段)。改代码时顺手改同目录
+CLAUDE.md 的习惯已经生效(11/16 零漂移),但跨目录文档没有触发器 ——
+后续可把 /audit-docs 挂成低频例行(如合 main 前必跑)。
