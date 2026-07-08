@@ -51,6 +51,25 @@ export CANARY=AlphaWbaiCanary001
 export CDATE=$(date +%Y%m%d)
 ```
 
+**sudo 非交互检查**(写命令会自提权,非交互 shell 里 sudo 无法读密码,验证会
+卡死在 L3-1):
+
+```bash
+sudo -n /home/wbai/.local/bin/ops --help >/dev/null 2>&1 && echo NOPASSWD-OK || echo NEED-SETUP
+```
+
+若输出 `NEED-SETUP`:**停止,让 wbai 在自己的终端里配置一次**(这正是 sudo.py
+文档字符串的部署建议 + roadmap 的 "sudo NOPASSWD wrapper" 待办):
+
+```bash
+# 由 wbai 本人执行(需输一次 sudo 密码);提权目标是整个 ops 入口,单行即可:
+echo 'wbai ALL=(root) NOPASSWD: /home/wbai/.local/bin/ops' | sudo tee /etc/sudoers.d/wbai-ops
+sudo chmod 440 /etc/sudoers.d/wbai-ops
+sudo visudo -c
+```
+
+配置后重跑探测,`NOPASSWD-OK` 才继续。
+
 基线记录(报告里要用):
 
 ```bash
@@ -73,11 +92,12 @@ ls /tank/vault/alphalib/{alpha_pnl,pnl_manual,pnl_automated}/$CANARY 2>/dev/null
 ```bash
 uv run python - <<'EOF'
 import os
+from pathlib import Path
 from ops.infra.config import Config
 from ops.infra.info import default_info_store
 from ops.infra.snapshot import default_snapshot_store
 from ops.infra.store import default_store
-c = Config.load("config.yaml")
+c = Config.load(Path("config.yaml"))  # Config.load 只收 Path,传 str 会 AttributeError
 n = os.environ.get("CANARY", "AlphaWbaiCanary001")
 rec = default_store(c).get(n)
 info = default_info_store(c).get(n)
@@ -246,9 +266,10 @@ uv run ops submit -u wbai -s $CDATE -f $CANARY
 ```bash
 uv run python - <<'EOF' &
 import os, time
+from pathlib import Path
 from ops.infra.config import Config
 from ops.infra.lock import factor_lock
-c = Config.load("config.yaml")
+c = Config.load(Path("config.yaml"))
 n = os.environ.get("CANARY", "AlphaWbaiCanary001")
 with factor_lock(n, c):
     print("[lock-holder] holding advisory lock 120s", flush=True)
