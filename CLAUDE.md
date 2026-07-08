@@ -157,11 +157,17 @@ Located at `/usr/local/gsim/`. The core backtesting engine that ops interacts wi
 /tank/vault/alphalib/
 ├── alpha_src/      # Factor source code        — alpha_src/<name>/        目录
 ├── alpha_pnl/      # Backtest results (PNL)    — alpha_pnl/<name>         单文件 ⚠
-├── alpha_dump/     # Daily target positions    — alpha_dump/<name>/       目录(本地 sidecar, 不进 JFS)
+├── alpha_dump/     # Daily target positions    — alpha_dump/<name>/       目录(软链 → 本地 sidecar,见下)
 └── alpha_feature/  # Aggregated alpha_dump     — alpha_feature/<name>.{v}.npy  单文件
 ```
 
-`/mnt/storage/alphalib/` 是旧 prod 数据,保留作紧急回退,稳定 1 周后清理。
+**两个软链约定**(2026-07-08 确认的部署事实):
+- `/mnt/storage/alphalib` 是**软链**,指向本机实际 alphalib 路径(各机挂载点不同:
+  160/150 `/tank/vault/`、144 `/storage/vault/`、170 `/ext4/`)—— 老脚本/固定路径
+  文档经它仍可用,不是旧数据副本。
+- `alphalib/alpha_dump` 也是**软链**,实体是 `<挂载点>.local/alpha_dump`(本地盘
+  sidecar,不进 JFS);config.yaml 按 `${alphalib_root}/alpha_dump` 引用,经软链
+  落到本地盘 —— 两种说法("本地 sidecar" 与 "JFS 路径下")由此调和。
 
 **⚠ alpha_pnl/<name> 是单文件,不是目录**。删除用 `Path.unlink()`,不要用 `shutil.rmtree()`(`Errno 20: Not a directory`)。alpha_feature 同理是单文件。只有 alpha_src / alpha_dump 是目录。
 
