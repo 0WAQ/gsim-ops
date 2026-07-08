@@ -1,5 +1,14 @@
 # 事件评估 · 144 孤儿 pack 与 5757 个 alpha_feature(只读)
 
+> **已结案(2026-07-08,wbai 拍板)**:7/1 的 pack 是 wbai 本人执行;
+> **alpha_dump 任意时刻/任意机器等价**(dump 是 check 回测的确定性产物,
+> 从哪份副本打包结果相同)→ 5757 个 feature 内容无污染;feature 可随时
+> `ops pack` 重打,无数据丢失风险。事件降级为"正常操作未善后 + 孤儿残留"。
+> A1/A3 无需执行。**剩余动作**:① wbai 清 3 个 tmp 残渣(A4 的一条 sudo rm,
+> 随时);② 升级窗口收官后在 IDC 机器用新代码跑一次裸 `ops pack` 补齐缺失与
+> 半对(A2 可先跑一次拿基数,非阻塞);③ 升级窗口从阶段 0a 重新开启。
+> 整改记账(pack 孤儿 residue / 数据源守卫)保留,随窗口收官进 JOURNAL。
+
 对应事件记录:`VERIFY-UPGRADE-150-144-RESULT.md` E1-E6。本手册全程**只读**
 (除最后清 3 个 tmp 残渣需 wbai root)。
 
