@@ -407,3 +407,16 @@ ops_test 重建为空库后复跑:**fast suite 51 passed / 8 skipped / 0 failed*
 
 顺带修正:e2e 实测全套 ~6:40、pass 路径单跑 ~2:27(tests/README 原写 ~85s,
 应为早期窗口更短时的测量;数字已更新)。
+
+## PV4 · 只读冒烟结果 + BrokenPipeError 修复(2026-07-08)
+
+**冒烟结果**:`ops list` 7485 个因子(与快照迁移数精确吻合)、3.9s(原 ~25s;
+零扫盘达成,余下是启动 + 三查询内存 JOIN + rich 渲染 7485 行,单条 SQL JOIN
+的既有 TODO 可再压);JSON 键变更符合文档(has_pnl/dump_days 移除、status 新增);
+`ops info` 正常,REJECTED 因子显示 07-04 迁移期存量快照属预期残留(R1 自愈覆盖)。
+
+**修复**:`ops list --format json | head` 触发 BrokenPipeError → 两屏 traceback +
+"ops crashed" 日志。下游管道提前关闭是正常 Unix 行为不是崩溃;main.py 加
+BrokenPipeError 臂:stdout 换 /dev/null(防解释器退出二次 flush 再炸)+
+退出码 141(128+SIGPIPE 管道约定),不打 traceback、不进 crashed 日志。
+历史遗留 bug(所有分支都有),在验证分支修复后合并前传。
