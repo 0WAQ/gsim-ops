@@ -529,6 +529,7 @@ checker 也不跳过自己,因子 restage/`--overwrite` 后重检时,correlation
 **为什么不是只做自名排除**:排除自名救不了"别的新因子撞已离库因子的鬼影",
 池成员资格必须与库成员资格一致(池 = ACTIVE 集合);回收是主修,排除是兜底。
 
-**验证**:本地 import + fast suite 绿;PG 组断言待 160 复跑;行为级验证建议
-金丝雀补一条 PV7 专项(生产阈值下 restage→recheck 应过 correlation,不再
-撞自己)—— 排期到多机升级后。
+**验证**:本地 import + fast suite 绿;PG 组断言 160 复跑通过(2026-07-08,
+51+ passed 含池副本回收/overwrite 回收新断言);行为级验证 = 金丝雀 PV7 专项
+(生产阈值 corr_threshold=0.7 下 restage→recheck 不撞自己 + 自名过滤双保险),
+执行手册 `VERIFY-PV7.md` —— 不依赖多机升级,160 单机随时可跑。
