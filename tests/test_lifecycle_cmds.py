@@ -138,6 +138,9 @@ def test_rm_hard_deletes_all(test_config, seed_factor):
     (config.alpha_pnl / name).write_text("pnl")
     (config.alpha_dump / name).mkdir(parents=True, exist_ok=True)
     (config.alpha_feature / f"{name}.v1.npy").write_bytes(b"x")
+    # bcorr 分流池副本(to_lib 写入;rm 不清则永远留在对比池,生产验证 L3-7 实测)
+    (config.pnl_manual / name).write_text("pool-copy")
+    (config.pnl_automated / name).write_text("pool-copy")
     seed_factor(name, FactorStatus.ACTIVE)
     from ops.infra.snapshot import FactorSnapshot
     _snapshot(config).insert(FactorSnapshot(name=name, ret=1.0, shrp=1.0, mdd=1.0,
@@ -151,6 +154,8 @@ def test_rm_hard_deletes_all(test_config, seed_factor):
     assert not (config.alpha_pnl / name).exists()
     assert not (config.alpha_dump / name).exists()
     assert not (config.alpha_feature / f"{name}.v1.npy").exists()
+    assert not (config.pnl_manual / name).exists()      # 池副本一并清
+    assert not (config.pnl_automated / name).exists()
     assert _store(config).get(name) is None
     assert _snapshot(config).get(name) is None  # info 级联删 snapshot
 

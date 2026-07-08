@@ -10,6 +10,8 @@
 - `alpha_pnl/<name>`(PNL 单文件)
 - `alpha_dump/<name>/`(dump 目录)
 - `alpha_feature/<name>.{v1,v2}.npy`(feature)
+- `pnl_automated|pnl_manual/<name>`(bcorr 分流池副本,单文件;2026-07-08 生产验证
+  L3-7 实测泄漏后补 —— 不清则已删因子的 pnl 永远留在对比池参与后续 bcorr)
 - `factor_info` PG 行 —— **级联删 `factor_state` + `factor_snapshot`**(外键 `ON DELETE CASCADE`)
 
 删除后因子即不存在,要恢复只能重新 `ops submit`。dump+feature 复用 `_purge_artifacts`
