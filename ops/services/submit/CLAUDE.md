@@ -47,6 +47,11 @@ staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
 
 **submit 写两表**:新因子先 `info_store.upsert(FactorInfo)` 再 `store.put(FactorRecord)`;`--overwrite` 只 `store.transition`(info 不动)。
 
+**`--overwrite` 离库回收**(2026-07-08 PV7):除删 snapshot 外,同步回收 check 面产物
+`alpha_pnl/<name>` + bcorr 池副本(`_recycle_check_artifacts`)—— 旧版本 pnl 留在池里,
+新代码重检时 correlation 对它 corr 通常极高 → 被迫"打败"旧的自己(自鬼影)。
+dump/feature 服务面保留(last-known-good,生产 combo 继续消费到新版本入库)。
+
 ## Backfilled Factors
 
 Backfill 的 legacy entries `submitted_at = null`(真实提交时间不可知),只 set `entered_at`(backfill 运行的时刻)。Code reading these fields must tolerate `None`。(`submitted_by` 已不在 state 记录里 —— 三表重构后 FactorRecord 无此字段;它仍是 meta.json 的字段,见 `factormeta.py`。)

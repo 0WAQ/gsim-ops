@@ -26,6 +26,11 @@ restage 删失败残留)则先 delete 再 insert,并 warn 日志 —— 否则 U
 
 `tvr` 上限按因子 `<Alpha @delay>` 选 d0/d1。任一项不达标 → `CorrelationFail` (REJECTED,日志含违反项,例 `tvr%=55.00 > 50.0 (delay=1)`)。
 
+**bcorr 排除自名**(2026-07-08 PV7):correlation checker 对 bcorr 结果过滤
+`name == factor.name` —— 因子永远不该和自己比相关性。主修是离库回收池副本
+(restage/`--overwrite`/rm 的 `_recycle_check_artifacts`),此处是防删除失败
+残留再造"自鬼影"(自相关≈1 → 被迫打败几乎相同的自己 → 必拒)的双保险。
+
 **bcorr 按因子来源分池** (`discovery_method`):bcorr 只在同类因子间比较,人工因子和机器因子互不撞车。`resolve_bcorr_pools(config, discovery_method)` (`infra/gsim/runner.py`) 决定对比池:`automated` → `pnl_automated/`,`manual` → `pnl_manual/`,来源未知 (legacy 因子 meta/XML 无此字段) 回退全库 (`pnl_prod_path` + `pnl_alphalib`,即分类前旧行为)。高相关时"打败竞品"的竞品业绩 (`_get_prod_factor_metrics`) 也从同类池取。`discovery_method` 由 `AlphaMetadata` 从 XML `<Description @discovery_method>` 读入(现存 `factor_info` 表)。`run_bcorr(pnl, config, pools=None)` 缺省 pools 时走全库统计。
 
 **Failure semantics**:

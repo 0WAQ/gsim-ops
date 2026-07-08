@@ -493,3 +493,42 @@ alpha_pnl 但池副本同样残留。语义涉及 bcorr 对比池的定义(池 =
 **用户侧待办**:`sudo rm -f /tank/vault/alphalib/pnl_manual/AlphaWbaiCanary001`
 (执行者的 NOPASSWD 只覆盖 ops 入口,裸 sudo rm 执行不了,本次金丝雀的池副本
 仍在生产 manual 池里);dropbox 金丝雀目录顺手清。
+
+## PV7 · 离库产物回收:两面模型 + 自鬼影修复(2026-07-08,作者拍板)
+
+**起因**:作者问"都 restage 了,相关产物是不是也都得回收"。顺着推发现这不只是
+卫生问题 —— 是**自鬼影相关陷阱**:`run_bcorr` 不排除同名因子、correlation
+checker 也不跳过自己,因子 restage/`--overwrite` 后重检时,correlation 拿
+**新 pnl** 对池里**自己的旧 pnl** 比(同代码 corr≈1.0 > 0.7)→ 进"高相关须
+打败竞品"分支 → `_check_beat` 要求三项中两项**严格更优**,对手是几乎逐点相同
+的自己 → 必拒。**生产阈值下 restage→recheck 不改代码的流程会被自己的鬼影
+挡死**;金丝雀没撞上纯因 verify config 的 corr_threshold=1.01 绕过了高相关
+分支。鬼影还害别人:新因子会被迫"打败"一个已离库因子的旧 pnl。
+
+**两难的化解(作者的顾虑:生产可能在消费 feature vs 不抽走则状态不一致)**:
+不一致不是必须消除,而是必须命名 —— 产物分两个面:
+- **check 面**(snapshot + alpha_pnl + bcorr 池副本):喂 check 流水线自己,
+  **离库即失效、一律回收**(与 R1"离库删 snapshot"同构);
+- **服务面**(alpha_dump / alpha_feature):语义 = **最后一次成功入库版本的
+  last-known-good**,与 check 状态解耦 —— 重检窗口内生产 combo 继续消费上一
+  入库版本(蓝绿式连续性);重检过 → 新产物替换,被拒 → on_reject 清除,
+  想立即下架 → `--purge`(旗标正名)。"状态 submitted 但 feature 在"从
+  不一致变为"服务面滞后 check 面一个版本"的既定模型。
+
+**改动**:
+- `rm.py` 新增 `_recycle_check_artifacts(name, config)`(pnl + 两池副本,
+  两池都查 —— 来源可能历史上变过);rm 自身换装;
+- `restage._restage_one`:ACTIVE/REJECTED 一律回收 check 面;服务面维持
+  "REJECTED 自动清 / ACTIVE 默认保留 + --purge 立即下架";
+- `submit_one --overwrite`:删 snapshot 后同步回收 check 面;
+- `correlation_checker`:bcorr 结果**过滤自名**(双保险,防删除失败残留;
+  也修正 CorrResult.max_bcorr 可能被自身 1.0 污染的问题);
+- 测试:restage ×3 / overwrite ×1 补种子与断言(PG 组,160 复跑覆盖);
+- 文档:restage/submit/check 三处 CLAUDE.md 落两面模型。
+
+**为什么不是只做自名排除**:排除自名救不了"别的新因子撞已离库因子的鬼影",
+池成员资格必须与库成员资格一致(池 = ACTIVE 集合);回收是主修,排除是兜底。
+
+**验证**:本地 import + fast suite 绿;PG 组断言待 160 复跑;行为级验证建议
+金丝雀补一条 PV7 专项(生产阈值下 restage→recheck 应过 correlation,不再
+撞自己)—— 排期到多机升级后。

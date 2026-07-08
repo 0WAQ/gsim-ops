@@ -37,6 +37,27 @@ def _purge_artifacts(name: str, config: Config) -> list[str]:
     return removed
 
 
+def _recycle_check_artifacts(name: str, config: Config) -> list[str]:
+    """删 check 面产物:alpha_pnl/<name> + bcorr 池副本(均单文件)。返回已删项。
+
+    rm / restage / submit --overwrite 共用:pnl 与池副本喂 correlation 的
+    对比池和竞品指标,因子**离库即失效** —— 留着就是"自鬼影":重检时新 pnl
+    对自己旧 pnl corr≈1,高相关分支要求打败几乎相同的自己 → 必拒;也让别的
+    新因子撞上已离库因子的旧 pnl(JOURNAL PV7)。与"离库删 snapshot"(R1)
+    同构。两个池都查 —— 因子来源可能在历史上变过。"""
+    removed: list[str] = []
+    pnl = config.alpha_pnl / name
+    if pnl.exists():
+        pnl.unlink()
+        removed.append(f"alpha_pnl/{name}")
+    for pool in (config.pnl_automated, config.pnl_manual):
+        pool_copy = pool / name
+        if pool_copy.exists():
+            pool_copy.unlink()
+            removed.append(f"{pool.name}/{name}")
+    return removed
+
+
 def run_rm(args) -> None:
     name: str = args.factor_name
     config: Config = Config.load(args.config_path)
@@ -75,19 +96,9 @@ def run_rm(args) -> None:
                 shutil.rmtree(src_dir)
                 info(f"  ✔ 已删除 alpha_src/{name}/")
 
-            # PNL (单文件,不是目录)
-            pnl = config.alpha_pnl / name
-            if pnl.exists():
-                pnl.unlink()
-                info(f"  ✔ 已删除 alpha_pnl/{name}")
-
-            # bcorr 分流池副本 (单文件;to_lib 按 discovery_method 写入,
-            # 两个池都查 —— 因子来源可能在历史上变过)
-            for pool in (config.pnl_automated, config.pnl_manual):
-                pool_copy = pool / name
-                if pool_copy.exists():
-                    pool_copy.unlink()
-                    info(f"  ✔ 已删除 {pool.name}/{name}")
+            # check 面产物: pnl + bcorr 池副本
+            for r in _recycle_check_artifacts(name, config):
+                info(f"  ✔ 已删除 {r}")
 
             # factor_info (级联删除 state + snapshot)
             if default_info_store(config).delete(name):

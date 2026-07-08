@@ -146,6 +146,12 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
             default_snapshot_store(config).delete(meta.name)
         except Exception:
             warn(f"  ⚠  {meta.name} 旧 snapshot 删除失败(archive 时会自愈)")
+        # 同理回收 check 面产物(pnl + bcorr 池副本):旧版本 pnl 留在池里,
+        # 新代码重检时 correlation 对它 corr 通常极高 → 被迫"打败"旧的自己
+        # (自鬼影,PV7)。dump/feature 服务面保留(last-known-good)。
+        from ops.services.rm.rm import _recycle_check_artifacts
+        for r in _recycle_check_artifacts(meta.name, config):
+            info(f"  ✔  已回收 {r}")
         info(f"  ✔  {meta.name} → submitted (version={new_version},覆盖新代码)")
 
     if meta.author and meta.author != submitted_by:
