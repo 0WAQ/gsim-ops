@@ -601,4 +601,17 @@ checker 也不跳过自己,因子 restage/`--overwrite` 后重检时,correlation
 **验证**:本地 import + fast suite 绿;PG 组断言 160 复跑通过(2026-07-08,
 51+ passed 含池副本回收/overwrite 回收新断言);行为级验证 = 金丝雀 PV7 专项
 (生产阈值 corr_threshold=0.7 下 restage→recheck 不撞自己 + 自名过滤双保险),
-执行手册 `VERIFY-PV7.md` —— 不依赖多机升级,160 单机随时可跑。
+执行手册 `VERIFY-PV7.md`。
+
+**行为级验证收官**(2026-07-08 18:40-18:59,160,`VERIFY-PV7-RESULT.md`):
+验证点 A/B 双通过。
+- A:restage 回收输出/文件断言全符(pnl+池副本回收、dump/feature 保留);
+  生产阈值 re-check 走"打败竞品"分支,竞品为库内真因子 AlphaWbaiReversal
+  (金丝雀 e2e 模板与其逻辑相同,bcorr=1.0 是真高相关),**不是自己** ——
+  按判读规则通过。
+- B:手工塞回旧 pnl 后,bcorr 原始输出含自名 1.0,过滤后 max_corr 仍为
+  AlphaWbaiReversal,与 A 轮结果完全一致 —— 自名过滤在真 gsim 输出下生效。
+- 附带收获:①金丝雀与真因子天然孪生,把"打败竞品"分支在生产阈值下跑了两遍
+  (低相关直通分支本次未触发,但它是 L3-L4 及日常的主路径,风险低);
+  ② PV7-4 人工塞入的池残留由收尾 `ops rm` 回收(零残留复查过),再次覆盖
+  L3-7 修复。PV 系列(PV1-PV7)至此全部收官。
