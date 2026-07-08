@@ -5,6 +5,8 @@
   - alpha_pnl/<name>            回测 PNL (单文件)
   - alpha_dump/<name>/          日频目标持仓目录
   - alpha_feature/<name>.*.npy  聚合 feature
+  - pnl_automated|pnl_manual/<name>  bcorr 分流池副本 (to_lib 写入;不清则已删
+    因子的 pnl 永远留在对比池里参与后续因子的 bcorr,生产验证 L3-7 实测泄漏)
   - factor_info PG 行           身份信息 (级联删除 state + snapshot)
 
 没有软删/墓碑:因子被 rm 后即不存在 (要恢复只能重新 ops submit)。
@@ -52,6 +54,7 @@ def run_rm(args) -> None:
     info(f"    · alpha_pnl/{name}           (PNL)")
     info(f"    · alpha_dump/{name}/         (dump)")
     info(f"    · alpha_feature/{name}.*.npy (feature)")
+    info(f"    · pnl_automated|manual/{name} (bcorr 分流池副本)")
     info(f"    · factor_info + 级联 (state + snapshot)")
 
     if not args.yes:
@@ -77,6 +80,14 @@ def run_rm(args) -> None:
             if pnl.exists():
                 pnl.unlink()
                 info(f"  ✔ 已删除 alpha_pnl/{name}")
+
+            # bcorr 分流池副本 (单文件;to_lib 按 discovery_method 写入,
+            # 两个池都查 —— 因子来源可能在历史上变过)
+            for pool in (config.pnl_automated, config.pnl_manual):
+                pool_copy = pool / name
+                if pool_copy.exists():
+                    pool_copy.unlink()
+                    info(f"  ✔ 已删除 {pool.name}/{name}")
 
             # factor_info (级联删除 state + snapshot)
             if default_info_store(config).delete(name):

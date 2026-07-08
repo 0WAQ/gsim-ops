@@ -20,7 +20,7 @@ cd ~/gsim-ops && git pull            # 应看到 5843345 fix(check): 每轮 chec
 export CANARY=AlphaWbaiCanary001
 export CDATE=20260708                # 与首次执行一致(dropbox 金丝雀所在日期目录)
 uv run ops rm $CANARY -y             # 清掉 REJECTED 残局(级联三表 + 全落点)
-sudo rm -f /tank/vault/alphalib/pnl_manual/$CANARY   # rm 不清分流副本(已知泄漏)
+sudo rm -f /tank/vault/alphalib/pnl_manual/$CANARY   # 当时 rm 不清分流副本(泄漏已于验证后修复,见下)
 ```
 
 然后**从 L3-1 重新执行**(dropbox 金丝雀与 config.verify.yaml 首次执行已就位,
@@ -89,13 +89,18 @@ sudo -n /home/wbai/.local/bin/ops --help >/dev/null 2>&1 && echo NOPASSWD-OK || 
 文档字符串的部署建议 + roadmap 的 "sudo NOPASSWD wrapper" 待办):
 
 ```bash
-# 由 wbai 本人执行(需输一次 sudo 密码);提权目标是整个 ops 入口,单行即可:
-echo 'wbai ALL=(root) NOPASSWD: /home/wbai/.local/bin/ops' | sudo tee /etc/sudoers.d/wbai-ops
+# 由 wbai 本人执行(需输一次 sudo 密码)。两行都要:第二行放行 sudo.py 的
+# --preserve-env 白名单 —— 缺它 sudo 拒绝保留 OPS_* 环境变量,首次执行时
+# L3-1 因此失败过一次(160 实测,2026-07-08)。
+sudo tee /etc/sudoers.d/wbai-ops >/dev/null <<'SUDOERS'
+wbai ALL=(root) NOPASSWD: /home/wbai/.local/bin/ops
+Defaults!/home/wbai/.local/bin/ops env_keep += "OPS_CONFIG OPS_GSIM_HOME OPS_STORAGE OPS_WORKSPACE OPS_ALPHALIB_ROOT"
+SUDOERS
 sudo chmod 440 /etc/sudoers.d/wbai-ops
 sudo visudo -c
 ```
 
-配置后重跑探测,`NOPASSWD-OK` 才继续。
+配置后重跑探测,`NOPASSWD-OK` 才继续。(150/144 升级部署时同样需要这一步。)
 
 基线记录(报告里要用):
 
@@ -270,11 +275,11 @@ ls /tank/vault/alphalib/alpha_pnl/$CANARY 2>/dev/null
 ls /tank/vault/alphalib/alpha_feature/$CANARY.* 2>/dev/null
 ```
 
-**已知泄漏(预期内,手动补)**:rm 不清 pnl 分流副本 ——
+**池副本检查**(验证时是已知泄漏须手动补;2026-07-08 验证收尾后 rm 已改为
+自动清理池副本 —— 之后的运行此处应天然无输出,若有残留即回归):
 
 ```bash
-sudo rm -f /tank/vault/alphalib/pnl_manual/$CANARY
-ls /tank/vault/alphalib/pnl_manual/$CANARY 2>/dev/null   # 应无
+ls /tank/vault/alphalib/{pnl_manual,pnl_automated}/$CANARY 2>/dev/null   # 应无
 ```
 
 `uv run ops list | tail -1` 应回到阶段 0 的基线数。
