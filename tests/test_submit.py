@@ -53,12 +53,17 @@ def test_submit_overwrite_bumps_version(test_config, make_dropbox_factor,
     from ops.services.submit.submit import run_submit
     cfg_path, config = test_config
     seed_factor("AlphaWbaiOw", FactorStatus.ACTIVE, version=2)
+    # 旧版本的 check 面产物(--overwrite 应回收,防新代码重检撞旧版自鬼影,PV7)
+    (config.alpha_pnl / "AlphaWbaiOw").write_text("old-pnl")
+    (config.pnl_manual / "AlphaWbaiOw").write_text("old-pool")
     make_dropbox_factor(name="AlphaWbaiOw", user="wbai", date="20260705")
     run_submit(make_args(user="wbai", start_date="20260705", end_date="20260705",
                          factor_name=None, overwrite=True))
     rec = _store(config).get("AlphaWbaiOw")
     assert rec.status == FactorStatus.SUBMITTED
     assert rec.version == 3  # 2 + 1
+    assert not (config.alpha_pnl / "AlphaWbaiOw").exists()
+    assert not (config.pnl_manual / "AlphaWbaiOw").exists()
 
 
 def test_submit_missing_discovery_fails(test_config, make_dropbox_factor, make_args):
