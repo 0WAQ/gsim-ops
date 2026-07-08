@@ -463,3 +463,16 @@ action 里,骨架只需要知道"跳过+原因";异常让 action 保持平铺直
 
 **验证**:本地(无 PG)5 passed / collection 零 import 错;PG 组的真验证依赖
 160 复跑(测试基建改动本身没有无 PG 的自证路径 —— 这正是 I2 的病根,记录之)。
+
+## PV3 · 复跑确认(2026-07-08,server-160)
+
+ops_test 重建为空库后复跑:**fast suite 51 passed / 8 skipped / 0 failed**
+(8 skip = test_state_store_pg 整组,等 I2 正式件,by design);
+**e2e pass 路径 PASSED**(2:27,全 6 条路径至此全部绿)。
+
+意义:submit / restage / cancel / approve / clear / rm / check 的行为测试
+**第一次在真 PG 上全绿** —— 三表拆分(2026-07-06)以来这些测试从未真正执行过。
+第 1-2 层验证通过,进入第 3 层(金丝雀写路径,重点 R1-R4)。
+
+顺带修正:e2e 实测全套 ~6:40、pass 路径单跑 ~2:27(tests/README 原写 ~85s,
+应为早期窗口更短时的测量;数字已更新)。

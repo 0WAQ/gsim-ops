@@ -77,7 +77,7 @@ uv run pytest -k routing -v           # 只跑路由测试
 `submit` → `check`(真回测)→ 最终 state + 文件落点 的完整生产流程。
 
 ```bash
-uv run pytest -m e2e -v                # 跑全部 6 条路径 (~85s)
+uv run pytest -m e2e -v                # 跑全部 6 条路径 (~7min, 160 实测)
 uv run pytest tests/e2e/ -m e2e -k pass   # 只跑 pass 路径
 ```
 
