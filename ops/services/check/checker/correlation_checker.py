@@ -80,6 +80,10 @@ class CorrelationChecker(Checker):
         corrs = Runner.run_bcorr(factor.pnl_file, self.config, pools=pools)
         if corrs is None:
             raise CorrelationSkip("bcorr 运行失败")
+        # 排除自己:restage/--overwrite 若有旧 pnl 残留在池里,自相关≈1 会把
+        # 重检因子挡死("打败几乎相同的自己"不可能)。离库回收(PV7)是主修,
+        # 此处是防删除失败残留的双保险 —— 因子永远不该和自己比相关性。
+        corrs = [(n, c) for n, c in corrs if n != factor.name]
         if not corrs:
             raise CorrelationSkip("无相关性数据")
 

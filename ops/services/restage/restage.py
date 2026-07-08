@@ -7,15 +7,18 @@ SUBMITTED,让下一次 ops check 捡起重跑 7 阶段流水线。version 不变
 - ACTIVE   (默认): 源 = alpha_src/<name>/
 - REJECTED        : 源 = alpha_src/<name>/(REJECTED src 与 ACTIVE 同库)
 
-destructive 为 opt-in:
-- 默认仅搬源 + 翻状态;alpha_dump / alpha_feature / alpha_pnl 保留
-- --purge:清除 alpha_dump + alpha_feature(alpha_pnl 始终保留,作为历史对照)
+产物按两个面处理(2026-07-08 PV7):
+- **check 面**(alpha_pnl + bcorr 池副本 + snapshot):离库即失效,**一律回收**
+  —— 旧 pnl 留在池里是"自鬼影"(重检时对自己旧 pnl corr≈1,高相关分支要求
+  打败几乎相同的自己 → 必拒),与"离库删 snapshot"(R1)同构;
+- **服务面**(alpha_dump / alpha_feature):语义 = 最后一次入库版本的
+  last-known-good,生产 combo 在重检窗口内继续消费,**默认保留**;
+  --purge = 立即下架(同步清除);REJECTED 召回无服务价值,一律自动清。
 
 批量模式(-u / -s)采用 apt-install 风格交互:列出受影响因子后询问 y/N;
 -y / --yes 跳过确认。
 
-跨机:状态变更通过 ops sync push 的 state merge 传播;sync 不会删 remote
-源目录(rclone copy 是 additive)。其他机器若需召回需自行 restage。
+跨机:state 在共享 PG、staging 在共享 JFS,任一节点 restage 全局立即生效。
 """
 import shutil
 from pathlib import Path
@@ -28,7 +31,7 @@ from ops.infra.info import default_info_store
 from ops.infra.snapshot import default_snapshot_store
 from ops.infra.store import default_store
 from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
-from ops.services.rm.rm import _purge_artifacts
+from ops.services.rm.rm import _purge_artifacts, _recycle_check_artifacts
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 _SUPPORTED_STATUSES = {FactorStatus.ACTIVE, FactorStatus.REJECTED}
@@ -133,9 +136,11 @@ def _print_plan(targets: list[FactorRecord],
         author = authors.get(r.name, "?")
         info(f"    · {r.name:<40}  {r.status.value:<9}  author={author:<10}  ← {src_str}")
     if purge:
-        highlight("  --purge: 同步清除 alpha_dump + alpha_feature(alpha_pnl 保留)")
+        highlight("  --purge: 立即下架 —— 同步清除 alpha_dump + alpha_feature")
     else:
-        info("  (默认保留 alpha_dump / alpha_feature / alpha_pnl)")
+        info("  (dump/feature 保留为服务面 last-known-good;pnl + bcorr 池副本一律回收)")
+    if any(r.status == FactorStatus.REJECTED for r in targets):
+        highlight("  REJECTED 因子将自动清除 dump + feature")
 
 
 def _restage_one(rec: FactorRecord, src: Path, config: Config, store,
@@ -164,19 +169,17 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config, store,
     shutil.move(str(src), str(dst))
     _rewrite_module_path(dst)
 
-    # REJECTED restage 自动清掉产物(无生产顾虑,check 会重新产出)
-    # ACTIVE 仅在 --purge 时清
+    # 服务面(dump/feature):REJECTED 无服务价值自动清;ACTIVE 默认保留
+    # (last-known-good 供生产 combo 继续消费),--purge = 立即下架
     if rec.status == FactorStatus.REJECTED or purge:
         removed = _purge_artifacts(name, config)
         for r in removed:
             info(f"    ✔ 已删除 {r}")
-        # REJECTED 额外清 pnl
-        # alpha_pnl/<name> 是单文件,不是目录
-        if rec.status == FactorStatus.REJECTED:
-            pnl = config.alpha_pnl / name
-            if pnl.exists():
-                pnl.unlink()
-                info(f"    ✔ 已删除 alpha_pnl/{name}")
+
+    # check 面(pnl + bcorr 池副本):离库即失效,一律回收 —— 否则重检时
+    # correlation 拿新 pnl 对池里自己的旧 pnl(corr≈1)必拒(自鬼影,PV7)
+    for r in _recycle_check_artifacts(name, config):
+        info(f"    ✔ 已回收 {r}")
 
     # CAS: 只允许从召回前状态(ACTIVE/REJECTED)翻 SUBMITTED
     store.transition(name, FactorStatus.SUBMITTED, expect=rec.status)

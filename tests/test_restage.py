@@ -40,11 +40,17 @@ def test_restage_active_moves_to_staging(test_config, seed_factor):
     cfg_path, config = test_config
     _seed_src(config, "AlphaWbaiAct")
     seed_factor("AlphaWbaiAct", FactorStatus.ACTIVE)
+    # check 面产物(离库应一律回收,PV7)
+    (config.alpha_pnl / "AlphaWbaiAct").write_text("pnl")
+    (config.pnl_manual / "AlphaWbaiAct").write_text("pool")
     run_restage(_args(cfg_path, factor_name="AlphaWbaiAct"))
     rec = _store(config).get("AlphaWbaiAct")
     assert rec.status == FactorStatus.SUBMITTED
     assert (config.staging / "AlphaWbaiAct").exists()
     assert not (config.alpha_src / "AlphaWbaiAct").exists()
+    # 离库即回收 pnl + 池副本(自鬼影修复)
+    assert not (config.alpha_pnl / "AlphaWbaiAct").exists()
+    assert not (config.pnl_manual / "AlphaWbaiAct").exists()
 
 
 def test_restage_active_keeps_artifacts(test_config, seed_factor):
@@ -70,10 +76,10 @@ def test_restage_active_purge_wipes_artifacts(test_config, seed_factor):
     (config.alpha_feature / "AlphaWbaiPurge.v1.npy").write_bytes(b"x")
     (config.alpha_pnl / "AlphaWbaiPurge").write_text("pnl")
     run_restage(_args(cfg_path, factor_name="AlphaWbaiPurge", purge=True))
-    # --purge 清 dump + feature;pnl 始终保留 (ACTIVE)
+    # --purge 清 dump + feature(立即下架);pnl 属 check 面,一律回收(PV7)
     assert not (config.alpha_dump / "AlphaWbaiPurge").exists()
     assert not (config.alpha_feature / "AlphaWbaiPurge.v1.npy").exists()
-    assert (config.alpha_pnl / "AlphaWbaiPurge").exists()
+    assert not (config.alpha_pnl / "AlphaWbaiPurge").exists()
 
 
 def test_restage_rejected_wipes_pnl(test_config, seed_factor):
@@ -83,10 +89,12 @@ def test_restage_rejected_wipes_pnl(test_config, seed_factor):
     _seed_src(config, name)
     seed_factor(name, FactorStatus.REJECTED, last_fail_stage="correlation")
     (config.alpha_pnl / name).write_text("pnl")
+    (config.pnl_manual / name).write_text("pool")
     run_restage(_args(cfg_path, factor_name=name, status="rejected"))
     assert _store(config).get(name).status == FactorStatus.SUBMITTED
-    # REJECTED restage 额外清 pnl
+    # check 面产物一律回收(pnl + 池副本)
     assert not (config.alpha_pnl / name).exists()
+    assert not (config.pnl_manual / name).exists()
 
 
 def test_restage_unsupported_status_rejected(test_config, seed_factor):

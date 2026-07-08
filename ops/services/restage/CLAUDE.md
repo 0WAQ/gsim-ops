@@ -26,12 +26,16 @@
 - `ops restage`: 原代码不变,召回 staging 待重跑 check。version 不变。
 - `ops submit --overwrite`: 新代码从 dropbox 覆盖,version += 1。
 
-## Destructive 行为
+## Destructive 行为(2026-07-08 PV7:产物分两个面)
 
-- 默认仅搬源 + 翻状态；dump / feature / pnl 保留
-- `--purge`: 清除 dump + feature（pnl 始终保留）
-- purge 复用 `rm.py` 的 `_purge_artifacts`
-- REJECTED restage 额外清 `alpha_pnl/<name>` 单文件（离开 REJECTED 后 pnl 无意义）
+- **check 面(pnl + bcorr 池副本)一律回收**(ACTIVE/REJECTED 都是,复用 rm 的
+  `_recycle_check_artifacts`):离库即失效 —— 旧 pnl 留在池里是**自鬼影**
+  (重检时新 pnl 对自己旧 pnl corr≈1,高相关分支要求打败几乎相同的自己 → 必拒),
+  与"离库删 snapshot"(R1)同构。`submit --overwrite` 同款回收。
+- **服务面(dump / feature)= 最后一次入库版本的 last-known-good**,生产 combo
+  在重检窗口内继续消费,默认保留;`--purge` = 立即下架(复用 `_purge_artifacts`);
+  REJECTED 召回无服务价值,一律自动清。
+- 双保险:correlation checker 对 bcorr 结果**排除自名**(防删除失败残留再造自鬼影)。
 
 ## 并发安全
 
