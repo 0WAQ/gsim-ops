@@ -451,3 +451,18 @@ wipe 与"谁检查谁负责清场"语义一致。
 
 **验证**:本地 fast suite 绿(fake checker 路径 rmtree 不存在目录无害);
 真验证 = 160 重跑 L3(rm 金丝雀后从 L3-1 重来,两次 check ~6 分钟)。
+
+**PV5 后记(2026-07-08,作者确认 gsim checkpoint 机制)**:恢复状态是两半配套的
+—— `checkpoint_path/<name>/archive.bin` + **pnl 文件尾部几行**(按 checkpointDays
+回读),下次运行读到两者则只增量跑尾部。L3-6 崩溃即两半错配:archive.bin 是首轮
+long_backtest 的,配套 pnl 已被 to_lib 搬走;Stats 以写模式新开 pnl 输出,
+checkpointLoad 回读尾行 → 对 write-only 文件 read → io.UnsupportedOperation。
+validate 不崩是因 dumpPnl=false 时 Stats checkpoint 路径不激活。锁内 wipe 修复
+成立(gsim 无 archive.bin 即全量跑;本轮内 checkbias→checkpoint 续跑两半同轮
+配套,不受影响)。
+
+**相邻缺口(记账,验证后再修)**:`prepare_for_archive` 拆雷只重定向
+pnlDir/dumpAlphaDir,**未摘 checkpointDir/checkpointDays** —— 入库 XML 仍指向
+check 时的 workspace checkpoint 路径;`ops run` 对入库因子重跑没有 wipe,同样
+会产生/读取错配 archive.bin。候选修法:archive 时置 checkpointDays=0 或
+checkpointDir 也指 /tmp scratch;与 `ops run` 是否该支持 checkpoint 一起拍板。
