@@ -75,9 +75,11 @@ wbai 原话(2026-07-07):
 
 - **D1 Repository 门面**:未动。submit/backfill/check 仍各抄一遍 info+state 双表
   写;`query_factors` 仍是三次查 + 内存 join(自带 TODO);rm 仍"问 state 删 info"。
-- **D2 连接池**:**退出收尾已落地**(2026-07-09,`ops/infra/pg.py` +
-  `track_pool`,消 `ConnectionPool.__del__` 的 `cannot join current thread` 刷屏);
-  **剩:按 conninfo 去重(三表同库共享一池)+ DDL 滚出 `__init__`**,归阶段 1。
+- **D2 连接池**:**核心已落地**(2026-07-09,`ops/infra/pg.py` `get_pool` +
+  `ensure_schema`):按 `(pid, conninfo)` 去重(三表同库塌成一池,治生产 P0
+  `too many clients already` —— check 每因子建池、20 worker 打爆 PG 默认 100 连接)
+  + atexit 退出收尾(治 `__del__` 刷屏)+ fork 隔离。**剩:DDL 彻底滚出 store
+  `__init__`、`max_size` 参数化**,归阶段 1 收尾。
 - **D3 返回值约定**:部分(InfoStore.delete 已改 bool,R3);Snapshot/State 未统一,
   无类型化异常模块。
 - **D4 双 FactorInfo 同名**:未动。

@@ -19,10 +19,9 @@ from datetime import datetime
 from typing import Any
 
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus
-from ops.infra.pg import track_pool
+from ops.infra.pg import ensure_schema, get_pool
 
 from .base import StateConflict, StateStore
 
@@ -90,13 +89,11 @@ def _ts_out(v) -> str | None:
 class PostgresStateStore(StateStore):
     def __init__(self, conninfo: str):
         """不再需要 library_id 参数（永远单库）。"""
-        self.pool = ConnectionPool(conninfo, min_size=1, max_size=4, open=True)
-        track_pool(self.pool)
+        self.pool = get_pool(conninfo)
         self._init_schema()
 
     def _init_schema(self) -> None:
-        with self.pool.connection() as conn:
-            conn.execute(_SCHEMA)
+        ensure_schema(self.pool, _SCHEMA)
 
     def _row_to_record(self, row) -> FactorRecord:
         (name, status, version, submitted_at, entered_at,
