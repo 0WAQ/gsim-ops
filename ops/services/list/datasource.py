@@ -1,12 +1,12 @@
+"""数据源解析(AST + npy 索引)。
+
+submit/check/backfill 共用的领域能力(⚠ 住在 list 包下是历史遗留,迁往共享
+模块属 Wave 4;full-review 第三部分 L 表)。2026-07-07 Wave 2:derived 层删除,
+本文件的 refresh_datasources/load_datasources/_store 写读僵尸表的半边随之删除,
+只留纯解析函数 —— datasources 的唯一落库点是 check archive 时的 factor_snapshot。
+"""
 import ast
 from pathlib import Path
-
-from ops.infra.config import Config
-from ops.infra.derived import default_derived_store
-
-
-def _store(config_path: Path):
-    return default_derived_store(Config.load(config_path))
 
 
 def _build_npy_index(nio_data_path: Path) -> dict[str, str]:
@@ -55,31 +55,3 @@ def resolve_tables(fields: list[str], npy_index: dict[str, str]) -> list[str]:
         if table:
             tables.add(table)
     return sorted(tables)
-
-
-def load_datasources(config_path: Path) -> dict[str, dict]:
-    out: dict[str, dict] = {}
-    for name, rec in _store(config_path).get_all().items():
-        if rec.fields is None and rec.tables is None:
-            continue
-        out[name] = {"fields": rec.fields or [], "tables": rec.tables or []}
-    return out
-
-
-def refresh_datasources(
-    names: list[str], config: Config, config_path: Path
-) -> dict[str, dict]:
-    """Re-parse getData() calls for the given factor names (AST), resolve to
-    tables via npy index, write to the store. Paths rebuilt from config."""
-    npy_index = _build_npy_index(config.nio_data_path)
-    store = _store(config_path)
-
-    for name in names:
-        py_files = list((config.alpha_src / name).glob("*.py"))
-        if not py_files:
-            continue
-        fields = parse_datasources(py_files[0])
-        tables = resolve_tables(fields, npy_index)
-        store.upsert_datasources(name, fields, tables)
-
-    return load_datasources(config_path)

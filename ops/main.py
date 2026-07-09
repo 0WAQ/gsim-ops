@@ -1,23 +1,22 @@
 import argparse
+import os
 import sys
 
-from ops.cli.run import add_run_subparser
-from ops.cli.check import add_check_subparser
-from ops.cli.list import add_list_subparser
-from ops.cli.info import add_info_subparser
-from ops.cli.health import add_health_subparser
-from ops.cli.submit import add_submit_subparser
-from ops.cli.status import add_status_subparser
-from ops.cli.backfill import add_backfill_subparser
-from ops.cli.pack import add_pack_subparser
-from ops.cli.sync import add_sync_subparser
-from ops.cli.rm import add_rm_subparser
-from ops.cli.restage import add_restage_subparser
 from ops.cli.approve import add_approve_subparser
+from ops.cli.backfill import add_backfill_subparser
 from ops.cli.cancel import add_cancel_subparser
+from ops.cli.check import add_check_subparser
 from ops.cli.clear import add_clear_subparser
 from ops.cli.combo import add_combo_subparser
-from ops.infra.sudo import maybe_elevate, ensure_redis_password
+from ops.cli.info import add_info_subparser
+from ops.cli.list import add_list_subparser
+from ops.cli.pack import add_pack_subparser
+from ops.cli.restage import add_restage_subparser
+from ops.cli.rm import add_rm_subparser
+from ops.cli.run import add_run_subparser
+from ops.cli.status import add_status_subparser
+from ops.cli.submit import add_submit_subparser
+from ops.infra.sudo import maybe_elevate
 from ops.utils.log import logger
 
 
@@ -37,12 +36,10 @@ def main():
         add_check_subparser(subparsers)
         add_list_subparser(subparsers)
         add_info_subparser(subparsers)
-        add_health_subparser(subparsers)
         add_submit_subparser(subparsers)
         add_status_subparser(subparsers)
         add_backfill_subparser(subparsers)
         add_pack_subparser(subparsers)
-        add_sync_subparser(subparsers)
         add_rm_subparser(subparsers)
         add_restage_subparser(subparsers)
         add_approve_subparser(subparsers)
@@ -51,16 +48,20 @@ def main():
         add_combo_subparser(subparsers)
 
         args = parser.parse_args()
-        # 新 shell 下 OPS_STATE_REDIS_PASSWORD 没 export 时,
-        # sudo grep 一次 config.state.redis.password_file 拿密码塞 env,
-        # 后续 self-elevate 透传给 root 子进程。
-        ensure_redis_password(args)
         # JFS 集中运维: write 命令 + alpha_src root-owned 时自动 sudo 提权,
-        # 否则 no-op (legacy prod 模式 / read-only 命令直通)。详见 ops/infra/sudo.py。
+        # 否则 no-op (read-only 命令直通)。详见 ops/infra/sudo.py。
+        # (ensure_redis_password 钩子随 redis state 后端一并退役, Wave 1 F2。)
         maybe_elevate(args)
         args.func(args)
     except SystemExit:
         raise  # argparse --help / explicit sys.exit() are control flow, not bugs
+    except BrokenPipeError:
+        # 下游管道提前关闭(`ops list | head` / `| less` 退出)是正常 Unix 行为,
+        # 不是崩溃。把 stdout 换成 /dev/null 防解释器退出时二次 flush 再炸,
+        # 按管道约定以 141 (128+SIGPIPE) 退出,不打 traceback。
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(141)
     except BaseException:
         logger.exception("ops crashed argv={}", sys.argv)
         raise

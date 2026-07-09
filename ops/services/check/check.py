@@ -1,52 +1,39 @@
 import multiprocessing as mp
 import shutil
-import xmltodict
-from datetime import datetime
+from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
-from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 
-from ops.infra.config import Config
-from ops.infra.gsim.runner import Runner
-from ops.infra.store import default_store
-from ops.infra.info import default_info_store, FactorInfo
-from ops.infra.snapshot import default_snapshot_store, FactorSnapshot
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.services.list.datasource import (
-    parse_datasources,
-    resolve_tables,
-    _build_npy_index,
-)
-from ops.utils.printer import *
-from ops.utils.printer import _console as _printer_console
-from ops.utils.log import logger, STDERR_SINK_ID
 from ops.core.alpha.metadata import AlphaMetadata
 from ops.core.factormeta import FactorMeta
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
-from ops.core.alpha.results.compliance import *
-from ops.core.alpha.results.correlation import *
-from ops.core.alpha.results.checkpoint import *
-from ops.core.alpha.results.checkbias import *
-
-# Imported AFTER the `results.*` star imports so its Status doesn't get
-# shadowed by the stub Status enum in core/alpha/results/base.py.
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
+from ops.infra.config import Config
+from ops.infra.gsim.runner import Runner
+from ops.infra.info import FactorInfo, default_info_store
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.snapshot import FactorSnapshot, default_snapshot_store
+from ops.infra.store import default_store
+from ops.services.list.datasource import (
+    _build_npy_index,
+    parse_datasources,
+    resolve_tables,
+)
+from ops.utils.clock import now_iso
+from ops.utils.factor_dir import clean_pycache, rewrite_module_path
 from ops.utils.live_table import LiveDriver, Status, make_factor_rows
+from ops.utils.log import STDERR_SINK_ID, logger
+from ops.utils.printer import _console as _printer_console
+from ops.utils.printer import banner, bottom, error, info, warn
 
-from .xml_prepare import *
+from .checker.base import Checker, CheckFail, CheckSkip
 from .report import write_check_report
-from .checker.base import *
-from .checker.validate_checker import ValidateChecker
-from .checker.checkbias_checker import CheckbiasChecker
-from .checker.checkpoint_checker import CheckpointChecker
-from .checker.long_backtest_checker import LongBacktestChecker
-from .checker.compliance_checker import ComplianceChecker
-from .checker.correlation_checker import CorrelationChecker
-
-# Stages whose failure is likely environmental/config — revert to SUBMITTED, leave in staging.
-_RETRYABLE_STAGES = {"validate", "long_backtest"}
-
-# Stage names + display order for the Live table. Must match keys used in
-# _run_one_locked when emitting (stage_start, ...) / (stage_done, ...) events.
-STAGES = ("validate", "checkbias", "checkpoint", "long_backtest", "compliance", "correlation")
+from .stages import (
+    CORRELATION,
+    KEEP_ARTIFACTS_STAGES,
+    PIPELINE,
+    RETRYABLE_STAGES,
+    STAGES,
+)
+from .xml_prepare import prepare_for_archive, prepare_for_initial
 
 
 class CheckerPipeline:
@@ -54,7 +41,6 @@ class CheckerPipeline:
                  users: list[str] | None,
                  config_path: Path,
                  factor: str | None = None,
-                 retry: bool = False,
                  checkers: dict[str, "Checker"] | None = None):
 
         self.config = Config.load(config_path)
@@ -65,7 +51,6 @@ class CheckerPipeline:
         self.config.alpha_pnl.mkdir(exist_ok=True)
         self.config.pnl_automated.mkdir(parents=True, exist_ok=True)
         self.config.pnl_manual.mkdir(parents=True, exist_ok=True)
-        self.retry = retry
 
         # kept for report file naming (see .report.write_check_report)
         self._user = users[0] if users else None
@@ -76,15 +61,13 @@ class CheckerPipeline:
             prepare_for_initial(md, self.config)
 
         # Checkers are dependency-injected: pass `checkers` to substitute fakes
-        # in tests. Unset (production) → construct the real gsim-backed checkers,
-        # behavior unchanged.
-        checkers = checkers or {}
-        self.validate_checker = checkers.get("validate") or ValidateChecker(config=self.config)
-        self.checkbias_checker = checkers.get("checkbias") or CheckbiasChecker(config=self.config)
-        self.checkpoint_checker = checkers.get("checkpoint") or CheckpointChecker(config=self.config)
-        self.long_backtest_checker = checkers.get("long_backtest") or LongBacktestChecker(config=self.config)
-        self.compliance_checker = checkers.get("compliance") or ComplianceChecker(config=self.config)
-        self.correlation_checker = checkers.get("correlation") or CorrelationChecker(config=self.config)
+        # in tests. Unset (production) → construct the real gsim-backed checkers
+        # via the PIPELINE stage table, behavior unchanged.
+        injected = checkers or {}
+        self.checkers: dict[str, Checker] = {
+            s.name: injected.get(s.name) or s.make_checker(self.config)
+            for s in PIPELINE
+        }
 
 
     def _scan_factors(self, users: list[str] | None,
@@ -130,29 +113,6 @@ class CheckerPipeline:
 
         return mds
 
-    def _clean_pycache(self, root: Path) -> None:
-        for p in root.rglob("__pycache__"):
-            if p.is_dir():
-                shutil.rmtree(p, ignore_errors=True)
-
-    def _rewrite_module_path(self, dir: Path) -> None:
-        """Rewrite XML's Modules.Alpha.@module to point to the .py inside `dir`,
-        so the factor can be re-run from its new location.
-        """
-        xmls = list(dir.glob("*.xml"))
-        pys = list(dir.glob("*.py"))
-        if not xmls or not pys:
-            return
-        xml_file = xmls[0]
-        cfg = xmltodict.parse(xml_file.read_text(encoding="utf-8"))
-        modules_alpha = cfg.get("gsim", {}).get("Modules", {}).get("Alpha")
-        if isinstance(modules_alpha, dict):
-            modules_alpha["@module"] = str(pys[0])
-            xml_file.write_text(
-                xmltodict.unparse(cfg, pretty=True, encoding="utf-8", full_document=False),
-                encoding="utf-8",
-            )
-
     def _persist_derived(self, factor: AlphaMetadata, metrics, corr_result) -> None:
         """入库前把所有派生数据写入 factor_snapshot (入库时快照，不可变)。
 
@@ -197,6 +157,13 @@ class CheckerPipeline:
 
         # 一次性写入 snapshot
         try:
+            # Re-archive 自愈:restage / submit --overwrite 在离库时删旧快照,但
+            # 迁移期存量 REJECTED 快照行、或删除步骤崩掉的残留仍可能在。快照语义
+            # = "本次入库事件的快照",旧行必须让位 —— 否则 insert 撞 name UNIQUE
+            # 被吞,反查/报告永远读到上一版代码的指标(full-review P0-1)。
+            if snapshot_store.get(factor.name) is not None:
+                logger.warning("stale snapshot exists, replacing factor={}", factor.name)
+                snapshot_store.delete(factor.name)
             snapshot_store.insert(FactorSnapshot(
                 name=factor.name,
                 ret=ret,
@@ -215,28 +182,33 @@ class CheckerPipeline:
             logger.exception("persist snapshot failed factor={}", factor.name)
 
     def to_lib(self, factor: AlphaMetadata):
-        self._clean_pycache(factor.dir)
+        clean_pycache(factor.dir)
 
         src_dst = self.config.alpha_src / factor.dir.name
         if src_dst.exists():
             shutil.rmtree(src_dst)
         shutil.move(factor.dir, self.config.alpha_src)
-        self._rewrite_module_path(src_dst)
+        rewrite_module_path(src_dst)
 
         dump_dst = self.config.alpha_dump / factor.alpha_dir.name
         if dump_dst.exists():
             shutil.rmtree(dump_dst)
         shutil.move(factor.alpha_dir, self.config.alpha_dump)
 
+        # alpha_pnl/<name> 是单文件(根 CLAUDE.md 明文警告的 Errno 20 反模式):
+        # restage 保留 pnl → re-archive 时此处必有旧文件,rmtree 对文件抛
+        # NotADirectoryError(full-review 第一部分 1.2)。目录形态只可能是远古残留。
         pnl_dst = self.config.alpha_pnl / factor.name
-        if pnl_dst.exists():
+        if pnl_dst.is_dir():
             shutil.rmtree(pnl_dst)
+        elif pnl_dst.exists():
+            pnl_dst.unlink()
         shutil.move(factor.pnl_file, pnl_dst)
 
         # 按因子来源 (discovery_method) 把 pnl 额外分流一份到 pnl_automated / pnl_manual。
         # factor.pnl_file 此时已被 move 走,从入库后的 pnl_dst 拷。pnl 是单文件,copy2。
         bucket = {"automated": self.config.pnl_automated,
-                  "manual": self.config.pnl_manual}.get(factor.discovery_method)
+                  "manual": self.config.pnl_manual}.get(factor.discovery_method or "")
         if bucket is not None:
             bucket.mkdir(parents=True, exist_ok=True)
             shutil.copy2(pnl_dst, bucket / factor.name)
@@ -244,11 +216,11 @@ class CheckerPipeline:
             logger.warning("discovery_method 缺失/非法, 跳过 pnl 分流 factor={} value={}",
                            factor.name, factor.discovery_method)
 
-    def on_reject(self, factor: AlphaMetadata, e: CheckFail):
+    def on_reject(self, factor: AlphaMetadata, failed_stage: str):
         """因子质量失败:src 归档到 alpha_src(与 ACTIVE 同库,状态由 state 区分),
         按失败阶段决定产物保留,最后清掉 staging 原物。不再写 recycle 目录。
         """
-        self._clean_pycache(factor.dir)
+        clean_pycache(factor.dir)
 
         # alpha_src: 从 staging 复制一份(REJECTED 与 ACTIVE 的 src 都在 alpha_src,
         # 状态靠 state 区分,不靠目录位置)
@@ -256,14 +228,12 @@ class CheckerPipeline:
         if src_dst.exists():
             shutil.rmtree(src_dst)
         shutil.copytree(factor.dir, src_dst)
-        self._rewrite_module_path(src_dst)
+        rewrite_module_path(src_dst)
 
-        # 按失败阶段区分产物保留策略:
-        # - compliance/correlation 失败: 保留 pnl + dump,生成 feature
-        # - checkbias/checkpoint 失败: 不保留 pnl/dump/feature(数据不完整)
-        _LATE_STAGES = {"compliance", "correlation"}
-
-        if e.stage in _LATE_STAGES:
+        # 产物保留策略由 Stage 表的 keep_artifacts_on_fail 声明:
+        # 晚期 stage(compliance/correlation)数据完整,保留 pnl + dump 供分析;
+        # 早期 stage(checkbias/checkpoint)数据不完整,清掉 dump + feature。
+        if failed_stage in KEEP_ARTIFACTS_STAGES:
             # 保留 pnl
             if factor.pnl_file.exists():
                 shutil.copy2(factor.pnl_file, self.config.alpha_pnl / factor.name)
@@ -271,16 +241,6 @@ class CheckerPipeline:
             dump_src = self.config.alpha_dump / factor.alpha_dir.name
             if factor.alpha_dir.exists() and not dump_src.exists():
                 shutil.move(str(factor.alpha_dir), str(dump_src))
-            # 生成 feature
-            # from ops.services.pack.pack import pack_one, load_universe, PACK_L
-            # try:
-            #     nio = load_universe(self.config.nio_data_path)
-            #     _, instruments, date_to_idx = nio
-            #     shape = (PACK_L, len(instruments))
-            #     pack_one(factor.name, self.config.alpha_dump,
-            #              self.config.alpha_feature, date_to_idx, shape)
-            # except Exception:
-            #     pass
         else:
             # checkbias/checkpoint: 清掉 dump + feature(短期数据不完整)
             dump_dir = self.config.alpha_dump / factor.name
@@ -302,7 +262,7 @@ class CheckerPipeline:
         meta_path = factor.dir / "meta.json"
         author = factor.key.user
         discovery_method = factor.discovery_method
-        submitted_at = datetime.now().isoformat(timespec="seconds")
+        submitted_at = now_iso()
         if meta_path.exists():
             try:
                 meta = FactorMeta.load(meta_path)
@@ -311,7 +271,7 @@ class CheckerPipeline:
                 submitted_at = meta.submitted_at or submitted_at
             except Exception:
                 pass
-        now = datetime.now().isoformat(timespec="seconds")
+        now = now_iso()
         info_store = default_info_store(self.config)
         info_store.upsert(FactorInfo(
             name=factor.name,
@@ -344,8 +304,16 @@ class CheckerPipeline:
     def _run_one_locked(self, factor: AlphaMetadata, q) -> str:
         store = default_store(self.config)
         self._ensure_record(factor, store)
-        check = CheckRecord(started_at=datetime.now().isoformat(timespec="seconds"))
+        check = CheckRecord(started_at=now_iso())
         store.transition(factor.name, FactorStatus.CHECKING)
+
+        # 清上一轮 check 的 checkpoint 残留(锁内,开跑前)。long_backtest 写的
+        # checkpoint 无人善后(CheckpointChecker.clean 只清它之前的),restage
+        # 重检时 checkbias 的 gsim 会 load 上一轮全历史窗口的残留,
+        # StatsSimpleV6.checkpointLoad 直接崩 io.UnsupportedOperation
+        # (生产验证 L3-6 发现,JOURNAL PV5)。本轮内 checkbias → checkpoint
+        # 的断点续跑不受影响 —— 那些 checkpoint 在本次 wipe 之后才写。
+        shutil.rmtree(factor.checkpoint_dir, ignore_errors=True)
 
         # Track which stage is currently running so the catch-all except clauses
         # can mark it failed in the Live table.
@@ -362,49 +330,27 @@ class CheckerPipeline:
             q.put(("stage_done", factor.name, stage, status))
 
         try:
-            # 0. Validate — short backtest, no firewall (env/config check)
-            _emit_stage_start("validate")
-            prepare_for_validate(factor)
-            self.validate_checker.check(factor)
-            _emit_stage_done("validate", Status.PASSED)
+            # Stage 顺序、prepare、checker 均由 PIPELINE 表驱动(stages.py)。
+            # prepare 失败不再被吞:异常落到下方 unexpected-error 臂
+            # (revert SUBMITTED + 完整日志),不会拿着错误窗口继续跑。
+            corr_result = None
+            for stage in PIPELINE:
+                _emit_stage_start(stage.name)
+                if stage.prepare is not None:
+                    stage.prepare(factor)
+                checker = self.checkers[stage.name]
+                result = checker.check(factor)
+                checker.clean(factor)
+                if stage.name == CORRELATION:
+                    corr_result = result
+                _emit_stage_done(stage.name, Status.PASSED)
 
-            # 1. Checkbias — firewall injection + short backtest
-            _emit_stage_start("checkbias")
-            prepare_for_checkbias(factor)
-            self.checkbias_checker.check(factor)
-            _emit_stage_done("checkbias", Status.PASSED)
-
-            # 2. Checkpoint — breakpoint stability
-            _emit_stage_start("checkpoint")
-            prepare_for_checkpoint(factor)
-            self.checkpoint_checker.check(factor)
-            self.checkpoint_checker.clean(factor)
-            _emit_stage_done("checkpoint", Status.PASSED)
-
-            # 3. Long Backtest — full history (pure run, no checks)
-            _emit_stage_start("long_backtest")
-            prepare_for_long_backtest(factor)
-            self.long_backtest_checker.check(factor)
-            _emit_stage_done("long_backtest", Status.PASSED)
-
-            # 4. Compliance — position limits check
-            _emit_stage_start("compliance")
-            prepare_for_compliance(factor)
-            self.compliance_checker.check(factor)
-            _emit_stage_done("compliance", Status.PASSED)
-
-            # 5. Correlation — correlation against library
-            _emit_stage_start("correlation")
-            prepare_for_correlation(factor)
-            corr_result = self.correlation_checker.check(factor)
-            _emit_stage_done("correlation", Status.PASSED)
-
-            # 6. Archive — simsummary + mark ACTIVE (设置 entered_at) + persist snapshot + move to lib
+            # Archive — simsummary + mark ACTIVE (设置 entered_at) + persist snapshot + move to lib
             #    (no live column; folded into outcome)
             metrics = Runner.run_simsummary(factor.pnl_file, self.config)
 
             # 先设置 entered_at (入库时间)，snapshot_at 依赖这个时间戳
-            now = datetime.now().isoformat(timespec="seconds")
+            now = now_iso()
             check.finished_at = now
             check.passed = True
             store.append_check(factor.name, check)
@@ -421,55 +367,60 @@ class CheckerPipeline:
             return "pass"
 
         except CheckSkip as e:
+            # stage 归因:CheckSkip/CheckFail 只可能从 checker.check() 抛出,
+            # 此时 current_stage 恒为所在 stage(exception 自己不携带 stage,
+            # 12 个硬编码 stage 字符串的子类已删,见 checker/base.py)。
+            stage_name = current_stage or "archive"
             if current_stage:
                 _emit_stage_done(current_stage, Status.SKIPPED)
             logger.warning("check skipped factor={} stage={} reason={}",
-                           factor.key, e.stage, str(e))
-            check.finished_at = datetime.now().isoformat(timespec="seconds")
+                           factor.key, stage_name, str(e))
+            check.finished_at = now_iso()
             check.passed = None
-            check.failed_stage = e.stage
+            check.failed_stage = stage_name
             check.fail_reason = str(e)
             store.append_check(factor.name, check)
             store.transition(factor.name, FactorStatus.SUBMITTED)
             q.put(("done", factor.name, "error",
-                   f"⊝ {e.stage} skipped: {str(e)[:60]}", "yellow"))
+                   f"⊝ {stage_name} skipped: {str(e)[:60]}", "yellow"))
             return "error"
 
         except CheckFail as e:
-            if e.stage in _RETRYABLE_STAGES:
+            stage_name = current_stage or "archive"
+            if stage_name in RETRYABLE_STAGES:
                 if current_stage:
                     _emit_stage_done(current_stage, Status.RETRYABLE)
                 logger.warning("check retryable failure factor={} stage={} reason={}",
-                               factor.key, e.stage, str(e))
+                               factor.key, stage_name, str(e))
                 # Environmental/config failure — revert to SUBMITTED, keep in staging
-                check.finished_at = datetime.now().isoformat(timespec="seconds")
+                check.finished_at = now_iso()
                 check.passed = False
-                check.failed_stage = e.stage
+                check.failed_stage = stage_name
                 check.fail_reason = str(e)
                 store.append_check(factor.name, check)
                 store.transition(factor.name, FactorStatus.SUBMITTED)
                 q.put(("done", factor.name, "error",
-                       f"↻ retry: {e.stage} ({str(e)[:60]})", "yellow"))
+                       f"↻ retry: {stage_name} ({str(e)[:60]})", "yellow"))
                 return "error"
             else:
                 if current_stage:
                     _emit_stage_done(current_stage, Status.FAILED)
                 logger.warning("check rejected factor={} stage={} reason={}",
-                               factor.key, e.stage, str(e))
+                               factor.key, stage_name, str(e))
                 # Factor quality failure — REJECTED (src → alpha_src)
-                self.on_reject(factor, e)
-                now = datetime.now().isoformat(timespec="seconds")
+                self.on_reject(factor, stage_name)
+                now = now_iso()
                 check.finished_at = now
                 check.passed = False
-                check.failed_stage = e.stage
+                check.failed_stage = stage_name
                 check.fail_reason = str(e)
                 store.append_check(factor.name, check)
                 store.transition(factor.name, FactorStatus.REJECTED,
                                  rejected_at=now,
-                                 last_fail_stage=e.stage,
+                                 last_fail_stage=stage_name,
                                  last_fail_reason=str(e))
                 q.put(("done", factor.name, "fail",
-                       f"→ rejected/{e.stage}: {str(e)[:60]}", "red"))
+                       f"→ rejected/{stage_name}: {str(e)[:60]}", "red"))
                 return "fail"
 
         except Exception as e:
@@ -478,7 +429,7 @@ class CheckerPipeline:
             if current_stage:
                 _emit_stage_done(current_stage, Status.FAILED)
             logger.exception("check pipeline crashed factor={}", factor.key)
-            check.finished_at = datetime.now().isoformat(timespec="seconds")
+            check.finished_at = now_iso()
             check.passed = None
             check.fail_reason = f"unexpected: {e}"
             store.append_check(factor.name, check)
@@ -582,13 +533,11 @@ def run_check(args):
     users: list[str] | None = [args.user] if args.user else None
     config_path: Path = args.config_path
     factor: str | None = args.factor_name
-    retry: bool = getattr(args, "retry", False)
 
     pipeline = CheckerPipeline(
         users=users,
         config_path=config_path,
         factor=factor,
-        retry=retry,
     )
     pipeline.run()
 

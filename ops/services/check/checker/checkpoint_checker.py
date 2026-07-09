@@ -1,21 +1,13 @@
 import shutil
 from pathlib import Path
 
-from .base import *
-from ops.utils.func import md5sum
+from ops.core.alpha.metadata import AlphaMetadata
+from ops.core.alpha.results.checkpoint import PointResult
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner
-from ops.core.alpha.metadata import AlphaMetadata
-from ops.core.alpha.results.checkpoint import *
+from ops.utils.func import md5sum
 
-
-class CheckpointSkip(CheckSkip):
-    def __init__(self, *args: object):
-        super().__init__("checkpoint", *args)
-
-class CheckpointFail(CheckFail):
-    def __init__(self, *args: object):
-        super().__init__("checkpoint", *args)
+from .base import Checker, CheckFail, CheckSkip
 
 
 class CheckpointChecker(Checker):
@@ -42,10 +34,11 @@ class CheckpointChecker(Checker):
         new = self._get_v2md5(factor)
 
         if not old or not new:
-            raise CheckpointSkip(f"old={'OK' if old else 'NONE'} new={'OK' if new else 'NONE'}")
+            raise CheckSkip(f"old={'OK' if old else 'NONE'} new={'OK' if new else 'NONE'}")
 
         if old != new:
-            raise CheckpointFail()
+            # 原 CheckpointFail() 不带消息,报告里 fail_reason 是空串
+            raise CheckFail(f"断点续跑与整跑结果不一致: v2 md5 {old[:8]}… != {new[:8]}…")
 
         return PointResult()
     

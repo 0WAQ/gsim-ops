@@ -1,15 +1,14 @@
 import shutil
 
-from rich.console import Console
-from rich.table import Table
-from rich.rule import Rule
 from rich import box
+from rich.console import Console
+from rich.rule import Rule
+from rich.table import Table
 
-from ops.core.state import FactorStatus, FactorRecord
+from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
-from ops.infra.store import default_store
 from ops.infra.info import default_info_store
-
+from ops.infra.store import default_store
 
 _console = Console(width=shutil.get_terminal_size((140, 50)).columns)
 
@@ -18,8 +17,6 @@ _STATUS_STYLE = {
     FactorStatus.CHECKING:  "bold yellow",
     FactorStatus.ACTIVE:    "green",
     FactorStatus.REJECTED:  "red",
-    FactorStatus.DECAYING:  "yellow",
-    FactorStatus.RETIRED:   "dim",
 }
 
 
@@ -113,7 +110,7 @@ def run_status(args) -> None:
         infos = {i.name: i for i in info_store.list()}
 
     # 附加 author 信息
-    records_with_author = [(r, infos.get(r.name).author if r.name in infos else None) for r in records]
+    records_with_author = [(r, i.author if (i := infos.get(r.name)) else None) for r in records]
     records_with_author.sort(key=lambda x: x[0].name)
 
     _console.print(Rule("[bold cyan]因子状态[/]", style="cyan", characters="━"))

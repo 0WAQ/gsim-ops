@@ -1,15 +1,14 @@
-from datetime import datetime
 from pathlib import Path
 
-from ops.infra.config import Config
-from ops.infra.store import default_store
-from ops.infra.info import default_info_store, FactorInfo
-from ops.core.state import FactorRecord, FactorStatus
 from ops.core.factormeta import FactorMeta
-from ops.services.submit.parser import parse_factor
+from ops.core.state import FactorRecord, FactorStatus
+from ops.infra.config import Config
+from ops.infra.info import FactorInfo, default_info_store
+from ops.infra.store import default_store
 from ops.services.list.datasource import _build_npy_index
-from ops.utils.printer import banner, bottom, info, warn, error, highlight
-
+from ops.services.submit.parser import parse_factor
+from ops.utils.clock import now_iso
+from ops.utils.printer import banner, bottom, error, info
 
 META_FILENAME = "meta.json"
 
@@ -66,7 +65,7 @@ def run_backfill(args):
 
     created = skipped = failed = state_added = 0
     failures: list[tuple[str, str]] = []
-    now = datetime.now().isoformat(timespec="seconds")
+    now = now_iso()
 
     for factor_dir in dirs:
         status, msg = backfill_one(factor_dir, config, dry_run, npy_index=npy_index)

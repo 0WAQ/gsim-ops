@@ -1,18 +1,16 @@
+import fnmatch
 import json
 import re
-import fnmatch
 import shutil
 
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from ops.core.library import LibraryScanner
 from ops.core.state import FactorStatus
 from ops.infra.config import Config
-from ops.infra.query import query_factors, FactorRow
+from ops.infra.query import FactorRow, query_factors
 from ops.infra.snapshot import FactorSnapshot
-
 
 DASH = "—"
 
@@ -23,8 +21,6 @@ _STATUS_STYLE = {
     FactorStatus.REJECTED:  "red",
     FactorStatus.SUBMITTED: "yellow",
     FactorStatus.CHECKING:  "yellow",
-    FactorStatus.DECAYING:  "magenta",
-    FactorStatus.RETIRED:   "dim",
 }
 
 
@@ -86,9 +82,12 @@ def print_table(rows: list[FactorRow], show_tables=False, show_fields=False):
     has_rejected = any(x.status == FactorStatus.REJECTED for x in rows)
 
     cols = list(_BASE_COLS)
-    if has_rejected: cols.append(_FAIL_COL)
-    if show_tables:  cols.append(_TABLES_COL)
-    if show_fields:  cols.append(_FIELDS_COL)
+    if has_rejected:
+        cols.append(_FAIL_COL)
+    if show_tables:
+        cols.append(_TABLES_COL)
+    if show_fields:
+        cols.append(_FIELDS_COL)
 
     table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", pad_edge=False)
     for header, justify, extras, _ in cols:
@@ -102,14 +101,15 @@ def print_table(rows: list[FactorRow], show_tables=False, show_fields=False):
     _console.print(f"Total: {len(rows)} factors")
 
 
-def _row_to_json(row: FactorRow, scanned: dict | None = None) -> dict:
-    """将 FactorRow 转换为 JSON 字典（保留历史 FactorInfo.to_dict() 结构）。
+def _row_to_json(row: FactorRow) -> dict:
+    """将 FactorRow 转换为 JSON 字典。
 
-    has_pnl/dump_days 是实时物理状态（不在 snapshot），从扫盘 FactorInfo 取
-    (scanned: {name -> FactorInfo}); 缺失则为 None。
+    ⚠ 2026-07-07 Wave 2 输出变更: has_pnl/dump_days 两个键移除 —— 它们是实时
+    物理状态,唯一来源是全库扫盘(每次 list ~25s),与"list 是 PG catalog 查询"
+    冲突。单因子的物理状态看 `ops info`(现场 stat,便宜);批量对账属后续
+    ops doctor。新增 status 键(因子集判据变更后调用方常需要)。
     """
     snap = row.snapshot
-    fi = (scanned or {}).get(row.info.name)
 
     metrics = None
     if snap and (snap.ret is not None or snap.shrp is not None or snap.fitness is not None):
@@ -126,8 +126,7 @@ def _row_to_json(row: FactorRow, scanned: dict | None = None) -> dict:
     return {
         "name": row.info.name,
         "author": row.info.author,
-        "has_pnl": fi.has_pnl if fi else None,
-        "dump_days": fi.dump_days if fi else None,
+        "status": row.status.value if row.status else None,
         "delay": snap.delay if snap else None,
         "metrics": metrics,
         "datasources": datasources,
@@ -135,8 +134,8 @@ def _row_to_json(row: FactorRow, scanned: dict | None = None) -> dict:
     }
 
 
-def print_json(rows: list[FactorRow], scanned: dict | None = None):
-    data = [_row_to_json(x, scanned) for x in rows]
+def print_json(rows: list[FactorRow]):
+    data = [_row_to_json(x) for x in rows]
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
@@ -226,19 +225,20 @@ def _metric_pushdown(filters: list[tuple[str, str, str]]) -> list[tuple[str, str
 
 
 def run_list(args):
+    """列出库内因子 —— 零扫盘,纯 PG catalog 查询。
+
+    2026-07-07 Wave 2 (JOURNAL V1): 因子集判据收敛为
+    `factor_state.status != 'submitted'`(在 query_factors 里定义,PG 是唯一
+    权威)。原扫盘白名单 + derived 索引缓存路径删除 —— 缓存自三表迁移起已坏,
+    每次 list 都在付 ~25s 全库扫盘税(full-review P0-4/G6)。PG 与磁盘的漂移
+    属对账问题(后续 ops doctor),不由 list 承担。
+    """
     config = Config.load(args.config_path)
 
-    # ⚠ STOPGAP (待清, 见 memory project_list_still_scans_disk): 因子集当前靠
-    # scan() 实时扫盘白名单界定。has_pnl 删列前靠 snapshot.has_pnl IS NOT NULL 下推,
-    # 删列后临时改此路径。这抵消了 PG 迁移 —— list 本该零扫盘纯 PG catalog 查询,却
-    # 仍碰盘 + 命中缓存时读僵尸 factor_derived 表。正确做法: 因子集判据改
-    # factor_state.status != 'submitted' 下推到 state, 删掉这里的 scan()。
-    scanned = LibraryScanner.from_config_path(args.config_path).scan(refresh=args.refresh)
-    scanned_names = {f.name for f in scanned}
-
     # Parse --filter-by up front so datasource conditions (field= / tables=) can
-    # be pushed down into get_all (SQL/GIN on the PG backend). apply_filters still
-    # runs the full filter set below, so pushdown is a pure pre-filter.
+    # be pushed down into snapshot_store.list (SQL/GIN on the PG backend).
+    # apply_filters still runs the full filter set below, so pushdown is a pure
+    # pre-filter.
     filters: list[tuple[str, str, str]] | None = None
     if args.filter_by is not None:
         if not args.filter_by.strip():
@@ -252,21 +252,17 @@ def run_list(args):
     metric_pd = _metric_pushdown(filters) if filters else []
     sort_pd = args.sort_by if args.sort_by in _SORTABLE_KEYS else None
 
-    # query_factors 联合读 info + state + snapshot 三表 (author/field/tables/metrics/
-    # status/sort/limit 下推 SQL)。下面仍全量跑一遍 filter/status/sort/[:n],故下推纯
-    # 为预筛,结果与不下推逐位等价。
-    #
-    # 因子集用扫盘白名单 scanned_names 界定 (== 在 alpha_src)。state (PG 里的存在性
-    # 真相源) 可能与此集偏离 (staging-only submit / 未 backfill 目录),那属 health
-    # 关注,此处刻意不暴露。
+    # query_factors 联合读 info + state + snapshot 三表 (author/field/tables/
+    # metrics/status/sort 下推)。下面仍全量跑一遍 filter/status/sort/[:n],故
+    # 下推纯为预筛,结果与不下推逐位等价。limit 由此处 [:n] 截断(P0-5 修复后
+    # 不再下推,见 query.py docstring)。
     rows = query_factors(
         config,
         author=args.user, field=field_pd, table_glob=table_pd,
         metrics=metric_pd,
         status=args.status, sort_by=sort_pd, n=args.n,
     )
-    rows = [x for x in rows if x.info.name in scanned_names]
-    # 兜底基线:默认 name ASC (JOIN 不带 sort_by 时的顺序),下方 sort/filter 再叠加。
+    # 兜底基线:默认 name ASC,下方 sort/filter 再叠加。
     rows.sort(key=lambda x: x.info.name)
 
     if args.status:
@@ -282,8 +278,7 @@ def run_list(args):
         rows = rows[:args.n]
 
     if args.format == "json":
-        scanned_map = {f.name: f for f in scanned}
-        print_json(rows, scanned_map)
+        print_json(rows)
     else:
         print_table(rows,
                     show_tables=args.show_tables, show_fields=args.show_fields)

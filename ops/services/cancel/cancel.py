@@ -18,18 +18,27 @@
 """
 import shutil
 
-from ops.infra.config import Config
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.infra.store import default_store
-from ops.infra.info import default_info_store
 from ops.core.state import FactorRecord, FactorStatus
-from ops.utils.printer import banner, bottom, info, warn, error, highlight
+from ops.infra.config import Config
+from ops.infra.info import default_info_store
+from ops.infra.store import default_store
+from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
+from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 
 def _eligible_statuses(force: bool) -> set[FactorStatus]:
     if force:
         return {FactorStatus.SUBMITTED, FactorStatus.CHECKING}
     return {FactorStatus.SUBMITTED}
+
+
+def _ineligible_reason(rec: FactorRecord, force: bool) -> str | None:
+    """resolve 与锁内复验共用的资格谓词;返回 None=可 cancel,str=原因。"""
+    if rec.status not in _eligible_statuses(force):
+        return f"status={rec.status.value}"
+    if rec.entered_at:
+        return "曾入库(entered_at 非空),staging 或为唯一源码"
+    return None
 
 
 def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[tuple[FactorRecord, str]]]:
@@ -50,6 +59,14 @@ def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[
             error(f"  ✘ {name} 状态为 {rec.status.value},cancel 仅支持 {hint}"
                   f"{' (CHECKING 需 --force)' if rec.status == FactorStatus.CHECKING else ''}")
             return [], []
+        if rec.entered_at:
+            # 曾入库因子被 restage 召回后也是 SUBMITTED,但源码唯一副本在 staging
+            # (restage 是 move 不是 copy)。cancel 的 rmtree 会毁掉唯一源码
+            # (full-review 第一部分 1.2 / 第三部分 §3.1:"SUBMITTED(新)"与
+            # "SUBMITTED(曾入库)"是被压成一个状态的两个状态,entered_at 即判据)。
+            error(f"  ✘ {name} 曾入库(entered_at={rec.entered_at}),staging 里可能是"
+                  f"唯一源码副本,拒绝 cancel;要彻底删除用 ops rm,要重新入库跑 ops check")
+            return [], []
         return [rec], []
 
     if not args.user:
@@ -69,10 +86,11 @@ def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[
     targets: list[FactorRecord] = []
     skipped: list[tuple[FactorRecord, str]] = []
     for r in records:
-        if r.status in eligible:
-            targets.append(r)
+        reason = _ineligible_reason(r, args.force)
+        if reason:
+            skipped.append((r, reason))
         else:
-            skipped.append((r, f"status={r.status.value}"))
+            targets.append(r)
     return targets, skipped
 
 
@@ -99,8 +117,7 @@ def _print_plan(targets: list[FactorRecord],
         highlight("  --force: 同时允许 CHECKING(用于清理崩溃 / 中断的 check 残留)")
 
 
-def _cancel_one(rec: FactorRecord, config: Config, store) -> None:
-    name = rec.name
+def _cancel_one(name: str, config: Config, store, info_store) -> None:
     staging_dir = config.staging / name
 
     # 先删 staging,再删 state — 崩在中间留下 orphan state record(SUBMITTED、无文件)。
@@ -117,8 +134,15 @@ def _cancel_one(rec: FactorRecord, config: Config, store) -> None:
     else:
         warn(f"    ⚠ state record {name} 已不存在")
 
+    # FK 级联方向是 info→state,删 state 不会带走 info:不删则每次 cancel 泄漏一行
+    # 孤儿 factor_info,且任何命令都够不到它(full-review P0-6 同族)。resolve 阶段的
+    # entered_at 守卫保证走到这里的因子从未入库,身份行可以安全移除;重新 submit 会
+    # 重建 info。
+    if info_store.delete(name):
+        info(f"    ✔ 已删除 factor_info {name}")
 
-def run_cancel(args) -> None:
+
+def run_cancel(args) -> BatchResult | None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
     info_store = default_info_store(config)
@@ -136,25 +160,20 @@ def run_cancel(args) -> None:
     banner(f"cancel · {len(targets)} 个因子")
     _print_plan(targets, skipped, info_store, force=args.force)
 
-    if not args.yes:
-        ans = input(f"  确认 cancel {len(targets)} 个因子? [y/N] ").strip().lower()
-        if ans not in ("y", "yes"):
-            info("  已取消")
-            bottom()
-            return
+    if not confirm_or_abort("cancel", len(targets), args.yes):
+        bottom()
+        return None
 
-    ok = fail = locked = 0
-    for rec in targets:
-        try:
-            with factor_lock(rec.name, config):
-                _cancel_one(rec, config, store)
-                ok += 1
-        except FactorLocked:
-            warn(f"  ⚠ {rec.name} 被另一个进程占用(check 正在运行?),跳过")
-            locked += 1
-        except Exception as e:
-            error(f"  ✘ {rec.name} 失败: {e}")
-            fail += 1
+    def _action(name: str) -> None:
+        # 锁内复验:确认提示挂起期间因子可能已被 check 转走 / 重新入库
+        fresh = store.get(name)
+        if fresh is None:
+            raise SkipFactor("state 记录已不存在")
+        reason = _ineligible_reason(fresh, args.force)
+        if reason:
+            raise SkipFactor(f"确认期间状态已变: {reason}")
+        _cancel_one(name, config, store, info_store)
 
-    info(f"  汇总: 成功={ok}  失败={fail}  占用={locked}  跳过={len(skipped)}")
+    result = apply_locked([r.name for r in targets], config, _action, verb="cancel")
     bottom()
+    return result

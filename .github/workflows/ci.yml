@@ -1,0 +1,27 @@
+# 最简 CI(full-review 行动清单 #5):fast 测试套件必须绿才能合并。
+# 背景:三表重构后 fast suite 曾红 (10 failed) 三周无人察觉 —— 没有 CI,
+# 红测试落分支是无声的。PG 组 (marker: pg) 在 CI 里因 ops_test 不可达自动
+# skip;e2e (marker: slow) 默认排除。后续按 full-review 第二部分 A 逐步加
+# ruff / pyright / import-linter 门禁。
+name: ci
+
+on:
+  push:
+    branches: ["main", "claude/**", "feat/**", "fix/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install
+        run: uv sync --group dev
+      - name: Lint (ruff)
+        run: uv run ruff check ops tests
+      - name: Typecheck (pyright)
+        run: uv run pyright ops
+      - name: Fast test suite
+        run: uv run pytest -m "not slow" -q

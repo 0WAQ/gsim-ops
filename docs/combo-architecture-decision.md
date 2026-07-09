@@ -169,5 +169,5 @@ qr **不交**: .npy / 训练代码 / 数据。
 
 - MLflow Projects (MLproject + python_env.yaml): 入口契约 + 环境约定, 可借鉴格式
 - MLflow Models (MLmodel flavors/signature): 借思路不抄结构
-- MLflow Tracking/Registry: 暂不需要 (已有 redis state + gsim pnl)
+- MLflow Tracking/Registry: 暂不需要 (已有 ops state + gsim pnl;注 2026-07-07: state 后端已从 redis 迁 Postgres,结论不变)
 - 结论: 借 MLflow Projects 的"环境/入口"格式, 不引入 MLflow 框架本身

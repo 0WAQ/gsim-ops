@@ -6,16 +6,13 @@ E2E 相反 —— 保留真实 gsim run_cp.py / simsummary / bcorr + 真实 /dat
 
 gsim / cc 数据不可达时,e2e_config fixture pytest.skip 整个 E2E 组。
 """
-import os
-import shutil
 import uuid
 from pathlib import Path
 
 import pytest
 import yaml
 
-from ops.infra.config import get_project_root, Config
-
+from ops.infra.config import Config, get_project_root
 
 _GSIM_RUN = Path("/usr/local/gsim/run_cp.py")
 _CC_DATA = Path("/datasvc/data/cc_2025")
@@ -55,10 +52,11 @@ def gsim_available() -> bool:
 def e2e_env(tmp_path, gsim_available, monkeypatch):
     """造一份指向真实 gsim/cc + 隔离落点的 config,返回 (config_path, Config, library_id)。
 
-    teardown 删本 library_id 的 PG 行。文件随 tmp_path 自动清。
+    隔离:测试前后各清一次 ops_test 三表(复用单测 conftest 的 wipe_test_db,
+    只对 current_database()=ops_test 生效;原按 library_id 删行自三表去
+    library_id 起是 no-op)。文件随 tmp_path 自动清。
     check 报告目录也被重定向到 tmp,避免污染 repo 的 docs/reports/check/。
     """
-    import psycopg
 
     # check 报告默认写 repo docs/reports/check/ (硬编码,非 config)。E2E 重定向到 tmp,
     # 否则每次跑都往版本库里落一堆 check-Alpha*.json。
@@ -94,7 +92,6 @@ def e2e_env(tmp_path, gsim_available, monkeypatch):
     pg = {"host": "10.9.100.160", "port": 15432, "dbname": "ops_test",
           "user": "ops", "password": pw}
     base["state"] = {"backend": "postgres", "postgres": dict(pg)}
-    base["derived"] = {"backend": "postgres", "postgres": dict(pg)}
 
     cfg_path = tmp_path / "config.e2e.yaml"
     cfg_path.write_text(yaml.safe_dump(base, allow_unicode=True))
@@ -106,17 +103,27 @@ def e2e_env(tmp_path, gsim_available, monkeypatch):
               Path(str(root / "pnl_prod")), Path(str(root / "pnl_pool"))):
         d.mkdir(parents=True, exist_ok=True)
 
-    yield cfg_path, config, lib
+    def _wipe():
+        # 与 tests/conftest.wipe_test_db 同款(pytest 非包模式下跨 conftest
+        # import 不可靠,故内联):删 factor_info,FK 级联 state/snapshot;
+        # 只在 ops_test 上生效。
+        import psycopg
+        try:
+            conn = psycopg.connect(
+                f"host=10.9.100.160 port=15432 dbname=ops_test user=ops password={pw}",
+                autocommit=True, connect_timeout=5)
+            if conn.execute("SELECT current_database()").fetchone()[0] == "ops_test":
+                try:
+                    conn.execute("DELETE FROM factor_info")
+                except psycopg.errors.UndefinedTable:
+                    pass
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
 
-    try:
-        conn = psycopg.connect(
-            f"host=10.9.100.160 port=15432 dbname=ops_test user=ops password={pw}",
-            autocommit=True, connect_timeout=5)
-        for t in ("factor_state", "factor_derived", "derived_meta"):
-            conn.execute(f"DELETE FROM {t} WHERE library_id = %s", (lib,))
-        conn.close()
-    except Exception:  # noqa: BLE001
-        pass
+    _wipe()
+    yield cfg_path, config, lib
+    _wipe()
 
 
 @pytest.fixture
@@ -128,6 +135,7 @@ def relax_thresholds(e2e_env):
     返回重载后的 Config。
     """
     import yaml as _yaml
+
     from ops.infra.config import Config as _Config
 
     cfg_path, _, _ = e2e_env

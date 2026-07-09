@@ -164,7 +164,11 @@ class PostgresSnapshotStore(SnapshotStore):
             if expr:
                 order_by_sql = f"ORDER BY {expr} DESC NULLS LAST"
 
-        limit_sql = f"LIMIT {limit}" if limit else ""
+        # LIMIT 参数化(原 f-string 拼接是注入面/负数崩溃点,full-review 第三部分)
+        limit_sql = ""
+        if limit:
+            limit_sql = "LIMIT %s"
+            params.append(limit)
 
         query = f"""
             SELECT name, ret, shrp, mdd, tvr, fitness,
@@ -177,7 +181,9 @@ class PostgresSnapshotStore(SnapshotStore):
         """
 
         with self.pool.connection() as conn:
-            rows = conn.execute(query, params).fetchall()
+            # 动态部分 (where/order/limit 结构) 全部来自白名单表达式,值走参数;
+            # psycopg stub 要求 LiteralString,此处结构安全,定点豁免。
+            rows = conn.execute(query, params).fetchall()  # pyright: ignore[reportArgumentType]
 
         return {row[0]: self._row_to_snapshot(row) for row in rows}
 

@@ -23,12 +23,12 @@ from concurrent.futures import Future, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 
+from rich import box
 from rich.console import Console, Group
 from rich.live import Live
 from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
-from rich import box
 
 
 class Status(str, Enum):

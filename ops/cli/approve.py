@@ -1,9 +1,9 @@
 import argparse
 from pathlib import Path
 
-from ops.utils.utils import LowerAction
 from ops.infra.config import get_default_config_path
 from ops.services.approve import run_approve
+from ops.utils.utils import LowerAction
 
 
 def add_approve_subparser(subparsers: argparse._SubParsersAction):

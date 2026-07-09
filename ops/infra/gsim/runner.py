@@ -2,22 +2,14 @@ import re
 import subprocess
 from pathlib import Path
 
-from ..config import Config
 from ops.core.metrics import Metrics
 from ops.utils.log import logger
 
+from ..config import Config
+
 
 class BacktestError(Exception):
-    def __init__(self, *args: object):
-        self.stage = "backtest"
-        super().__init__(*args)
-
-    def __repr__(self):
-        if len(self.args) == 0:
-            return ""
-        if len(self.args) > 1:
-            return repr(self.args[0])
-        return repr(self.args)
+    """gsim 回测进程失败(非零退出 / 超时)。"""
 
 
 class ScriptError(Exception):

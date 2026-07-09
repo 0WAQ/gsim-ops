@@ -6,6 +6,10 @@
 
 - 默认: `SUBMITTED`
 - `--force`: 同时允许 `CHECKING`,用于清理崩溃 / 中断的 check 残留
+- **`entered_at` 非空一律拒绝**(2026-07-07):曾入库因子被 restage 召回后也是
+  SUBMITTED,但 restage 是 move 不是 copy —— staging 里是**唯一源码副本**,cancel
+  的 rmtree 会毁掉它(full-review 第一部分 1.2)。此类因子要么 `ops rm` 彻底删,
+  要么 `ops check` 重新入库。批量模式归入 Skipped 段。
 
 ## 与 ops rm 的区别
 
@@ -26,6 +30,9 @@
 3. `_cancel_one`:
    - `shutil.rmtree(staging/<name>/)`
    - `store.delete(name)` 硬删
+   - `info_store.delete(name)`(2026-07-07:FK 级联方向是 info→state,不删则每次
+     cancel 泄漏一行孤儿 factor_info 且任何命令都够不到;entered_at 守卫保证走到
+     这里的因子从未入库,身份行可安全移除)
 
 ## 不动的产物
 
@@ -34,7 +41,13 @@ SUBMITTED 因子按定义没有这些产物;CHECKING 残留若有 dump,留给后
 
 ## 并发安全
 
-每个因子操作包裹在 `factor_lock`。被占用(check 正在跑)则跳过(warn + locked 计数)。
+每个因子操作包裹在 `factor_lock`;被占用则跳过(warn + locked 计数)。
+**2026-07-07 Wave 3**:批量骨架收敛到 `ops/services/_batch.py`(confirm / 锁循环 /
+汇总 / 失败双通道记录),并修复 TOCTOU —— 确认提示挂起期间状态可变,action 在
+**锁内重取记录复验资格**(不过则 SkipFactor 跳过);状态转移用
+`transition(expect=...)` CAS 双保险(FOR UPDATE 行锁内校验 from-status,冲突抛
+StateConflict 按跳过处理)。`run_*` 返回 `BatchResult`(done/skipped/failed/locked),
+测试可断言"正确拒绝"。行为测试见 `tests/test_batch.py`(json 后端,无需 PG)。
 
 ## 崩溃恢复
 

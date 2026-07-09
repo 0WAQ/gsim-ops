@@ -1,18 +1,12 @@
-import numpy as np
 from pathlib import Path
-from .base import *
-from ops.infra.config import Config
+
+import numpy as np
+
 from ops.core.alpha.metadata import AlphaMetadata
-from ops.core.alpha.results.compliance import *
+from ops.core.alpha.results.compliance import CompResult
+from ops.infra.config import Config
 
-
-class ComplianceSkip(CheckSkip):
-    def __init__(self, *args: object):
-        super().__init__("compliance", *args)
-
-class ComplianceFail(CheckFail):
-    def __init__(self, *args: object):
-        super().__init__("compliance", *args)
+from .base import Checker, CheckFail, CheckSkip
 
 
 class Position:
@@ -102,7 +96,7 @@ class ComplianceChecker(Checker):
     def check(self, factor: AlphaMetadata) -> CompResult:
         npy_files = factor.get_v2npy_files()
         if not npy_files:
-            raise ComplianceSkip("未找到 v2 版本的 npy 文件")
+            raise CheckSkip("未找到 v2 版本的 npy 文件")
 
         # 只校验最近 check_window 个交易日 (get_v2npy_files 已按时序排序)。
         # 早期数据不全的暖机天落在窗口外,天然被排除;不足 window 天用全部。
@@ -119,13 +113,13 @@ class ComplianceChecker(Checker):
             all_violations.extend(position.violations)
 
         if not positions:
-            raise ComplianceSkip("持仓全空")
+            raise CheckSkip("持仓全空")
 
         if all_violations:
             n_bad = sum(1 for p in positions if p.violations)
             head = "; ".join(all_violations[:10])
             more = f" (另有 {len(all_violations) - 10} 项)" if len(all_violations) > 10 else ""
-            raise ComplianceFail(
+            raise CheckFail(
                 f"窗口内 {n_bad}/{len(positions)} 天违规: {head}{more}")
 
         return CompResult(np.mean([p.long_pct for p in positions], dtype=np.float64),

@@ -10,9 +10,9 @@ from pathlib import Path
 
 import xmltodict
 
-from ops.infra.config import Config
-from ops.infra.gsim.runner import Runner, BacktestError, ScriptError
 from ops.core.metrics import Metrics
+from ops.infra.config import Config
+from ops.infra.gsim.runner import BacktestError, Runner, ScriptError
 from ops.utils import printer
 
 # combo 的 predict/train 脚本固定用 gsim venv (有 torch/lgbm), 区别于 ops 自己的 venv。

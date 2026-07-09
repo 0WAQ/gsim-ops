@@ -1,8 +1,9 @@
 import os
 import re
-import yaml
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
+
+import yaml
 
 
 def get_project_root() -> Path:
@@ -21,9 +22,8 @@ def get_default_config_path() -> Path:
     2. ./config.yaml (current directory)
     3. {project_root}/config.yaml
 
-    Phase C 上线 (2026-06-05) 之前默认是 config.prod.yaml; 现在 config.yaml
-    指向 JFS + sentinel-aware redis state. 旧的 prod 配置保留为
-    config.prod-legacy.yaml, 紧急回退用 `-c config.prod-legacy.yaml`.
+    config.yaml = 生产默认 (JFS 路径 + Postgres state)。没有回退配置 ——
+    config.prod-legacy.yaml 已于 2026-07-07 Wave 1 删除 (假保险)。
     """
     # 1. Environment variable
     env_config = os.environ.get("OPS_CONFIG")
@@ -47,11 +47,11 @@ def get_default_config_path() -> Path:
 
 
 class Config:
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         # checker
-        self.compliance: Dict[str, Any] = config["checker"]["compliance"]
-        self.correlation: Dict[str, Any] = config["checker"]["correlation"]
-        self.checkpoint: Dict[str, Any] = config["checker"]["checkpoint"]
+        self.compliance: dict[str, Any] = config["checker"]["compliance"]
+        self.correlation: dict[str, Any] = config["checker"]["correlation"]
+        self.checkpoint: dict[str, Any] = config["checker"]["checkpoint"]
 
         # path
         self.dropbox_path = Path(config["path"]["dropbox_path"])
@@ -96,76 +96,31 @@ class Config:
         self.dry_run: bool = config["mode"]["dry_run"]
         self.timeout: int = config["mode"]["timeout"]
 
-        # sync (optional)
-        sync_cfg: Dict[str, Any] = config.get("sync") or {}
-        self.sync_remote: str | None = sync_cfg.get("remote")
+        # library_id: ~/.cache/ops/lib/ 下的命名空间键。历史上住在 sync 段;
+        # sync 栈已于 2026-07-07 退役 (Wave 1, JOURNAL F1),仅存此键
+        # (G-wave 时迁到顶层)。
+        sync_cfg: dict[str, Any] = config.get("sync") or {}
         self.library_id: str = sync_cfg.get("library_id") or self.alpha_src.parent.name
 
-        # sync.s3 (optional — if present, use boto3 instead of rclone)
-        s3_cfg: Dict[str, Any] = sync_cfg.get("s3") or {}
-        self.s3_endpoint_url: str | None = s3_cfg.get("endpoint_url")
-        self.s3_access_key_id: str | None = s3_cfg.get("access_key_id")
-        self.s3_secret_access_key: str | None = s3_cfg.get("secret_access_key")
-        self.s3_bucket: str | None = s3_cfg.get("bucket")
-
-        # state backend (optional, default JSON file in ~/.cache/ops/lib/<library_id>/)
-        # set state.backend: redis + state.redis.{url, password_env|password|password_file} to use the
-        # multi-node redis store. PoC -- see scripts/juicefs-poc/06-redis-jfs.sh
-        state_cfg: Dict[str, Any] = config.get("state") or {}
+        # state backend: postgres (生产真相源) | json (单机 dev/test)。
+        # 2026-07-07 Wave 1: redis 后端删除 —— 三表拆分后它与 FactorRecord 不
+        # 兼容,作为"紧急回退"是假保险 (full-review P0-2/G1)。承载它的
+        # redis-sentinel 实例是 JFS metadata 后端,与 ops 无关,不受影响。
+        state_cfg: dict[str, Any] = config.get("state") or {}
         self.state_backend: str = state_cfg.get("backend") or "json"
-        redis_cfg: Dict[str, Any] = state_cfg.get("redis") or {}
-        self.state_redis_url: str | None = redis_cfg.get("url")
-        # password resolution order:
-        #   1. password (yaml literal, plaintext — avoid in shared configs)
-        #   2. password_env (env var name; default OPS_STATE_REDIS_PASSWORD)
-        #   3. password_file + password_key (file content, e.g. /etc/juicefs/...-jfs.env)
-        # 3rd is for the "fresh shell" case where user hasn't exported the env var;
-        # ops will read the file directly when running as root (after self-elevation),
-        # or sudo grep it (ops/infra/sudo.py:_ensure_redis_password) before elevation.
-        pwd: str | None = redis_cfg.get("password")
-        if pwd is None:
-            env_var = redis_cfg.get("password_env") or "OPS_STATE_REDIS_PASSWORD"
-            pwd = os.environ.get(env_var)
-        if pwd is None:
-            pwd_file = redis_cfg.get("password_file")
-            pwd_key = redis_cfg.get("password_key", "META_PASSWORD")
-            if pwd_file:
-                try:
-                    with open(pwd_file) as f:
-                        for line in f:
-                            line = line.strip()
-                            if line.startswith(f"{pwd_key}="):
-                                pwd = line.split("=", 1)[1]
-                                break
-                except (PermissionError, OSError, FileNotFoundError):
-                    # wbai usually can't read 0600 root files; that's OK, the sudo
-                    # grep helper in ops/infra/sudo.py will populate env before elevation.
-                    pass
-        self.state_redis_password: str | None = pwd
-        # Stash for downstream helpers (e.g. ops/infra/sudo.py:_ensure_redis_password)
-        self.state_redis_password_file: str | None = redis_cfg.get("password_file")
-        self.state_redis_password_key: str = redis_cfg.get("password_key") or "META_PASSWORD"
-        self.state_redis_password_env: str = redis_cfg.get("password_env") or "OPS_STATE_REDIS_PASSWORD"
 
         # state.postgres backend (single source of truth, migrated from redis
-        # 2026-07-04). Reuses the same conninfo builder as derived; password
-        # resolution: postgres.password (literal) > password_env > password_file.
-        state_pg_cfg: Dict[str, Any] = state_cfg.get("postgres") or {}
+        # 2026-07-04). Password resolution:
+        # postgres.password (literal) > password_env > password_file.
+        state_pg_cfg: dict[str, Any] = state_cfg.get("postgres") or {}
         self.state_postgres_conninfo: str | None = self._build_pg_conninfo(state_pg_cfg)
 
-        # derived-layer backend (index/metrics/datasources/bcorr).
-        # default json (~/.cache/ops/lib/<lib>/derived.json, per-machine fallback);
-        # set derived.backend: postgres + derived.postgres.{host,port,dbname,user,password*}
-        # for the shared, queryable store. Password resolution mirrors redis:
-        #   1. password (yaml literal) 2. password_env 3. password_file + password_key
-        derived_cfg: Dict[str, Any] = config.get("derived") or {}
-        self.derived_backend: str = derived_cfg.get("backend") or "json"
-        pg_cfg: Dict[str, Any] = derived_cfg.get("postgres") or {}
-        self.derived_postgres_conninfo: str | None = self._build_pg_conninfo(pg_cfg)
+        # (derived 层配置随僵尸层删除, 2026-07-07 Wave 2, JOURNAL V2:
+        #  metrics/datasources/bcorr 在 factor_snapshot,index 缓存不复存在。)
 
     @staticmethod
-    def _build_pg_conninfo(pg_cfg: Dict[str, Any]) -> str | None:
-        """Assemble a libpq conninfo string from derived.postgres.* config.
+    def _build_pg_conninfo(pg_cfg: dict[str, Any]) -> str | None:
+        """Assemble a libpq conninfo string from state.postgres.* config.
 
         Returns None when no host/dbname is configured (backend stays json).
         Password resolves in the same 3-tier order as redis (literal / env / file).
@@ -204,7 +159,7 @@ class Config:
         return " ".join(parts)
 
     @staticmethod
-    def _resolve_vars(raw: Dict[str, Any]) -> Dict[str, Any]:
+    def _resolve_vars(raw: dict[str, Any]) -> dict[str, Any]:
         """Resolve ${var_name} references in config values.
 
         Variables are defined in the 'vars' block and can be overridden

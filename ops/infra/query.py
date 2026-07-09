@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from ops.core.state import FactorStatus
 from ops.infra.config import Config
 from ops.infra.info import FactorInfo, default_info_store
-from ops.infra.store import default_store
 from ops.infra.snapshot import FactorSnapshot, default_snapshot_store
+from ops.infra.store import default_store
 
 
 @dataclass
@@ -49,58 +49,69 @@ def query_factors(
     metrics: list[tuple[str, str, float]] | None = None,
     status: str | None = None,
     sort_by: str | None = None,
-    n: int | None = None,
+    n: int | None = None,  # noqa: ARG001 — 语义参数保留,见下方 limit 说明
 ) -> list[FactorRow]:
-    """联合读因子完整信息 (info + state + snapshot)。
+    """联合读"库内因子"的完整信息 (info + state + snapshot)。
 
-    参数语义同原 DerivedStore.get_all，外加 status (state 侧过滤)。
+    **因子集判据 (2026-07-07 Wave 2, JOURNAL V1)**: 库内因子 =
+    `factor_state.status != 'submitted'`(SUBMITTED 在 staging 不在库)。
+    这是唯一权威 —— 原先由 LibraryScanner 扫盘白名单界定,PG 迁移后仍每次
+    付 ~25s 扫盘税(full-review G6/P0-4)。`status` 给定时按其精确过滤
+    (包括显式查 submitted)。PG 与磁盘的漂移(崩溃残留等)属对账问题,
+    由后续 ops doctor 处理,不再让每次 list 付对账税。
 
-    limit (n) 下推 gate: 只有 PG 同库 + 精确下推条件时才下推，否则留调用方兜底。
+    **limit (n) 不再下推**(P0-5 修复): 旧实现把 LIMIT 塞进 snapshot 单表
+    查询且无稳定 ORDER BY,PG 返回任意 N 行,再与 info/state 交集 → 行数
+    错乱、入选因子 metrics 空白。三表内存合并模型下 limit 只能在合并后截断,
+    由调用方 (list.py 的 [:n]) 执行;参数保留是为未来单条 SQL JOIN 时恢复
+    下推(TODO)。
     """
     # 当前只实现 Postgres 路径（单库永远用 PG）
     if not _both_postgres_same_db(config):
         raise NotImplementedError("query_factors 当前只支持 Postgres 后端")
 
-    # 直接从 snapshot_store 拿三表 JOIN 的结果
     snapshot_store = default_snapshot_store(config)
 
-    # TODO: 实现三表 JOIN 的 SQL（当前 snapshot_store 只有单表查询）
+    # TODO: 单条 SQL 三表 LEFT JOIN(届时 limit/status 一并下推)
     # 临时方案：三次读 + 内存合并
     info_store = default_info_store(config)
     state_store = default_store(config)
 
-    # 1. 读 info（可按 author 过滤）
+    # 1. 读 state —— 因子集的定义者
+    if status:
+        states = {r.name: r for r in state_store.list(status=FactorStatus(status))}
+    else:
+        states = {r.name: r for r in state_store.list()
+                  if r.status != FactorStatus.SUBMITTED}
+
+    # 2. 读 info（可按 author 过滤;身份行是三表的根,正常情况必存在）
     infos = info_store.list(author=author)
 
-    # 2. 读 state（可按 status 过滤）
-    state_status = FactorStatus(status) if status else None
-    states = {r.name: r for r in state_store.list(status=state_status)}
-
-    # 3. 读 snapshot（应用所有过滤条件）
+    # 3. 读 snapshot（field/tables/metrics/sort 下推;limit 不下推,见 docstring）
     snapshots = snapshot_store.list(
         field=field,
         table_glob=table_glob,
         metrics=metrics,
         sort_by=sort_by,
-        limit=n,  # 暂时先下推，后面优化
+        limit=None,
     )
 
-    # 4. 内存合并
+    # 4. 内存合并:以 state 因子集为基,info 提供身份(兼做 author 过滤)
+    infos_by_name = {i.name: i for i in infos}
     result = []
-    for info in infos:
-        # 如果有 snapshot 过滤条件，只保留在 snapshots 里的
-        if field or table_glob or metrics:
-            if info.name not in snapshots:
-                continue
-
-        state = states.get(info.name)
-        snapshot = snapshots.get(info.name)
-
+    for name, state in states.items():
+        info = infos_by_name.get(name)
+        if info is None:
+            # author 过滤未命中,或(异常)孤儿 state —— 两种都不属于本次结果集
+            continue
+        # snapshot 侧过滤条件命中才保留
+        if (field or table_glob or metrics) and name not in snapshots:
+            continue
         result.append(FactorRow(
             info=info,
-            status=state.status if state else None,
-            last_fail_stage=state.last_fail_stage if state else None,
-            snapshot=snapshot,
+            status=state.status,
+            last_fail_stage=state.last_fail_stage,
+            snapshot=snapshots.get(name),
         ))
 
     return result

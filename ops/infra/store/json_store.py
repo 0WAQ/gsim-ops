@@ -1,21 +1,19 @@
+import fcntl
 import json
 import os
-import time
-import fcntl
 import tempfile
+import time
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
-from .base import StateStore
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 
+from .base import StateConflict, StateStore
 
 STALE_TMP_AGE_SECONDS = 3600
 
 
-def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+from ops.utils.clock import now_iso as _now  # 单一真相源,见 utils/clock.py
 
 
 class JsonStateStore(StateStore):
@@ -90,23 +88,25 @@ class JsonStateStore(StateStore):
             records[record.name] = record
             self._atomic_write(records)
 
-    def list(self,
-             author: str | None = None,
-             status: FactorStatus | None = None) -> list[FactorRecord]:
+    def list(self, status: FactorStatus | None = None) -> list[FactorRecord]:
+        # author 过滤已删:FactorRecord 无 author 字段,原实现 r.author 直接
+        # AttributeError(坏回退的一部分,full-review P0-2)。author 走 InfoStore。
         with self._locked():
             out = list(self._read_records().values())
-        if author is not None:
-            out = [r for r in out if r.author == author]
         if status is not None:
             out = [r for r in out if r.status == status]
         return out
 
-    def transition(self, name: str, to_status: FactorStatus, **updates) -> FactorRecord:
+    def transition(self, name: str, to_status: FactorStatus,
+                   expect: FactorStatus | None = None, **updates) -> FactorRecord:
         with self._locked():
             records = self._read_records()
             rec = records.get(name)
             if rec is None:
                 raise KeyError(f"factor not found: {name}")
+            if expect is not None and rec.status != expect:
+                raise StateConflict(
+                    f"{name}: status={rec.status.value}, expect={expect.value}")
             rec.status = to_status
             for k, v in updates.items():
                 setattr(rec, k, v)

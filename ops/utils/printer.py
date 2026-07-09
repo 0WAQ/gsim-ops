@@ -3,7 +3,6 @@ import shutil
 from rich.console import Console
 from rich.rule import Rule
 
-
 _console = Console(width=shutil.get_terminal_size((140, 50)).columns)
 
 

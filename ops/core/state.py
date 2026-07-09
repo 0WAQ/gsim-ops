@@ -1,14 +1,15 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 
 
 class FactorStatus(str, Enum):
+    # 与 factor_state 的 chk_status CHECK 约束一一对应(DB 是权威)。DECAYING/RETIRED
+    # 曾在此声明但 DB 拒收、无任何 transition 产生 —— 接口先行的幽灵状态,2026-07-07
+    # 移除(full-review 第三部分 S10/G13);真要引入衰退生命周期时随 DB 约束一起加。
     SUBMITTED = "submitted"
     CHECKING  = "checking"
     ACTIVE    = "active"
     REJECTED  = "rejected"
-    DECAYING  = "decaying"
-    RETIRED   = "retired"
 
 
 @dataclass
@@ -36,7 +37,7 @@ class FactorRecord:
     """
     name: str
     status: FactorStatus
-    updated_at: str
+    updated_at: str | None
     submitted_at: str | None = None
     entered_at: str | None = None
     rejected_at: str | None = None

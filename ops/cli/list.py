@@ -1,10 +1,10 @@
 import argparse
 from pathlib import Path
 
-from ops.utils.utils import LowerAction
-from ops.infra.config import get_default_config_path
 from ops.core.state import FactorStatus
+from ops.infra.config import get_default_config_path
 from ops.services.list import run_list
+from ops.utils.utils import LowerAction
 
 
 def add_list_subparser(subparser: argparse._SubParsersAction):
@@ -16,8 +16,7 @@ def add_list_subparser(subparser: argparse._SubParsersAction):
 Example:
     ops list              # List all factors
     ops list -u wbai      # List factors by author
-    ops list --refresh    # Force refresh index cache
-    ops list --sort shrp  # Sort by Sharpe ratio
+    ops list --sort-by shrp  # Sort by Sharpe ratio
     ops list --format json
 """,
     )
@@ -45,12 +44,7 @@ Example:
         choices=["table", "json"],
         help="Output format (default: table)",
     )
-    parser.add_argument(
-        "--refresh",
-        "-r",
-        action="store_true",
-        help="Force refresh index cache",
-    )
+    # --refresh 已删除 (2026-07-07 Wave 2): list 改纯 PG 查询,不再有扫盘索引缓存。
     parser.add_argument(
         "--show-tables",
         action="store_true",
@@ -64,12 +58,15 @@ Example:
     parser.add_argument(
         "--filter-by",
         type=str,
-        help="Filter conditions separated by commas (e.g., table=ashareeodprices,ret>30,shrp>1.5)",
+        help="Filter conditions separated by commas (e.g., tables=ashareeodprices,ret>30,shrp>1.5)",
     )
+    # choices 与 list.py 的 _SORTABLE_KEYS 对齐:原先多一个 "delay",接受后
+    # 被服务层静默忽略(full-review 第三部分 S8)。delay 若要可排序,须同时
+    # 进 _SORTABLE_KEYS 与 snapshot _METRIC_EXPR。
     parser.add_argument(
         "--sort-by",
         type=str,
-        choices=["ret", "shrp", "mdd", "tvr", "fitness", "delay", "bcorr"],
+        choices=["ret", "shrp", "mdd", "tvr", "fitness", "bcorr"],
         help="Sort by field (descending)",
     )
     parser.add_argument(

@@ -18,11 +18,10 @@ The .py / .xml file basenames are NOT renamed (would break imports). A warning
 is printed if their stems don't carry the expected identifier.
 """
 
-import xmltodict
 from pathlib import Path
 
 from ops.utils.printer import info, warn
-
+from ops.utils.xmlio import load_xml, save_xml
 
 MOD_SUFFIX = "Mod"
 
@@ -44,12 +43,6 @@ def _extract_xxx(factor_name: str) -> str:
     return name
 
 
-def _save(xml_file: Path, cfg: dict) -> None:
-    xml_file.write_text(
-        xmltodict.unparse(cfg, pretty=True, encoding="utf-8", full_document=False)
-    )
-
-
 def normalize_factor_xml(staging_dir: Path) -> None:
     """Inspect the factor's XML and rewrite mismatched name fields in-place."""
     factor_name = staging_dir.name
@@ -60,7 +53,7 @@ def normalize_factor_xml(staging_dir: Path) -> None:
         return
     xml_file = xml_files[0]
 
-    cfg = xmltodict.parse(xml_file.read_text(encoding="utf-8"))
+    cfg = load_xml(xml_file)
 
     portfolio_alpha = cfg.get("gsim", {}).get("Portfolio", {}).get("Alpha")
     modules_alpha = cfg.get("gsim", {}).get("Modules", {}).get("Alpha")
@@ -96,7 +89,7 @@ def normalize_factor_xml(staging_dir: Path) -> None:
                 changed.append(f"Modules.Alpha.@module stem: {cur_stem!r} → {factor_name!r}")
 
     if changed:
-        _save(xml_file, cfg)
+        save_xml(xml_file, cfg)
         info(f"  ⚙  {factor_name} auto-fixed XML:")
         for c in changed:
             info(f"       - {c}")

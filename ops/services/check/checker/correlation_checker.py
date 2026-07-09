@@ -1,19 +1,12 @@
 from pathlib import Path
 
-from .base import *
+from ops.core.alpha.metadata import AlphaMetadata
+from ops.core.alpha.results.correlation import CorrResult
+from ops.core.metrics import Metrics
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner, resolve_bcorr_pools
-from ops.core.alpha.metadata import AlphaMetadata
-from ops.core.alpha.results.correlation import *
 
-
-class CorrelationSkip(CheckSkip):
-    def __init__(self, *args: object):
-        super().__init__("correlation", *args)
-
-class CorrelationFail(CheckFail):
-    def __init__(self, *args: object):
-        super().__init__("correlation", *args)
+from .base import Checker, CheckFail, CheckSkip
 
 
 class CorrelationChecker(Checker):
@@ -77,19 +70,23 @@ class CorrelationChecker(Checker):
         # 1. 运行 bcorr
         corrs = Runner.run_bcorr(factor.pnl_file, self.config, pools=pools)
         if corrs is None:
-            raise CorrelationSkip("bcorr 运行失败")
+            raise CheckSkip("bcorr 运行失败")
+        # 排除自己:restage/--overwrite 若有旧 pnl 残留在池里,自相关≈1 会把
+        # 重检因子挡死("打败几乎相同的自己"不可能)。离库回收(PV7)是主修,
+        # 此处是防删除失败残留的双保险 —— 因子永远不该和自己比相关性。
+        corrs = [(n, c) for n, c in corrs if n != factor.name]
         if not corrs:
-            raise CorrelationSkip("无相关性数据")
+            raise CheckSkip("无相关性数据")
 
         # 2. 获取当前因子指标
         metrics = Runner.run_simsummary(factor.pnl_file, self.config)
         if not metrics:
-            raise CorrelationSkip("无法获取因子指标")
-        
+            raise CheckSkip("无法获取因子指标")
+
         # 3. 判断是否满足要求
         violations = self._gate_violations(metrics, factor.delay)
         if violations:
-            raise CorrelationFail(f"{'; '.join(violations)} | {metrics}")
+            raise CheckFail(f"{'; '.join(violations)} | {metrics}")
 
         # 4. 找出最大相关系数 (bcorr 输出已排序，取最后一行)
         max_corr_factor, max_corr = corrs[-1]
@@ -110,7 +107,7 @@ class CorrelationChecker(Checker):
 
             # 未打败
             if not self._check_beat(metrics, competitor_metrices):
-                raise CorrelationFail(CorrResult(
+                raise CheckFail(CorrResult(
                                         metrics,
                                         max_corr, max_corr_factor,
                                         len(high_corr_factors),

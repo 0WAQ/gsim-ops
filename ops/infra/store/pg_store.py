@@ -21,9 +21,9 @@ from typing import Any
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
-from .base import StateStore
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 
+from .base import StateConflict, StateStore
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS factor_state (
@@ -55,8 +55,7 @@ _COLS = (
 _TS_FIELDS = {"submitted_at", "entered_at", "rejected_at", "updated_at"}
 
 
-def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+from ops.utils.clock import now_iso as _now  # 单一真相源, 见 utils/clock.py
 
 
 def _ts_in(v: str | None) -> str | None:
@@ -163,7 +162,8 @@ class PostgresStateStore(StateStore):
         with self.pool.connection() as conn:
             return [self._row_to_record(r) for r in conn.execute(sql, params)]
 
-    def transition(self, name: str, to_status: FactorStatus, **updates) -> FactorRecord:
+    def transition(self, name: str, to_status: FactorStatus,
+                   expect: FactorStatus | None = None, **updates) -> FactorRecord:
         sql = f"SELECT {_COLS} FROM factor_state WHERE name = %s FOR UPDATE"
         with self.pool.connection() as conn:
             with conn.transaction():
@@ -171,6 +171,10 @@ class PostgresStateStore(StateStore):
                 if row is None:
                     raise KeyError(f"factor not found: {name}")
                 rec = self._row_to_record(row)
+                if expect is not None and rec.status != expect:
+                    # FOR UPDATE 行锁内的 CAS —— 并发安全的 from-status 守卫
+                    raise StateConflict(
+                        f"{name}: status={rec.status.value}, expect={expect.value}")
                 rec.status = to_status
                 for k, v in updates.items():
                     setattr(rec, k, v)

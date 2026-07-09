@@ -8,16 +8,14 @@ check_history 读,不用 UI rows 里被截断的 note。
 仓库版本化保留,方便回溯与转发。
 """
 import json
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
 from ops.infra.config import Config, get_project_root
-from ops.infra.store import default_store
 from ops.infra.info import default_info_store
 from ops.infra.snapshot import default_snapshot_store
+from ops.infra.store import default_store
 from ops.utils.live_table import FactorRow
-
 
 REPORT_VERSION = 1
 

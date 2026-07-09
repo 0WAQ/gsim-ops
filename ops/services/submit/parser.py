@@ -1,15 +1,14 @@
 import ast
-import xmltodict
 from pathlib import Path
 
 from ops.core.factormeta import FactorMeta
 from ops.infra.config import Config
 from ops.services.list.datasource import (
+    _build_npy_index,
     parse_datasources,
     resolve_tables,
-    _build_npy_index,
 )
-
+from ops.utils.xmlio import load_xml
 
 INTRADAY_HINTS = ("Interval", "intraday", "tick", "5m", "1m", "15m", "30m")
 _GENERIC_AUTHORS = {"gsim_users", "unknown", ""}
@@ -134,7 +133,7 @@ def parse_factor(
 
     _check_py_syntax(py_file)
 
-    xml = xmltodict.parse(xml_file.read_text(encoding="utf-8"))
+    xml = load_xml(xml_file)
 
     alpha_node = _extract_alpha_node(xml)
     desc = _extract_description(alpha_node)

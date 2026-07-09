@@ -1,43 +1,35 @@
-import xmltodict
-from datetime import datetime
-from pathlib import Path
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
+from pathlib import Path
 
 from ops.infra.config import Config
-from ops.infra.gsim.runner import Runner, BacktestError
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.utils.printer import *
+from ops.infra.gsim.runner import BacktestError, Runner
+from ops.infra.lock import FactorLocked, factor_lock
 from ops.utils.log import logger
-from ops.core.alpha.metadata import AlphaMetadata
+from ops.utils.printer import banner, bottom, error, info, progress, warn
+from ops.utils.xmlio import load_xml, save_xml
 
 from .find import scan_factors
 
 
 def _override_dates(xml_file: Path, start_date: str, end_date: str) -> tuple[str, str]:
     """Override XML Universe startdate/enddate. Returns original values for restore."""
-    cfg = xmltodict.parse(xml_file.read_text(encoding="utf-8"))
+    cfg = load_xml(xml_file)
     universe = cfg["gsim"]["Universe"]
     orig_start = universe.get("@startdate", "")
     orig_end = universe.get("@enddate", "")
     universe["@startdate"] = start_date
     universe["@enddate"] = end_date
-    xml_file.write_text(
-        xmltodict.unparse(cfg, pretty=True, encoding="utf-8", full_document=False),
-        encoding="utf-8",
-    )
+    save_xml(xml_file, cfg)
     return orig_start, orig_end
 
 
 def _restore_dates(xml_file: Path, orig_start: str, orig_end: str) -> None:
-    cfg = xmltodict.parse(xml_file.read_text(encoding="utf-8"))
+    cfg = load_xml(xml_file)
     universe = cfg["gsim"]["Universe"]
     universe["@startdate"] = orig_start
     universe["@enddate"] = orig_end
     try:
-        xml_file.write_text(
-            xmltodict.unparse(cfg, pretty=True, encoding="utf-8", full_document=False),
-            encoding="utf-8",
-        )
+        save_xml(xml_file, cfg)
     except Exception:
         logger.exception("XML restore failed file={} orig=({},{}) — XML may be in bad state",
                          xml_file, orig_start, orig_end)
@@ -137,9 +129,12 @@ def run_factors(args) -> None:
 
         for f in as_completed(futures):
             match f.result():
-                case "pass":   passed += 1
-                case "fail":   failed += 1
-                case "locked": locked += 1
+                case "pass":
+                    passed += 1
+                case "fail":
+                    failed += 1
+                case "locked":
+                    locked += 1
 
     banner("运行汇总")
     info(f"✔ 通过 : {passed:>4}")

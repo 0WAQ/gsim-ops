@@ -22,9 +22,9 @@ def _store(config):
     return default_store(config)
 
 
-def _derived(config):
-    from ops.infra.derived import default_derived_store
-    return default_derived_store(config)
+def _snapshot(config):
+    from ops.infra.snapshot import default_snapshot_store
+    return default_snapshot_store(config)
 
 
 def _prep_pass_artifacts(config, name):
@@ -64,11 +64,12 @@ def test_pass_archives_to_lib(test_config, make_factor, fake_checkers, fake_metr
     assert (config.pnl_manual / "AlphaWbaiTest").exists()
     assert not (config.pnl_automated / "AlphaWbaiTest").exists()
 
-    # derived 三组落库
-    d = _derived(config).get("AlphaWbaiTest")
+    # snapshot 落库 (metrics + datasources 组)
+    d = _snapshot(config).get("AlphaWbaiTest")
+    assert d is not None
     assert d.ret == 15.0                      # fake_metrics
     assert d.fields == ["ashareeodprices.s_dq_close"]  # 真 AST parse
-    # bcorr: fake corr_result 默认 None → 不写,这里断言 metrics+datasources 即可
+    # bcorr: fake corr_result 默认 None → max_bcorr 为 None
 
 
 def test_pass_automated_routes_pnl(test_config, make_factor, fake_checkers, fake_metrics):
@@ -108,7 +109,8 @@ def test_pass_bcorr_persisted(test_config, make_factor, fake_checkers, fake_metr
     checkers, _ = fake_checkers(fail_stage=None, corr_result=corr)
     pipe = _pipeline(cfg_path, checkers)
     assert pipe.run_one(pipe.metadatas[0], 0, queue.Queue()) == "pass"
-    d = _derived(config).get("AlphaWbaiBcorr")
+    d = _snapshot(config).get("AlphaWbaiBcorr")
+    assert d is not None
     assert d.max_bcorr == 0.42
     assert d.max_bcorr_factor == "AlphaOther"
 
@@ -229,35 +231,25 @@ def test_stage_short_circuit(test_config, make_factor, fake_checkers):
 
 
 # ---------------------------------------------------------------------------
-# _persist_derived 局部失败不阻断入库
+# snapshot 写失败不阻断入库 (快照缺失可见于日志,入库不能失败)
 # ---------------------------------------------------------------------------
 
-def test_persist_derived_partial_failure_still_archives(
+def test_snapshot_write_failure_still_archives(
         test_config, make_factor, fake_checkers, fake_metrics, monkeypatch):
-    from ops.core.alpha.results.correlation import CorrResult
-    from ops.core.metrics import Metrics
-
     cfg_path, config = test_config
     make_factor(name="AlphaWbaiPartial")
     _prep_pass_artifacts(config, "AlphaWbaiPartial")
-    corr = CorrResult(metrics=Metrics(ret=15.0, tvr=40.0, shrp=2.5, mdd=8.0, fitness=1.2),
-                      max_bcorr=0.42, max_bcorr_factor="X")
-    checkers, _ = fake_checkers(fail_stage=None, corr_result=corr)
+    checkers, _ = fake_checkers(fail_stage=None)
     pipe = _pipeline(cfg_path, checkers)
 
-    # 让 upsert_bcorr 抛异常 (模拟派生库局部失败)
-    import ops.infra.derived.pg_store as pg
-    orig = pg.PostgresDerivedStore.upsert_bcorr
+    # 让 snapshot insert 抛异常 (模拟 PG 局部失败)
+    import ops.infra.snapshot.pg_store as pg
     def boom(self, *a, **k):
-        raise RuntimeError("bcorr write boom")
-    monkeypatch.setattr(pg.PostgresDerivedStore, "upsert_bcorr", boom)
+        raise RuntimeError("snapshot write boom")
+    monkeypatch.setattr(pg.PostgresSnapshotStore, "insert", boom)
 
     ret = pipe.run_one(pipe.metadatas[0], 0, queue.Queue())
-    # 仍入库
+    # 仍入库 (行为约定: 快照失败不阻断 archive; 见 check/_persist_derived)
     assert ret == "pass"
     assert _store(config).get("AlphaWbaiPartial").status == FactorStatus.ACTIVE
-    # metrics/datasources 已落 (bcorr 失败不影响它们)
-    d = _derived(config).get("AlphaWbaiPartial")
-    assert d.ret == 15.0
-    assert d.fields == ["ashareeodprices.s_dq_close"]
-    assert d.max_bcorr is None  # bcorr 写失败
+    assert _snapshot(config).get("AlphaWbaiPartial") is None  # 快照缺失

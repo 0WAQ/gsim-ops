@@ -1,18 +1,19 @@
 import shutil
 from pathlib import Path
-from datetime import datetime
 
-from ops.infra.config import Config
-from ops.utils.func import date_range
-from ops.utils.printer import info, warn, error, highlight, banner, bottom, progress
-from ops.infra.store import default_store, StateStore
-from ops.infra.info import default_info_store, FactorInfo
-from ops.infra.lock import factor_lock, FactorLocked
 from ops.core.state import FactorRecord, FactorStatus
+from ops.infra.config import Config
+from ops.infra.info import FactorInfo, default_info_store
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.snapshot import default_snapshot_store
+from ops.infra.store import StateStore, default_store
 from ops.services.list.datasource import _build_npy_index
-from .parser import parse_factor
-from .normalize import normalize_factor_xml
+from ops.utils.clock import now_iso
+from ops.utils.func import date_range
+from ops.utils.printer import banner, bottom, error, info, progress, warn
 
+from .normalize import normalize_factor_xml
+from .parser import parse_factor
 
 META_FILENAME = "meta.json"
 
@@ -80,7 +81,7 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
     Existing factor + overwrite=False -> "skip" (defensive; run_submit normally
                                         filters these out before copy).
     """
-    submitted_at = datetime.now().isoformat(timespec="seconds")
+    submitted_at = now_iso()
 
     py_files = sorted(staging_dir.glob("*.py"))
     xml_files = sorted(staging_dir.glob("*.xml"))
@@ -139,6 +140,18 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
         store.transition(meta.name, FactorStatus.SUBMITTED,
                          submitted_at=submitted_at,
                          version=new_version)
+        # 覆盖提交 = 旧入库快照失效(新代码 re-check 通过后 archive 写新快照)。
+        # 不删则 insert 撞 name UNIQUE 被吞,快照永远停在旧代码(full-review P0-1)。
+        try:
+            default_snapshot_store(config).delete(meta.name)
+        except Exception:
+            warn(f"  ⚠  {meta.name} 旧 snapshot 删除失败(archive 时会自愈)")
+        # 同理回收 check 面产物(pnl + bcorr 池副本):旧版本 pnl 留在池里,
+        # 新代码重检时 correlation 对它 corr 通常极高 → 被迫"打败"旧的自己
+        # (自鬼影,PV7)。dump/feature 服务面保留(last-known-good)。
+        from ops.services.rm.rm import _recycle_check_artifacts
+        for r in _recycle_check_artifacts(meta.name, config):
+            info(f"  ✔  已回收 {r}")
         info(f"  ✔  {meta.name} → submitted (version={new_version},覆盖新代码)")
 
     if meta.author and meta.author != submitted_by:

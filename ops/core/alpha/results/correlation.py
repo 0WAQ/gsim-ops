@@ -1,7 +1,8 @@
-from typing import Dict
-from .base import *
+
 from ...metrics import Metrics
 from ..metadata import AlphaMetadata
+from .base import Result, Results, Status
+
 
 class CorrStatus(Status):
     PASS = 1
@@ -34,7 +35,7 @@ class CorrResult(Result):
 
 class CorrResults(Results):
     def __init__(self):
-        self.results: Dict[AlphaMetadata, CorrResult | str] = {}
+        self.results: dict[AlphaMetadata, CorrResult | str] = {}
 
     def get(self, key: AlphaMetadata, default: CorrResult | str | None):
         return self.results.get(key, default)

@@ -5,6 +5,8 @@
   - alpha_pnl/<name>            回测 PNL (单文件)
   - alpha_dump/<name>/          日频目标持仓目录
   - alpha_feature/<name>.*.npy  聚合 feature
+  - pnl_automated|pnl_manual/<name>  bcorr 分流池副本 (to_lib 写入;不清则已删
+    因子的 pnl 永远留在对比池里参与后续因子的 bcorr,生产验证 L3-7 实测泄漏)
   - factor_info PG 行           身份信息 (级联删除 state + snapshot)
 
 没有软删/墓碑:因子被 rm 后即不存在 (要恢复只能重新 ops submit)。
@@ -13,10 +15,10 @@
 import shutil
 
 from ops.infra.config import Config
-from ops.infra.lock import factor_lock, FactorLocked
-from ops.infra.store import default_store
 from ops.infra.info import default_info_store
-from ops.utils.printer import banner, bottom, info, error, highlight
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.store import default_store
+from ops.utils.printer import banner, bottom, error, highlight, info
 
 
 def _purge_artifacts(name: str, config: Config) -> list[str]:
@@ -32,6 +34,27 @@ def _purge_artifacts(name: str, config: Config) -> list[str]:
         if f.exists():
             f.unlink()
             removed.append(f"alpha_feature/{f.name}")
+    return removed
+
+
+def _recycle_check_artifacts(name: str, config: Config) -> list[str]:
+    """删 check 面产物:alpha_pnl/<name> + bcorr 池副本(均单文件)。返回已删项。
+
+    rm / restage / submit --overwrite 共用:pnl 与池副本喂 correlation 的
+    对比池和竞品指标,因子**离库即失效** —— 留着就是"自鬼影":重检时新 pnl
+    对自己旧 pnl corr≈1,高相关分支要求打败几乎相同的自己 → 必拒;也让别的
+    新因子撞上已离库因子的旧 pnl(JOURNAL PV7)。与"离库删 snapshot"(R1)
+    同构。两个池都查 —— 因子来源可能在历史上变过。"""
+    removed: list[str] = []
+    pnl = config.alpha_pnl / name
+    if pnl.exists():
+        pnl.unlink()
+        removed.append(f"alpha_pnl/{name}")
+    for pool in (config.pnl_automated, config.pnl_manual):
+        pool_copy = pool / name
+        if pool_copy.exists():
+            pool_copy.unlink()
+            removed.append(f"{pool.name}/{name}")
     return removed
 
 
@@ -52,7 +75,8 @@ def run_rm(args) -> None:
     info(f"    · alpha_pnl/{name}           (PNL)")
     info(f"    · alpha_dump/{name}/         (dump)")
     info(f"    · alpha_feature/{name}.*.npy (feature)")
-    info(f"    · factor_info + 级联 (state + snapshot)")
+    info(f"    · pnl_automated|manual/{name} (bcorr 分流池副本)")
+    info("    · factor_info + 级联 (state + snapshot)")
 
     if not args.yes:
         ans = input("  确认彻底删除? 不可恢复 [y/N] ").strip().lower()
@@ -72,15 +96,13 @@ def run_rm(args) -> None:
                 shutil.rmtree(src_dir)
                 info(f"  ✔ 已删除 alpha_src/{name}/")
 
-            # PNL (单文件,不是目录)
-            pnl = config.alpha_pnl / name
-            if pnl.exists():
-                pnl.unlink()
-                info(f"  ✔ 已删除 alpha_pnl/{name}")
+            # check 面产物: pnl + bcorr 池副本
+            for r in _recycle_check_artifacts(name, config):
+                info(f"  ✔ 已删除 {r}")
 
             # factor_info (级联删除 state + snapshot)
             if default_info_store(config).delete(name):
-                info(f"  ✔ 已删除 factor_info (级联删除 state + snapshot)")
+                info("  ✔ 已删除 factor_info (级联删除 state + snapshot)")
     except FactorLocked:
         error(f"  ✘ {name} 被另一个进程占用,稍后再试")
         return

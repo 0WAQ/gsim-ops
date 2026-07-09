@@ -27,7 +27,7 @@
 
 **意义**: 提早暴露配置错误、import 错误、运行时异常，避免后续阶段浪费时间。
 
-**失败处理**: 状态回退到 `SUBMITTED`，因子留在 staging（环境/配置问题，可通过 `ops check --retry` 重试）。
+**失败处理**: 状态回退到 `SUBMITTED`，因子留在 staging（环境/配置问题；下次 `ops check` 无条件重扫 staging，自动重试）。
 
 ### 1. Checkbias（未来数据泄露检测）
 
@@ -190,11 +190,11 @@ XML 中通过 `Constants` 控制：
 
 **操作**:
 - 运行 `simsummary` 提取指标（ret/shrp/dd/tvr/fitness）
-- 保存指标到 ops 索引
+- 指标写入 PG `factor_snapshot`（入库时不可变快照，`snapshot_at = entered_at`）
 - 将因子源代码、Config、Readme 移动到 `alpha_src/`
 - 将 PNL 文件移动到 `alpha_pnl/`
 - 将 alpha_dump 移动到 `alpha_dump/`
-- 更新状态为 `ACTIVE`，生成 `meta.json`
+- 更新状态为 `ACTIVE`（`meta.json` 由 submit 生成、随因子目录同行,archive 不生成）
 
 ## 失败语义总结
 
@@ -206,7 +206,7 @@ XML 中通过 `Constants` 控制：
 | Long Backtest | `SUBMITTED` | 留 staging（可 retry） |
 | Compliance | `REJECTED` | src 留 alpha_src |
 | Correlation | `REJECTED` | src 留 alpha_src |
-| Archive | `REJECTED` | src 留 alpha_src |
+| Archive | `SUBMITTED` | 留 staging（普通异常走 unexpected 臂，revert 后可重跑） |
 
 设计原则：
 - **环境/配置问题** → 回退到 SUBMITTED，可 retry
@@ -215,7 +215,7 @@ XML 中通过 `Constants` 控制：
 ## 并发与隔离
 
 - 使用 `ProcessPoolExecutor`（最多 20 workers）并行检测多个因子
-- 每个因子操作前获取非阻塞 advisory 锁(`factor_lock(name, config)`):postgres 后端为**跨机 PG advisory lock**(防三机并发 check 同一因子),json/redis 回退为 `~/.cache/ops/locks/{name}.lock` fcntl 锁
+- 每个因子操作前获取非阻塞 advisory 锁(`factor_lock(name, config)`):postgres 后端为**跨机 PG advisory lock**(防三机并发 check 同一因子),json dev/test 后端为 `~/.cache/ops/locks/{name}.lock` fcntl 锁
 - 锁竞争时直接跳过（不排队），避免重复检查
 
 ## 入库标准
@@ -268,12 +268,12 @@ uv run ops submit -u wbai -s 20260401 -f AlphaWbaiExample1 --overwrite
 
 ## State 漂移与崩溃恢复
 
-reconcile 已下线。state 上共享 redis 后,per-host 本地 `staging` / `alpha_dump` 视图无权裁决
+reconcile 已下线。state 共享 Postgres 后,per-host 本地 `staging` / `alpha_dump` 视图无权裁决
 全局 state(单机看不到别机的文件,曾导致跨机误判 / 误删)。崩溃恢复改靠两点自愈:
 
 - `ops check` **按 staging 目录扫描**(不看 state status),崩在半路仍在 staging 的因子
   下次照常重跑,并覆盖其 `CHECKING` 状态
-- redis state 原子写,drift 窗口只在"移动文件 → 改 state"两步之间且极小
+- PG state 事务原子写,drift 窗口只在"移动文件 → 改 state"两步之间且极小
 
 真正需要人工介入的残留用 `ops rm` / 后续 `ops doctor` 处理。
 

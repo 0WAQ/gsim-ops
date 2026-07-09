@@ -1,5 +1,10 @@
 # 三表迁移 - 非主线待办清单
 
+> **2026-07-07 更新**: A1(删 health)/A2(清 derived 僵尸层)/A3(config 清理)已在
+> remediation Wave 2 执行完毕(branch `claude/remediation-wave0`,见
+> `docs/remediation/JOURNAL.md` V1-V3);生产库僵尸表清理脚本
+> `migrate_drop_derived.sql` 待手动执行。以下原文保留作历史记录。
+
 > 临时文档，记录迁移主线之外的收尾事项。主线 = ops 生产库迁移。
 
 ## A. 涉及代码的（可暂缓，不影响迁移正确性）

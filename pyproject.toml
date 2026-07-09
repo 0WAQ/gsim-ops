@@ -4,29 +4,19 @@ version = "0.1.1"
 description = "Gsim Operations Tool"
 readme = "README.md"
 requires-python = ">=3.10"
+# 2026-07-07 依赖大扫除(full-review 第三部分 §五 + Wave 1):Wave 0 删除从未
+# import 的 mlflow/pandas/lxml(+stubs)/scp/zstandard/colorama、argparse backport、
+# setuptools/wheel、随死代码退役的 paramiko/requests;Wave 1 (JOURNAL F1/F2) 再删
+# boto3/tqdm(随 sync 栈)与 redis(随已坏的 redis state 后端;redis-sentinel
+# 实例是 JFS metadata 后端,与 ops 依赖无关)。
 dependencies = [
-    "argparse>=1.4.0",
-    "boto3>=1.43.16",
-    "colorama>=0.4.6",
     "loguru>=0.7.2",
-    "lxml>=6.0.2",
-    "lxml-stubs>=0.5.1",
-    "mlflow>=3.13.0",
     "numpy>=2.2.6",
-    "pandas>=2.3.3",
-    "paramiko>=4.0.0",
     "psycopg-pool>=3.3.1",
     "psycopg[binary]",
     "pyyaml>=6.0.3",
-    "redis>=8.0.0",
-    "requests>=2.32.5",
     "rich>=15.0.0",
-    "scp>=0.15.0",
-    "setuptools>=80.9.0",
-    "tqdm>=4.67.1",
-    "wheel>=0.45.1",
     "xmltodict>=1.0.2",
-    "zstandard>=0.25.0",
 ]
 
 [project.scripts]
@@ -34,7 +24,9 @@ ops = "ops.main:main"
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.411",
     "pytest>=8",
+    "ruff>=0.15.20",
 ]
 
 [tool.pytest.ini_options]
@@ -53,3 +45,14 @@ markers = [
 
 [tool.setuptools.packages.find]
 include = ["ops*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# 首批规则按 full-review 第二部分 A 挑选,对准本库实际病灶:
+#   F401/F841 死导入死变量, F403/F405 star import, E7 比较/裸 except 类,
+#   I import 排序, UP006/007/035/045 旧式 typing, B006/B008 可变默认参数。
+# 不开 pydocstyle(D)—— 与双语 docstring 约定冲突(风格守则 J10)。
+select = ["F", "E7", "I", "UP006", "UP007", "UP035", "UP045", "B006", "B008"]

@@ -7,11 +7,10 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 ## Key Modules
 
 - **infra/config.py**: `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var -> `./config.yaml` -> project root `config.yaml`. Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables (`OPS_GSIM_HOME`, `OPS_STORAGE`, `OPS_WORKSPACE`).
-- **core/alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code. Constructor calls `_modify_always()` which modifies XML on disk (paths from config, not hardcoded). `_modify_always` also updates per-Data module `niodatapath` for L2 data (replaces `/datasvc/data/cc/` prefix with config's `nio_data_path`).
-- **core/library.py**: `LibraryScanner` scans `alpha_src/` and publishes the index (name/author/has_pnl/dump_days/delay) to the DerivedStore (see `infra/derived/`). Freshness = alpha_src mtime vs the store's `index_built_at` watermark (shared across machines); `ops list --refresh` forces a rescan. 其扫描产物类也叫 `FactorInfo`(与 `infra/info/` 的 store dataclass 同名但不同物,一个是扫盘结果、一个是 factor_info 表模型)。**过渡状态**:三表重构后 metrics/datasources/bcorr 已迁 `factor_snapshot`,但 index 组仍暂存 DerivedStore(`derived/` 层未删,是待清理的僵尸层)。
+- **core/alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code。构造只读盘解析,无写盘副作用。niodatapath 改写在 `_update_data_niodatapath`(纯内存,把 `/datasvc/data/cc/` 前缀换成 config 的 `nio_data_path`),由 check 的 `prepare_for_initial`(`ops/services/check/xml_prepare.py`)调用并经 `ops/utils/xmlio.save_xml` 落盘。
+- **core/library.py**: `LibraryScanner` — 磁盘视角的对账工具(2026-07-07 Wave 2 起退出命令热路径:list 因子集=factor_state、info 存在性=factor_info,均纯 PG)。`scan()` 纯磁盘遍历无缓存,留给未来 ops doctor;`get()` 供 info 做单因子现场 stat。其扫描产物类也叫 `FactorInfo`(与 `infra/info/` 表模型同名不同物,改名 ScannedFactor 留待后续 wave / Factor 聚合重构)。
 - **core/metrics.py**: `Metrics` dataclass (ret, tvr, shrp, mdd, fitness). Serialization keys use `ret%`, `tvr%`, `mdd%` to indicate percentage fields.
 - **infra/gsim/runner.py**: `Runner` static methods shell out to gsim tools (`run_backtest`, `run_simsummary`, `run_bcorr`) via `subprocess.run` with configurable timeout.
-- **infra/ssh.py**: Paramiko-based SSH client.
 
 ## State Models
 
@@ -22,10 +21,9 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `infra/info/` | `FactorInfo` dataclass + `InfoStore` ABC + `PostgresInfoStore`(factor_info 表:身份信息 author/discovery_method/created_at) |
 | `infra/snapshot/` | `FactorSnapshot` dataclass + `SnapshotStore` ABC + `PostgresSnapshotStore`(factor_snapshot 表:入库时不可变快照 metrics+datasources+index+bcorr) |
 | `infra/store/pg_store.py` | Postgres state backend (真相源 since 2026-07-04), `SELECT FOR UPDATE` + check_history JSONB;2026-07-06 去 library_id / author,`id SERIAL` 主键 + `name UNIQUE`,外键引 factor_info |
-| `infra/store/redis_store.py` | Redis state backend (回退; 实例仍是 JFS metadata 后端) |
-| `infra/store/json_store.py` | JSON state backend, fcntl cross-process lock, atomic write |
-| `infra/query.py` | `query_factors(config, ...)` — list 读 info+state+snapshot 三表的唯一入口,返回 `FactorRow = (info, status, last_fail_stage, snapshot)`(当前三次查 + 内存按 name JOIN,TODO 单条 SQL)。health 不走此入口(直接 LibraryScanner.scan + snapshot_store.list) |
-| `infra/lock.py` | Per-factor advisory lock (`factor_lock(name, config)` / `FactorLocked`);postgres 后端跨机 PG advisory lock,json/redis 回退 fcntl |
+| `infra/store/json_store.py` | JSON state backend(单机 dev/test;非生产回退), fcntl cross-process lock, atomic write |
+| `infra/query.py` | `query_factors(config, ...)` — list 读 info+state+snapshot 三表的唯一入口,返回 `FactorRow = (info, status, last_fail_stage, snapshot)`(当前三次查 + 内存按 name JOIN,TODO 单条 SQL)。因子集定义处:status 缺省排除 submitted(2026-07-07 Wave 2) |
+| `infra/lock.py` | Per-factor advisory lock (`factor_lock(name, config)` / `FactorLocked`);postgres 后端跨机 PG advisory lock(conninfo 缺失硬错误),json dev/test 后端 fcntl |
 
 **三表外键**:`factor_state.name` / `factor_snapshot.name` 均 `REFERENCES factor_info(name) ON DELETE CASCADE`。删 factor_info 级联删 state + snapshot(`ops rm` 走这条)。
 

@@ -1,3 +1,3 @@
-from .combo import run_combo, ComboRunner
+from .combo import ComboRunner, run_combo
 
 __all__ = ["run_combo", "ComboRunner"]

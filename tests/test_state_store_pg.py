@@ -1,20 +1,25 @@
 """state 存储层单测 (PG, ops_test 库)。
 
 覆盖 PostgresStateStore:put/get round-trip、时间戳 tz 正确性、transition、
-append_check、delete、list 过滤、library_id 隔离。
+append_check、delete、list 过滤。
+
+2026-07-07:适配三表拆分 —— FactorRecord 不再有 author/submitted_by(身份在
+factor_info),PostgresStateStore 不再有 library_id(永远单库);原
+test_library_id_isolation 随隔离模型一并删除(per-test 隔离改造为 per-schema
+是待办,见 full-review 第二部分 I2)。本套件曾红在 HEAD 三周无人察觉(无 CI)。
 """
 import pytest
 
-from ops.core.state import FactorRecord, FactorStatus, CheckRecord
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 
 pytestmark = pytest.mark.pg
 
 
-def _rec(name="A", author="wbai", status=FactorStatus.SUBMITTED,
+def _rec(name="A", status=FactorStatus.SUBMITTED,
          updated_at="2026-07-05T00:00:00"):
-    return FactorRecord(name=name, author=author, status=status,
+    return FactorRecord(name=name, status=status,
                         updated_at=updated_at,
-                        submitted_at="2026-07-05T00:00:00", submitted_by=author)
+                        submitted_at="2026-07-05T00:00:00")
 
 
 def test_put_get_roundtrip(state_store):
@@ -27,9 +32,7 @@ def test_put_get_roundtrip(state_store):
     got = state_store.get("A")
     assert got is not None
     assert got.name == "A"
-    assert got.author == "wbai"
     assert got.status == FactorStatus.SUBMITTED
-    assert got.submitted_by == "wbai"
     assert len(got.check_history) == 1
     assert got.check_history[0].passed is True
     assert state_store.get("missing") is None
@@ -85,29 +88,8 @@ def test_delete(state_store):
 
 
 def test_list_filters(state_store):
-    state_store.put(_rec("A", "wbai", FactorStatus.ACTIVE))
-    state_store.put(_rec("B", "mhe", FactorStatus.SUBMITTED))
-    state_store.put(_rec("C", "wbai", FactorStatus.SUBMITTED))
+    state_store.put(_rec("A", FactorStatus.ACTIVE))
+    state_store.put(_rec("B", FactorStatus.SUBMITTED))
+    state_store.put(_rec("C", FactorStatus.SUBMITTED))
     assert {r.name for r in state_store.list()} == {"A", "B", "C"}
-    assert {r.name for r in state_store.list(author="wbai")} == {"A", "C"}
     assert {r.name for r in state_store.list(status=FactorStatus.SUBMITTED)} == {"B", "C"}
-    assert {r.name for r in state_store.list(author="wbai", status=FactorStatus.SUBMITTED)} == {"C"}
-
-
-def test_library_id_isolation(pg_conninfo, library_id):
-    """两个 library_id 写同名因子互不可见。"""
-    from ops.infra.store.pg_store import PostgresStateStore
-
-    s1 = PostgresStateStore(conninfo=pg_conninfo, library_id=library_id)
-    other_lib = library_id + "_other"
-    s2 = PostgresStateStore(conninfo=pg_conninfo, library_id=other_lib)
-    try:
-        s1.put(_rec("Shared", "wbai", FactorStatus.ACTIVE))
-        assert s1.get("Shared") is not None
-        assert s2.get("Shared") is None  # 另一个 library 看不到
-    finally:
-        # 清 other_lib (library_id fixture 只清自己那个)
-        import psycopg
-        conn = psycopg.connect(pg_conninfo, autocommit=True)
-        conn.execute("DELETE FROM factor_state WHERE library_id = %s", (other_lib,))
-        conn.close()
