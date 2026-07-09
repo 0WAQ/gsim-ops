@@ -41,7 +41,7 @@ uv run ops status -u wbai --status submitted     # Filter by author/state
 uv run ops backfill --dry-run                    # Preview backfill on alpha_src/
 uv run ops backfill                              # Generate meta.json + ACTIVE for legacy factors
 uv run ops list                      # List factors (default config.yaml → JFS)
-uv run ops list --author wbai        # Filter by author
+uv run ops list -u wbai              # Filter by author (-u/--user)
 uv run ops list --format json        # JSON output
 uv run ops info <factor-name>        # Show factor details (入库时快照 metrics + snapshot_at)
 uv run ops pack                      # Aggregate alpha_dump → alpha_feature (skip already-packed)
@@ -222,5 +222,5 @@ AlphaXxx/
 - Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/restage` 走 `git add/commit`(串行化复用现有 `factor_lock`,已是跨机 PG advisory lock)
 - Phase E: `.state` merge 逻辑简化(其实在 Redis 后大部分逻辑已不需要)
 - Phase F: checkpoint 落地(按设计原则放 JFS / 本地 SSD)
-- Phase G 剩余: ~~反查命令 `ops query --field/--table`~~ (已改造 `ops list --filter-by field=/tables=` 下推 SQL 吃 GIN, 未新增命令) / ~~refresh_* 从 list 独立成 ops refresh~~ (已废弃: 三表重构后 metrics/datasources/bcorr 改为入库时快照, `ops refresh` 命令删除, 不再有重算路径) / PG 密码正规化 (挪 /etc root-only + 分发 150/144) / 150/144 部署 (uv tool install 带 psycopg) / 分支合 main / 验稳后清 Redis 残留 state key (只 DEL state:*, 绝不 FLUSHDB — Redis 还扛 JFS) / ~~清理僵尸 derived 层~~ (2026-07-07 Wave 2 已删) / ~~`ops health` 删除~~ (Wave 2 已删) / ~~list 扫盘界定因子集~~ (Wave 2 已改纯 PG 判据, scan 退出热路径)
+- Phase G 剩余: ~~反查命令 `ops query --field/--table`~~ (已改造 `ops list --filter-by field=/tables=` 下推 SQL 吃 GIN, 未新增命令) / ~~refresh_* 从 list 独立成 ops refresh~~ (已废弃: 三表重构后 metrics/datasources/bcorr 改为入库时快照, `ops refresh` 命令删除, 不再有重算路径) / PG 密码正规化 (挪 /etc root-only;~~分发 150/144~~ 2026-07-08 已随升级窗口 scp 完成) / ~~150/144 部署~~ (2026-07-08 完成: 三机 rev 一致 + 跨机锁四观测 + migrate_drop_derived 已执行, JOURNAL U1) / 分支合 main / 验稳后清 Redis 残留 state key (只 DEL state:*, 绝不 FLUSHDB — Redis 还扛 JFS) / ~~清理僵尸 derived 层~~ (2026-07-07 Wave 2 已删) / ~~`ops health` 删除~~ (Wave 2 已删) / ~~list 扫盘界定因子集~~ (Wave 2 已改纯 PG 判据, scan 退出热路径)
 - Phase C 上线后剩余: 写入重试 wrapper / ~~sync deprecation warning~~(sync 已删) / sudo NOPASSWD wrapper / **MinIO key rotation(紧急:密钥曾入库,虽已删文件但在 git 历史)** / alpha_dump 退役
