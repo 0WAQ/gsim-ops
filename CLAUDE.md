@@ -196,6 +196,25 @@ AlphaXxx/
 - **rich** - Terminal output (tables / live progress)
 - **psycopg** / **psycopg-pool** - Postgres client (state + info + snapshot 真相源, `ops/infra/store/pg_store.py` / `ops/infra/info/pg_store.py` / `ops/infra/snapshot/pg_store.py`)
 
+## SSOT 表(事实族 → 正主)
+
+改代码/review 第一问:**"你在问正主吗?"** 每个事实族只有一个权威来源,其余都是
+投影或缓存(full-review §8.2;⚠ 行是已知的多真相源,收敛计划见
+`docs/factor-aggregate-plan.md`)。
+
+| 事实族 | 正主(SSOT) | 备注 |
+|---|---|---|
+| 因子集(什么算在库) | PG `factor_state.status != 'submitted'` | 2026-07-07 起纯 PG,零扫盘 |
+| 身份(author / discovery_method) | PG `factor_info` | 目录名推断只是 guess,不权威 |
+| 入库快照(metrics/datasources/bcorr/delay) | PG `factor_snapshot` | 不可变,`snapshot_at = entered_at`,无重算路径 |
+| stage 身份 / 顺序 / 路由策略 | `services/check/stages.py` 的 `PIPELINE` | 新增 stage = 加一行 |
+| 时间戳格式 | `ops/utils/clock.py::now_iso` | |
+| 状态值 | `FactorStatus` 枚举 | 与 DB CHECK 约束同一提交改 |
+| 依赖分层规则 | import-linter 契约(`docs/factor-aggregate-plan.md` 附录 A) | 阶段 0 进 CI |
+| ⚠ 盘面布局(src/pnl/dump/feature/staging) | 待建 `FactorPaths`,今散布 40+ 处 | 聚合工程阶段 1 |
+| ⚠ 写命令集(sudo 提权名单) | `infra/sudo.py::WRITE_COMMANDS` 手抄 | 待从命令注册派生(S16) |
+| ⚠ metric 表达式 | snapshot `_METRIC_EXPR` 与 list 镜像 | 待注册表(S8) |
+
 ## Known Technical Debt (Deferred)
 
 - **Stub files**: `core/alpha/results/base.py`, `results/checkpoint.py`(空壳 Enum/class)

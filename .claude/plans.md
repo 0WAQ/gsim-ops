@@ -2,6 +2,15 @@
 
 Deferred / not-yet-started plans. See `CLAUDE.md` for current architecture.
 
+## 迁移完成定义(全局纪律,full-review §8.3)
+
+> 一次迁移包含 Expand、Migrate、**Contract** 三步;Contract = 旧代码删除 + 旧配置键
+> 删除 + 文档更新 + 回退承诺移除(或回退路径有测试)。**前两步完成、第三步未完成的
+> 迁移不算完成**,不得据此开启下一段迁移。(Waves 0-4 整改即按此纪律执行并收官。)
+
+**排期中的大工程**:Factor 聚合(领域模型立正主,full-review 路线图 Wave 5)——
+施工图 `docs/factor-aggregate-plan.md`(目标模型 / 三阶段迁移 / import-linter 契约基线)。
+
 ## Architecture Refactor (已基本落地 — 保留作历史设计记录)
 
 > 状态注 (2026-07-08):分层架构已是现状(`cli/` → `services/` → `core/` + `infra/`,`utils/` 共享),`common/` 已不存在,构造器写盘副作用已拆到 `services/check/xml_prepare.py`。下文细节(notify/ssh 模块、cp 子命令等)与现状不符,勿按此文施工。
