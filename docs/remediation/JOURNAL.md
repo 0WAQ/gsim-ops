@@ -546,3 +546,40 @@ checker 也不跳过自己,因子 restage/`--overwrite` 后重检时,correlation
   (低相关直通分支本次未触发,但它是 L3-L4 及日常的主路径,风险低);
   ② PV7-4 人工塞入的池残留由收尾 `ops rm` 回收(零残留复查过),再次覆盖
   L3-7 修复。PV 系列(PV1-PV7)至此全部收官。
+
+## U1 · 多机升级窗口:150/144 → wave0 + 僵尸表 migration(2026-07-08)
+
+**结果**(`VERIFY-UPGRADE-150-144-RESULT.md`):三机(160/150/144)rev 一致
+`7f5b710`;跨机 PG advisory 锁(F5 固定命名空间锁键)首次三机真互斥,四观测
+(150/144 持锁期 FactorLocked + 释放后 ACQUIRED)全符;`migrate_drop_derived.sql`
+备份先行后执行,`\dt` 仅剩三正规表,三机只读回归 Total 7488 不变。Phase G 的
+"150/144 部署"与"僵尸表清理"两项落账;`.env` 密码已 scp 分发(正规化挪
+/etc root-only 仍待办)。144 走 `OPS_ALPHALIB_ROOT=/storage/vault/alphalib`
+env 覆盖(该机制 + sudoers env_keep 首次实战)。
+
+**开窗前事件:144 孤儿 pack(已结案,`INCIDENT-144-PACK.md`)**。阶段 0a 探测
+发现 144 有 20 个 ppid=1、7 天龄的 `ops pack` worker(root)。取证定性空转僵尸
+(cputime 冻结 + fd 无写句柄);其 7/1 写入共享 JFS 的 5757 个 feature 经代码侧
+核实为 **backfill 非覆盖**(裸 pack 无 --force 跳过 v1+v2 齐全者,即这些 feature
+此前不存在);wbai 确认本人操作、alpha_dump 任意时刻/机器等价 → 无污染,结案。
+遗留:3 个 `.tmp` 残渣(root 清)+ 窗口后在 IDC 机器补一次裸 `ops pack`
+(队列未跑完的缺失 + 2 个半对)。
+
+**过程教训与记账**:
+- **测试串行红线被实测验证**:144 一个误判为已死、实际后台存活的 pytest 与
+  150 的测试撞共享 `ops_test`(wipe_test_db 互清),150 一轮 3 failed;kill +
+  严格串行后三机各 51 passed/8 skipped/0 failed。→ I2 正式件(per-schema/
+  per-machine 测试库隔离)的又一动机。
+- **pack 两笔账进 ops doctor / 整改候选**:①孤儿 worker 是无人兜底的 crash
+  residue 类别(staging 有 `ops clear`,pack 没有;现版本同为 ProcessPoolExecutor
+  风险仍在);②pack 无数据源/机器角色守卫,冷副本一条裸命令即可写共享
+  alpha_feature → 候选:批量写入前 apt 风格确认(与其它批量命令对齐)。
+- **WAN 基线(144)**:fetch/pull 20s;`uv sync` 需 `UV_HTTP_TIMEOUT=180`
+  (~6min);L1 测试 335s(IDC 的 ~40×);`ops list` 10s。
+- **入口与文档勘误**:150/144 生产入口是 uv tool install 的 `ops`,项目 venv
+  无 console script(`uv run ops` 不可用,与 160 不同);`ops list` 作者过滤是
+  `-u/--user`,根 CLAUDE.md 示例笔误已修(手册头部已加勘误注)。
+
+**后续解锁**:验稳后清 Redis 残留 state key(只 DEL state:*,绝不 FLUSHDB);
+PG 密码正规化;wave3/stage-table 增量验证与三机滚存;补 pack;MinIO/Feishu
+密钥轮换(与本窗口无关,持续挂账,紧急)。
