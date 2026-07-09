@@ -583,3 +583,38 @@ env 覆盖(该机制 + sudoers env_keep 首次实战)。
 **后续解锁**:验稳后清 Redis 残留 state key(只 DEL state:*,绝不 FLUSHDB);
 PG 密码正规化;wave3/stage-table 增量验证与三机滚存;补 pack;MinIO/Feishu
 密钥轮换(与本窗口无关,持续挂账,紧急)。
+
+## U2 · wave3 + stage-table 增量验证收官:三机滚存到堆叠顶端(2026-07-09)
+
+**结果**(`VERIFY-WAVE3-STAGE-TABLE-RESULT.md`,rev `a85c26b`):
+- 160 门禁全绿:ruff 0 / pyright 0 / fast suite **69 passed**(增量 =
+  `test_batch` + `test_check_routing_json`,数目与 wave0 的 51 相加吻合);
+- **e2e 重跑 6 passed / 90s** —— Stage 表重构(运行块 for-loop 化 + 归因盖章 +
+  prepare 抛错)在真 gsim + 真 cc 数据下无回归,这次确认跑在含 `stages.py`
+  的代码上;
+- 金丝雀环路 3a-3e 全过(证据为原始输出):批量确认交互(n 零副作用 / y 走
+  锁内复验+CAS)、生产阈值 REJECTED 的**归因盖章**(fail_stage=correlation
+  由流水线 current_stage 盖,异常子类已删)+ late-stage 产物策略(pnl+dump
+  保留 / 不拷池 / 无快照)、REJECTED 召回闭环再入库(快照重建);
+- 150/144 从 wave0 `7f5b710` 滚存,**三机 rev = `a85c26b`**,fast suite 全绿
+  (144 WAN:uv sync 161s 需 UV_HTTP_TIMEOUT=180、pytest 61s);
+- 144 pack 事件遗留收口:tmp 已清 + 补 pack 39 → 0(`INCIDENT-144-PACK.md`
+  关闭)。**合 main 前置齐备。**
+
+**上一份 wave3 报告的勘误**(已记入 RESULT 首节):其"三机 rev 一致
+(150/145 @ 4dec7a6)"经逐台核实不成立(150 实为 wave0 `7f5b710`;145
+NO-REPO,该机是 JFS 对象存储落盘机,无 ops 部署),相关声明作废;该报告降级
+为"160 单机 wave3 证据"(e2e + 金丝雀迭代可信)。教训:**验证报告必须贴命令
+原始输出,转述不作数**(该报告另有两处照原样执行必报错的快照命令)。
+
+**验证中挖出的新问题(待办)**:
+1. **bcorr 池存量鬼影实锤**:`AlphaWbaiReversal` 当前 status=rejected,但
+   `pnl_manual` 池副本与 07-04 旧 snapshot 仍在(离库发生在 PV7 回收代码部署
+   之前,存量残留)。后果演示:金丝雀 3c 正是被这个**已离库因子**的鬼影 pnl
+   拒掉的 —— 不在库里的因子在给新因子把关。PV7 回收只管未来动作;存量需一次
+   性对账:池成员 − ACTIVE 集合 = 鬼影清单(只读审计脚本已交 wbai),确认后
+   清理;长期机制归 `ops doctor`。
+2. 手册改进:金丝雀 dropbox 重建 snippet 补 `rm -rf`(本轮 3a 实测撞上一轮
+   残留被 ".xml=2" 拒收 —— submit 行为正确,夹具不卫生;VERIFY-PV7.md 已改)。
+3. 小账:PG 核对 snippet 退出时有 psycopg `ConnectionPool.__del__` 析构噪声
+   (无害;后续给连接池加显式 close)。
