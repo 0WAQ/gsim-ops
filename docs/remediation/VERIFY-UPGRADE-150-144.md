@@ -1,5 +1,11 @@
 # 多机升级窗口 · server-150 / intel-workstation-144 执行手册
 
+> **已执行完毕(2026-07-08,RESULT 全绿)。实测勘误,供本手册复用时参考**:
+> ① 150/144 生产入口是 uv tool install 的 `ops`(PATH),项目 venv 不生成
+> console script,凡 `uv run ops xxx` 应作 `ops xxx`(pytest/python snippet
+> 仍走 `uv run`);② 1-6 的 `ops list --author` 应为 `ops list -u`;
+> ③ 144(WAN)`uv sync` 需 `UV_HTTP_TIMEOUT=180`。
+
 **目标**:把 150(北京 IDC)和 144(本地办公网,WAN 节点)升级到与 160 一致的
 `claude/remediation-wave0`(含 Waves 0-2 + 全部 R/W/T/F/V/PV 修复),验证跨机
 一致性与**跨机 PG advisory 锁互斥**,最后在 160 上手动执行
