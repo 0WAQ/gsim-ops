@@ -75,8 +75,9 @@ wbai 原话(2026-07-07):
 
 - **D1 Repository 门面**:未动。submit/backfill/check 仍各抄一遍 info+state 双表
   写;`query_factors` 仍是三次查 + 内存 join(自带 TODO);rm 仍"问 state 删 info"。
-- **D2 连接池**:未动。PG store 仍在 `__init__` 建池 + DDL,全库仍 0 个
-  `.close()`(U2 验证时 `ConnectionPool.__del__` 析构噪声即此症状)。
+- **D2 连接池**:**退出收尾已落地**(2026-07-09,`ops/infra/pg.py` +
+  `track_pool`,消 `ConnectionPool.__del__` 的 `cannot join current thread` 刷屏);
+  **剩:按 conninfo 去重(三表同库共享一池)+ DDL 滚出 `__init__`**,归阶段 1。
 - **D3 返回值约定**:部分(InfoStore.delete 已改 bool,R3);Snapshot/State 未统一,
   无类型化异常模块。
 - **D4 双 FactorInfo 同名**:未动。
@@ -131,9 +132,10 @@ repo.meta(name) -> FactorMeta                       # meta.json 独家读写
 
 - **`FactorPaths`**(S4):`src/pnl(单文件!)/dump/feature[]/staging/池副本` 的
   唯一拼法。40+ 处散布路径收编;"pnl 是单文件"从 CLAUDE.md 警告降级为类型事实。
-- **`ops/infra/pg.py` 池注册表**(D2):`get_pool(conninfo)`(lru_cache + fork
-  守卫 pid 检查)+ `ensure_schema(pool, ddl)` 一次性;`default_*_store` 工厂内部
-  改走注册表,调用点不改;进程退出显式 close(消 U2 析构噪声)。
+- **`ops/infra/pg.py` 池注册表**(D2):**退出收尾已于 2026-07-09 落地**
+  (`track_pool` + atexit close + fork 重置,消 `__del__` 刷屏)。**阶段 1 补**:
+  `get_pool(conninfo)`(lru_cache + fork 守卫 pid 检查)按 conninfo 去重 +
+  `ensure_schema(pool, ddl)` 一次性;`default_*_store` 工厂改走注册表,调用点不改。
 - **`ops/infra/errors.py`**(D3):`FactorNotFound`/`StateConflict`(已有)/
   `SnapshotAlreadyExists`;变更方法统一 `-> bool` 或抛类型化异常。
 - **D4 改名**:core/library.py 的 `FactorInfo → ScannedFactor`,`author →

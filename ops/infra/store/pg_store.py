@@ -22,6 +22,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus
+from ops.infra.pg import track_pool
 
 from .base import StateConflict, StateStore
 
@@ -90,6 +91,7 @@ class PostgresStateStore(StateStore):
     def __init__(self, conninfo: str):
         """不再需要 library_id 参数（永远单库）。"""
         self.pool = ConnectionPool(conninfo, min_size=1, max_size=4, open=True)
+        track_pool(self.pool)
         self._init_schema()
 
     def _init_schema(self) -> None:

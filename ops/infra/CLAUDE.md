@@ -36,6 +36,18 @@ All ops state/cache files live under `~/.cache/ops/`.
 - Locks at `~/.cache/ops/locks/` — fcntl, per-machine(**仅 json dev/test 后端用**;postgres 后端走跨机 PG advisory lock,见 `lock.py`)
 - `cache.py` 现仅剩 json dev/test 后端的 factor_state.json + locks 用(derived.json 随僵尸层退役,2026-07-07 Wave 2)。
 
+## PG Pool Lifecycle (`pg.py`)
+
+`ConnectionPool(open=True)` 与其后台 worker 线程互相引用成环 → 池活到解释器关闭 →
+GC 触发 `__del__` → join 线程在关闭上下文抛 `cannot join current thread`(无害但每条
+命令 × 每个未关的池刷一次 traceback)。`track_pool(pool)` 登记每个建好的池,`atexit`
+钩子在退出前显式 `close()`(此后 `__del__` 空转)。三个 PG store(state/info/snapshot)
+构造后各调一次。**fork 安全**:登记项带 pid,`atexit` 只关本进程建的池;
+`register_at_fork` 在子进程清空登记表(`ops check` worker 各自建 store、各自关)。
+**这是 full-review D2「每进程池注册表」的最小前身** —— 只做退出收尾,未做按 conninfo
+去重(三表同库本可共享一池);去重见 `docs/factor-aggregate-plan.md` 阶段 1。
+行为测试 `tests/test_pg_pool_cleanup.py`(假池,无需 PG)。
+
 ## Info (`info/`)
 
 因子**身份信息**存储层(2026-07-06 从 factor_state.author 拆出)。`factor_info` 表:身份是不可变属性,与生命周期状态、入库快照三表分离。
