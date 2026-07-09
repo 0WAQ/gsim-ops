@@ -70,7 +70,7 @@ EOF
 
 ```bash
 uv run python - <<'EOF'
-import os, sys
+import os, shutil, sys
 from pathlib import Path
 sys.path.insert(0, "tests/e2e")
 import conftest as e2e
@@ -78,7 +78,8 @@ name = os.environ.get("CANARY", "AlphaWbaiCanary001")
 date = os.environ.get("CDATE")
 py_tpl, delay = e2e._TEMPLATES["good"]
 d = Path("/mnt/storage/dropbox/wbai") / date / name
-d.mkdir(parents=True, exist_ok=True)
+shutil.rmtree(d, ignore_errors=True)  # 清上一轮残留:旧 xml 会让 submit 按 ".xml=2 不合规" 拒收(U2 实测)
+d.mkdir(parents=True)
 (d / f"{name}.py").write_text(py_tpl.format(name=name))
 (d / f"Config.{name}.xml").write_text(e2e._xml(name, delay))  # discovery_method 缺省 manual
 print("canary at", d)
