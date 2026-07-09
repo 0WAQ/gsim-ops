@@ -2,9 +2,8 @@
 from datetime import datetime
 
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
-from ops.infra.pg import track_pool
+from ops.infra.pg import ensure_schema, get_pool
 
 from .base import FactorSnapshot, SnapshotStore
 
@@ -78,13 +77,11 @@ class PostgresSnapshotStore(SnapshotStore):
     """factor_snapshot 表的 Postgres 实现（入库时快照，不可变）。"""
 
     def __init__(self, conninfo: str):
-        self.pool = ConnectionPool(conninfo, min_size=1, max_size=10, open=True)
-        track_pool(self.pool)
+        self.pool = get_pool(conninfo)
         self._init_schema()
 
     def _init_schema(self):
-        with self.pool.connection() as conn:
-            conn.execute(_SCHEMA)
+        ensure_schema(self.pool, _SCHEMA)
 
     def get(self, name: str) -> FactorSnapshot | None:
         with self.pool.connection() as conn:

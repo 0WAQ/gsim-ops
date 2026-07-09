@@ -36,17 +36,28 @@ All ops state/cache files live under `~/.cache/ops/`.
 - Locks at `~/.cache/ops/locks/` — fcntl, per-machine(**仅 json dev/test 后端用**;postgres 后端走跨机 PG advisory lock,见 `lock.py`)
 - `cache.py` 现仅剩 json dev/test 后端的 factor_state.json + locks 用(derived.json 随僵尸层退役,2026-07-07 Wave 2)。
 
-## PG Pool Lifecycle (`pg.py`)
+## PG Pool Registry (`pg.py`,full-review D2)
 
-`ConnectionPool(open=True)` 与其后台 worker 线程互相引用成环 → 池活到解释器关闭 →
-GC 触发 `__del__` → join 线程在关闭上下文抛 `cannot join current thread`(无害但每条
-命令 × 每个未关的池刷一次 traceback)。`track_pool(pool)` 登记每个建好的池,`atexit`
-钩子在退出前显式 `close()`(此后 `__del__` 空转)。三个 PG store(state/info/snapshot)
-构造后各调一次。**fork 安全**:登记项带 pid,`atexit` 只关本进程建的池;
-`register_at_fork` 在子进程清空登记表(`ops check` worker 各自建 store、各自关)。
-**这是 full-review D2「每进程池注册表」的最小前身** —— 只做退出收尾,未做按 conninfo
-去重(三表同库本可共享一池);去重见 `docs/factor-aggregate-plan.md` 阶段 1。
-行为测试 `tests/test_pg_pool_cleanup.py`(假池,无需 PG)。
+**唯一建 PG 池的地方**。三个 PG store(state/info/snapshot)`__init__` 里
+`self.pool = get_pool(conninfo)` + `ensure_schema(self.pool, _SCHEMA)`,不再各自
+`ConnectionPool(...)`。合治两个故障:
+
+- **连接打爆**(生产 P0):原先 `default_*_store()` 每调一次新建一个池(min_size=1
+  立刻占 1 连接),`ops check` 在 `run_one` 里**每因子**建 state/info/snapshot 三池,
+  一个 worker 处理 K 因子攒 3K 池、3K 连接到进程退出才放,20 worker 秒破 PG 默认
+  `max_connections=100` → `FATAL: too many clients already`。`get_pool(conninfo)` 按
+  `(pid, conninfo)` 缓存,同进程**同 conninfo 只一个池**;三表同库同 conninfo → 塌成
+  一个共享池,worker 连接占用 3K→1。`ensure_schema` 保证每 `(池, DDL)` 只建表一次。
+- **退出刷屏**:`ConnectionPool(open=True)` 与 worker 线程成环 → 池活到解释器关闭 →
+  `__del__` join 线程抛 `cannot join current thread`(无害但每池刷一次)。`get_pool`
+  登记池,`atexit` 退出前显式 `close()`,此后 `__del__` 空转。
+
+**fork 安全**:缓存键带 pid,子进程 pid 不同 → 自建自己的池;`register_at_fork`
+在子进程清空缓存/登记表(丢弃继承自父进程、worker 线程已不存活的池对象);`atexit`
+只关本进程建的池(`ops check` worker 各自建、各自关)。行为测试
+`tests/test_pg_pool_cleanup.py`(假池,无需 PG:去重 / ensure_schema 一次 / pid 过滤 /
+fork 重置)。**剩余**:DDL 彻底滚出 store `__init__`、`max_size` 参数化,见
+`docs/factor-aggregate-plan.md` 阶段 1。
 
 ## Info (`info/`)
 

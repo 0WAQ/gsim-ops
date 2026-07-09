@@ -1,9 +1,7 @@
 """PostgreSQL 实现 factor_info store."""
 from datetime import datetime
 
-from psycopg_pool import ConnectionPool
-
-from ops.infra.pg import track_pool
+from ops.infra.pg import ensure_schema, get_pool
 
 from .base import FactorInfo, InfoStore
 
@@ -24,14 +22,12 @@ class PostgresInfoStore(InfoStore):
     """factor_info 表的 Postgres 实现。"""
 
     def __init__(self, conninfo: str):
-        self.pool = ConnectionPool(conninfo, min_size=1, max_size=10, open=True)
-        track_pool(self.pool)
+        self.pool = get_pool(conninfo)
         self._init_schema()
 
     def _init_schema(self):
-        """幂等创建表和索引。"""
-        with self.pool.connection() as conn:
-            conn.execute(_SCHEMA)
+        """幂等创建表和索引(每个 pool 只跑一次)。"""
+        ensure_schema(self.pool, _SCHEMA)
 
     def get(self, name: str) -> FactorInfo | None:
         with self.pool.connection() as conn:
