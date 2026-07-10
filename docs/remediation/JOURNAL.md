@@ -1102,3 +1102,9 @@ pnl_manual 池 —— bcorr 池存量鬼影挂账再次现形(审计 snippet 已
 `ops/main.py::SUBPARSER_REGISTRARS` 模块级单一正主,main 与测试共同迭代它,
 测试只钉"哪 10 个是写命令"这一个真正的决策。门禁终态:51 passed、7/7 契约、
 pyright 0。
+
+**160 验证收官(第三轮,2026-07-10)**:phase3b(c280b18)按 P2P3 手册复跑
+阶段 1/2/4 全绿 —— 106 passed / e2e 6 passed / 金丝雀 4a-4g 与第二轮**逐位一致**
+(4a stamped=t、4b 连接数 1、4c 回收+归因+产物策略、4d approve、4e rm 三表零行、
+4f cancel 级联零孤儿)。archive/recall/unstage 收编与 S16 的行为等价性获生产
+实证;合 main 前置齐备。
