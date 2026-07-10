@@ -148,3 +148,39 @@ def test_prepare_failure_is_loud(json_config, write_factor, fake_checkers, monke
     assert "unexpected" in (rec.check_history[-1].fail_reason or "")
     assert call_log == []  # checker 未被调到
     assert (config.staging / "AlphaWbaiPrep").exists()
+
+
+def test_identity_divergence_refused_before_state(json_config, write_factor,
+                                                  fake_checkers):
+    """staging 目录名 != XML @id → run_one 在任何状态写入前整单拒绝(P2 guard)。
+
+    发散场景(手工放置 / 中断 submit 的 stale XML)下,归档的 rmtree 锚定 @id、
+    staging 原物锚定目录名 —— 若不拒绝,to_lib 会 rmtree alpha_src/<@id>,即
+    **另一个在库因子的唯一源码**(FactorPaths 迁移对抗评审确认的缺陷)。守卫必须
+    在 _ensure_record / transition 之前:否则光是"跑一下"就会把 @id 撞名的在库
+    因子状态打成 CHECKING。
+    """
+    cfg_path, config = json_config
+    d = write_factor(config, name="AlphaWbaiImposter")
+    # 篡改 XML,@id 指向另一个在库因子(目录名保持 Imposter → 身份发散)
+    xml = d / "Config.AlphaWbaiImposter.xml"
+    xml.write_text(xml.read_text().replace("AlphaWbaiImposter", "AlphaWbaiVictim"))
+    # 受害者:在库因子的唯一源码
+    victim_src = config.alpha_src / "AlphaWbaiVictim"
+    victim_src.mkdir(parents=True)
+    (victim_src / "AlphaWbaiVictim.py").write_text("# 唯一源码,不可被误删")
+
+    checkers, call_log = fake_checkers(fail_stage=None)  # 全 pass,守卫先于一切
+    from ops.services.check.check import CheckerPipeline
+    pipe = CheckerPipeline(users=None, config_path=cfg_path,
+                           factor="AlphaWbaiImposter", checkers=checkers)
+    assert len(pipe.metadatas) == 1
+    ret = pipe.run_one(pipe.metadatas[0], 0, queue.Queue())
+
+    assert ret == "error"
+    assert call_log == []                                    # 一个 stage 都没跑
+    store = default_store(config)
+    assert store.get("AlphaWbaiVictim") is None              # 零状态写入
+    assert store.get("AlphaWbaiImposter") is None
+    assert (victim_src / "AlphaWbaiVictim.py").exists()      # 受害者毫发无损
+    assert d.exists()                                        # staging 原物保留

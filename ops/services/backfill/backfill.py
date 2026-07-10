@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from ops.core.factormeta import FactorMeta
+from ops.core.paths import META_FILENAME
 from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
 from ops.infra.info import FactorInfo, default_info_store
@@ -9,8 +10,6 @@ from ops.services.list.datasource import _build_npy_index
 from ops.services.submit.parser import parse_factor
 from ops.utils.clock import now_iso
 from ops.utils.printer import banner, bottom, error, info
-
-META_FILENAME = "meta.json"
 
 
 def _iter_alpha_src(config: Config) -> list[Path]:

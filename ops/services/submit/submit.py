@@ -1,6 +1,7 @@
 import shutil
 from pathlib import Path
 
+from ops.core.paths import META_FILENAME, FactorPaths
 from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
 from ops.infra.info import FactorInfo, default_info_store
@@ -14,8 +15,6 @@ from ops.utils.printer import banner, bottom, error, info, progress, warn
 
 from .normalize import normalize_factor_xml
 from .parser import parse_factor
-
-META_FILENAME = "meta.json"
 
 
 def _iter_dropbox_dirs(config: Config, users: list[str], start: str, end: str,
@@ -53,7 +52,7 @@ def _copy_one_to_staging(config: Config, src: Path) -> Path:
     `ops clear`). We warn and overwrite rather than fail.
     """
     config.staging.mkdir(parents=True, exist_ok=True)
-    dst = config.staging / src.name
+    dst = FactorPaths.of(src.name, config).staging
     if dst.exists():
         warn(f"  ⚠  {dst.name} staging 已存在(疑似 parse 失败遗留的 orphan),覆盖重写")
         shutil.rmtree(dst)

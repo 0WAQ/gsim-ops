@@ -19,6 +19,7 @@
 """
 import shutil
 
+from ops.core.paths import FactorPaths
 from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
 from ops.infra.info import default_info_store
@@ -39,7 +40,7 @@ def _ineligible_reason(rec: FactorRecord, force: bool, config: Config) -> str | 
         return f"status={rec.status.value}"
     if rec.entered_at:
         return "曾入库(entered_at 非空),staging 或为唯一源码"
-    if (config.alpha_src / rec.name).exists():
+    if FactorPaths.of(rec.name, config).src.exists():
         # cancel 的前提"SUBMITTED 无产物"只对纯新提交成立。曾被 check 归档过的
         # 因子(如 REJECTED 后 submit --overwrite 召回)在 alpha_src 有归档,
         # late-stage 拒绝还留有 pnl/dump —— 只删记录会把这些产物变成任何命令都
@@ -75,7 +76,7 @@ def _resolve_targets(args, store, info_store, config: Config) -> tuple[list[Fact
             error(f"  ✘ {name} 曾入库(entered_at={rec.entered_at}),staging 里可能是"
                   f"唯一源码副本,拒绝 cancel;要彻底删除用 ops rm,要重新入库跑 ops check")
             return [], []
-        if (config.alpha_src / name).exists():
+        if FactorPaths.of(name, config).src.exists():
             error(f"  ✘ {name} 在 alpha_src 有归档产物(曾被 check 归档,如 REJECTED"
                   f" 后重提),cancel 只删记录会留下孤儿产物;要彻底删除用 ops rm")
             return [], []
@@ -130,7 +131,7 @@ def _print_plan(targets: list[FactorRecord],
 
 
 def _cancel_one(name: str, config: Config, store, info_store) -> None:
-    staging_dir = config.staging / name
+    staging_dir = FactorPaths.of(name, config).staging
 
     # 先删 staging,再删 state — 崩在中间留下 orphan state record(SUBMITTED、无文件)。
     # 不再自动清理(reconcile 已下线),但 ops check 按 staging 目录扫描,该 orphan 不影响

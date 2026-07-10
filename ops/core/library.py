@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ops.core.paths import META_FILENAME, FactorPaths
+
 if TYPE_CHECKING:
     # 仅类型引用:core 不得运行期依赖 infra(import-linter C1)。Config 实例由
     # 调用方构造后传入。
@@ -105,7 +107,7 @@ class LibraryScanner:
         return None, None
 
     def _read_delay(self, factor_dir: Path) -> int | None:
-        meta_path = factor_dir / "meta.json"
+        meta_path = factor_dir / META_FILENAME
         if not meta_path.exists():
             return None
         try:
@@ -125,23 +127,17 @@ class LibraryScanner:
                 continue
 
             name = factor_dir.name
-            author = self._parse_author(name)
-            dump_path = self.alpha_dump / name
-            pnl_path = self.alpha_pnl / name
-            has_pnl = pnl_path.exists()
-            dump_days = self._count_dump_days(dump_path)
-            delay = self._read_delay(factor_dir)
-
+            fp = FactorPaths.of(name, self.config)
             factors.append(
                 ScannedFactor(
                     name=name,
-                    author_guess=author,
+                    author_guess=self._parse_author(name),
                     src_path=factor_dir,
-                    dump_path=dump_path,
-                    pnl_path=pnl_path,
-                    has_pnl=has_pnl,
-                    dump_days=dump_days,
-                    delay=delay,
+                    dump_path=fp.dump,
+                    pnl_path=fp.pnl,
+                    has_pnl=fp.pnl.exists(),
+                    dump_days=self._count_dump_days(fp.dump),
+                    delay=self._read_delay(factor_dir),
                 )
             )
 
@@ -154,26 +150,22 @@ class LibraryScanner:
 
     def get(self, name: str) -> ScannedFactor | None:
         """单因子现场 stat(便宜:只碰该因子的 src/dump/pnl 路径)。"""
-        src_path = self.alpha_src / name
-        if not src_path.exists():
+        fp = FactorPaths.of(name, self.config)
+        if not fp.src.exists():
             return None
-
-        dump_path = self.alpha_dump / name
-        pnl_path = self.alpha_pnl / name
 
         return ScannedFactor(
             name=name,
             author_guess=self._parse_author(name),
-            src_path=src_path,
-            dump_path=dump_path,
-            pnl_path=pnl_path,
-            has_pnl=pnl_path.exists(),
-            dump_days=self._count_dump_days(dump_path),
+            src_path=fp.src,
+            dump_path=fp.dump,
+            pnl_path=fp.pnl,
+            has_pnl=fp.pnl.exists(),
+            dump_days=self._count_dump_days(fp.dump),
         )
 
     def get_dump_date_range(self, name: str) -> tuple[str | None, str | None]:
-        dump_path = self.alpha_dump / name
-        return self._get_dump_date_range(dump_path)
+        return self._get_dump_date_range(FactorPaths.of(name, self.config).dump)
 
     def filter_by_author(
         self, factors: list[ScannedFactor], author: str

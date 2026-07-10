@@ -1,6 +1,7 @@
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+from ops.core.paths import FactorPaths
 from ops.infra.config import Config
 from ops.infra.gsim.runner import BacktestError, Runner
 from ops.infra.lock import FactorLocked, factor_lock
@@ -82,7 +83,7 @@ def _run_one_locked(factor_dir: Path, config: Config,
         info(f"  ✔  {name} backtest passed")
 
         # Run simsummary
-        pnl_file = config.alpha_pnl / name
+        pnl_file = FactorPaths.of(name, config).pnl
         if pnl_file.exists():
             metrics = Runner.run_simsummary(pnl_file, config)
             if metrics:

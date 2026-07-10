@@ -211,7 +211,7 @@ AlphaXxx/
 | 时间戳格式 | `ops/utils/clock.py::now_iso` | |
 | 状态值 | `FactorStatus` 枚举 | 与 DB CHECK 约束同一提交改 |
 | 依赖分层规则 | pyproject `[tool.importlinter]`(enforcing)+ `contracts-baseline.toml`(C2/C3 ratchet) | 2026-07-09 已进 CI |
-| ⚠ 盘面布局(src/pnl/dump/feature/staging) | 待建 `FactorPaths`,今散布 40+ 处 | 聚合工程阶段 1 |
+| 盘面布局(src/pnl/dump/feature/staging/池副本/meta.json) | `ops/core/paths.py::FactorPaths` | 2026-07-09 收编(40+ 处拼接清零) |
 | ⚠ 写命令集(sudo 提权名单) | `infra/sudo.py::WRITE_COMMANDS` 手抄 | 待从命令注册派生(S16) |
 | ⚠ metric 表达式 | snapshot `_METRIC_EXPR` 与 list 镜像 | 待注册表(S8) |
 

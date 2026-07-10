@@ -17,6 +17,7 @@ syntax error 都会触发。
 import shutil
 from pathlib import Path
 
+from ops.core.paths import FactorPaths
 from ops.infra.config import Config
 from ops.infra.store import default_store
 from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
@@ -46,7 +47,7 @@ def _resolve_targets(args, config: Config, store) -> tuple[list[Path], list[tupl
         return [], []
 
     if name:
-        d = config.staging / name
+        d = FactorPaths.of(name, config).staging
         if not d.exists():
             error(f"  ✘ staging/{name}/ 不存在")
             return [], []

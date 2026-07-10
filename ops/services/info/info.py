@@ -4,6 +4,7 @@ from rich.console import Console
 from rich.tree import Tree
 
 from ops.core.library import LibraryScanner
+from ops.core.paths import FactorPaths
 from ops.infra.config import Config
 from ops.infra.info import default_info_store
 from ops.infra.snapshot import default_snapshot_store
@@ -48,10 +49,11 @@ def run_info(args):
     status_str = rec.status.value if rec else "?(无 state 记录)"
     tree = Tree(f"[bold cyan]Factor: {name}[/]  [dim](author: {info.author or '?'}, status: {status_str})[/]")
 
+    fp = FactorPaths.of(name, config)
     paths = tree.add("[yellow]Paths[/]")
-    paths.add(_kv("Source:", config.alpha_src / name if factor is None else factor.src_path))
-    paths.add(_kv("Dump:",   config.alpha_dump / name))
-    paths.add(_kv("PNL:",    config.alpha_pnl / name))
+    paths.add(_kv("Source:", fp.src if factor is None else factor.src_path))
+    paths.add(_kv("Dump:",   fp.dump))
+    paths.add(_kv("PNL:",    fp.pnl))
 
     stats = tree.add("[yellow]Statistics[/]")
     if factor is None:

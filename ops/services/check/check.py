@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ops.core.alpha.metadata import AlphaMetadata
 from ops.core.factormeta import FactorMeta
+from ops.core.paths import META_FILENAME, FactorPaths
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 from ops.infra.config import Config
 from ops.infra.gsim.runner import Runner
@@ -83,7 +84,7 @@ class CheckerPipeline:
 
         candidates: list[Path] = []
         if factor_name is not None:
-            d = staging / factor_name
+            d = FactorPaths.of(factor_name, self.config).staging
             if d.is_dir():
                 candidates.append(d)
         else:
@@ -93,7 +94,7 @@ class CheckerPipeline:
 
         mds: list[AlphaMetadata] = []
         for factor_dir in candidates:
-            meta_path = factor_dir / "meta.json"
+            meta_path = factor_dir / META_FILENAME
             if not meta_path.exists():
                 warn(f"  ⚠  {factor_dir.name} 缺少 meta.json,跳过(请先 ops submit)")
                 continue
@@ -183,35 +184,41 @@ class CheckerPipeline:
 
     def to_lib(self, factor: AlphaMetadata):
         clean_pycache(factor.dir)
+        paths = FactorPaths.of(factor.name, self.config)
 
-        src_dst = self.config.alpha_src / factor.dir.name
-        if src_dst.exists():
-            shutil.rmtree(src_dst)
-        shutil.move(factor.dir, self.config.alpha_src)
-        rewrite_module_path(src_dst)
+        # 兜底断言(第一道闸在 run_one 入口):下方 rmtree/move/rewrite 三步共用
+        # paths.src(键=@id)锚点,其正确性依赖 目录名 == @id。发散时 rmtree 删的
+        # 是"另一个因子",绝不能带病归档 —— 抛错走 unexpected 臂 revert SUBMITTED。
+        if factor.dir.name != factor.name:
+            raise RuntimeError(
+                f"identity divergence: staging dir {factor.dir.name!r}"
+                f" != XML @id {factor.name!r}, refuse to archive")
 
-        dump_dst = self.config.alpha_dump / factor.alpha_dir.name
-        if dump_dst.exists():
-            shutil.rmtree(dump_dst)
-        shutil.move(factor.alpha_dir, self.config.alpha_dump)
+        if paths.src.exists():
+            shutil.rmtree(paths.src)
+        shutil.move(factor.dir, paths.src)
+        rewrite_module_path(paths.src)
 
-        # alpha_pnl/<name> 是单文件(根 CLAUDE.md 明文警告的 Errno 20 反模式):
-        # restage 保留 pnl → re-archive 时此处必有旧文件,rmtree 对文件抛
-        # NotADirectoryError(full-review 第一部分 1.2)。目录形态只可能是远古残留。
-        pnl_dst = self.config.alpha_pnl / factor.name
-        if pnl_dst.is_dir():
-            shutil.rmtree(pnl_dst)
-        elif pnl_dst.exists():
-            pnl_dst.unlink()
-        shutil.move(factor.pnl_file, pnl_dst)
+        if paths.dump.exists():
+            shutil.rmtree(paths.dump)
+        shutil.move(factor.alpha_dir, paths.dump)
+
+        # alpha_pnl/<name> 是单文件(FactorPaths 布局事实):restage 保留 pnl →
+        # re-archive 时此处必有旧文件,rmtree 对文件抛 NotADirectoryError
+        # (full-review 第一部分 1.2)。目录形态只可能是远古残留。
+        if paths.pnl.is_dir():
+            shutil.rmtree(paths.pnl)
+        elif paths.pnl.exists():
+            paths.pnl.unlink()
+        shutil.move(factor.pnl_file, paths.pnl)
 
         # 按因子来源 (discovery_method) 把 pnl 额外分流一份到 pnl_automated / pnl_manual。
-        # factor.pnl_file 此时已被 move 走,从入库后的 pnl_dst 拷。pnl 是单文件,copy2。
-        bucket = {"automated": self.config.pnl_automated,
-                  "manual": self.config.pnl_manual}.get(factor.discovery_method or "")
+        # factor.pnl_file 此时已被 move 走,从入库后的 paths.pnl 拷。pnl 是单文件,copy2。
+        bucket = {"automated": paths.pool_automated,
+                  "manual": paths.pool_manual}.get(factor.discovery_method or "")
         if bucket is not None:
-            bucket.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(pnl_dst, bucket / factor.name)
+            bucket.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(paths.pnl, bucket)
         else:
             logger.warning("discovery_method 缺失/非法, 跳过 pnl 分流 factor={} value={}",
                            factor.name, factor.discovery_method)
@@ -224,11 +231,11 @@ class CheckerPipeline:
 
         # alpha_src: 从 staging 复制一份(REJECTED 与 ACTIVE 的 src 都在 alpha_src,
         # 状态靠 state 区分,不靠目录位置)
-        src_dst = self.config.alpha_src / factor.name
-        if src_dst.exists():
-            shutil.rmtree(src_dst)
-        shutil.copytree(factor.dir, src_dst)
-        rewrite_module_path(src_dst)
+        paths = FactorPaths.of(factor.name, self.config)
+        if paths.src.exists():
+            shutil.rmtree(paths.src)
+        shutil.copytree(factor.dir, paths.src)
+        rewrite_module_path(paths.src)
 
         # 产物保留策略由 Stage 表的 keep_artifacts_on_fail 声明:
         # 晚期 stage(compliance/correlation)数据完整,保留 pnl + dump 供分析;
@@ -236,18 +243,15 @@ class CheckerPipeline:
         if failed_stage in KEEP_ARTIFACTS_STAGES:
             # 保留 pnl
             if factor.pnl_file.exists():
-                shutil.copy2(factor.pnl_file, self.config.alpha_pnl / factor.name)
+                shutil.copy2(factor.pnl_file, paths.pnl)
             # 保留 dump
-            dump_src = self.config.alpha_dump / factor.alpha_dir.name
-            if factor.alpha_dir.exists() and not dump_src.exists():
-                shutil.move(str(factor.alpha_dir), str(dump_src))
+            if factor.alpha_dir.exists() and not paths.dump.exists():
+                shutil.move(str(factor.alpha_dir), str(paths.dump))
         else:
             # checkbias/checkpoint: 清掉 dump + feature(短期数据不完整)
-            dump_dir = self.config.alpha_dump / factor.name
-            if dump_dir.exists():
-                shutil.rmtree(dump_dir)
-            for v in ("v1", "v2"):
-                f = self.config.alpha_feature / f"{factor.name}.{v}.npy"
+            if paths.dump.exists():
+                shutil.rmtree(paths.dump)
+            for f in paths.features:
                 if f.exists():
                     f.unlink()
 
@@ -259,7 +263,7 @@ class CheckerPipeline:
             return
         # state record 缺失（crash 恢复 / 直接 check staging 未经 submit）时补建。
         # 三表结构：author/discovery_method 写 factor_info，状态机字段写 factor_state。
-        meta_path = factor.dir / "meta.json"
+        meta_path = factor.dir / META_FILENAME
         author = factor.key.user
         discovery_method = factor.discovery_method
         submitted_at = now_iso()
@@ -294,6 +298,20 @@ class CheckerPipeline:
         can render them. The return string is also still consumed by the
         parent for counter accumulation.
         """
+        # 身份不变量:staging 目录名必须等于 XML @id(submit 的 normalize_factor_xml
+        # 强制 @id := 目录名)。发散时(手工放置 / 中断 submit 留下的 stale XML)
+        # state/lock/归档落点全键在 @id 上,而 staging 原物键在目录名上 —— 归档会
+        # rmtree alpha_src/<@id>,那可能是**另一个在库因子的唯一源码**。必须在任何
+        # 状态写入(_ensure_record/transition)之前整单拒绝;残留由人工重新
+        # ops submit(或 ops clear)处理。
+        if factor.dir.name != factor.name:
+            logger.error(
+                "身份发散拒绝 check: staging 目录 {} != XML @id {} "
+                "(stale/手工 XML;重新 ops submit 以恢复 @id := 目录名 的不变量)",
+                factor.dir.name, factor.name)
+            q.put(("done", factor.name, "error",
+                   f"! 目录名 {factor.dir.name} != @id {factor.name}", "red"))
+            return "error"
         try:
             with factor_lock(factor.name, self.config):
                 return self._run_one_locked(factor, q)

@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ops.core.paths import FactorPaths
 from ops.infra.config import Config
 from ops.infra.lock import FactorLocked, factor_lock
 from ops.utils.log import logger
@@ -38,16 +39,16 @@ def load_universe(nio_data_path: Path) -> tuple[np.ndarray, np.ndarray, dict[int
     return dates, ins, {int(d): i for i, d in enumerate(dates)}
 
 
-def _read_delay(name: str, alpha_src: Path) -> int:
+def _read_delay(paths: FactorPaths) -> int:
     """Read delay from meta.json. Defaults to 1 (legacy assumption) if missing/unreadable."""
-    meta = alpha_src / name / "meta.json"
+    meta = paths.src_meta
     if not meta.exists():
-        warn(f"{name} meta.json 缺失,默认 delay=1")
+        warn(f"{paths.name} meta.json 缺失,默认 delay=1")
         return 1
     try:
         return int(json.loads(meta.read_text()).get("delay", 1))
     except Exception as e:
-        warn(f"{name} 读取 delay 失败 ({e}),默认 delay=1")
+        warn(f"{paths.name} 读取 delay 失败 ({e}),默认 delay=1")
         return 1
 
 
@@ -99,7 +100,7 @@ def _atomic_write_memmap(target: Path, ram: np.ndarray) -> None:
         raise
 
 
-def verify_sample(name: str, factor_dump_dir: Path, alpha_feature: Path,
+def verify_sample(paths: FactorPaths,
                   date_to_idx: dict[int, int], shape: tuple[int, int],
                   delay: int) -> None:
     """Pick up to VERIFY_SAMPLES random dates that have source files, compare
@@ -107,7 +108,7 @@ def verify_sample(name: str, factor_dump_dir: Path, alpha_feature: Path,
     any mismatch.
     """
     offset = _offset_for_delay(delay)
-    candidates = [c for c in _iter_date_files(factor_dump_dir)
+    candidates = [c for c in _iter_date_files(paths.dump)
                   if (di := date_to_idx.get(c[0])) is not None
                   and 0 <= di + offset < shape[0]]
     if not candidates:
@@ -119,14 +120,14 @@ def verify_sample(name: str, factor_dump_dir: Path, alpha_feature: Path,
         for date, version, src_path in picks:
             di = date_to_idx[date] + offset
             if version not in mms:
-                mms[version] = np.memmap(alpha_feature / f"{name}.{version}.npy",
+                mms[version] = np.memmap(paths.feature(version),
                                          mode="r", shape=shape, dtype=DTYPE)
             src = np.load(src_path)
             row = np.array(mms[version][di, :src.shape[0]])
             diff = np.abs(np.where(np.isnan(src) & np.isnan(row), 0.0, src - row))
             if not np.all(diff < ATOL):
                 raise AssertionError(
-                    f"sanity check failed: {name} {version} date={date} di={di} "
+                    f"sanity check failed: {paths.name} {version} date={date} di={di} "
                     f"max_diff={float(np.nanmax(diff)):.3e}"
                 )
     finally:
@@ -134,7 +135,7 @@ def verify_sample(name: str, factor_dump_dir: Path, alpha_feature: Path,
             del mm
 
 
-def pack_one(name: str, alpha_dump: Path, alpha_feature: Path,
+def pack_one(paths: FactorPaths,
              date_to_idx: dict[int, int], shape: tuple[int, int],
              delay: int, verify: bool = True) -> None:
     """Full rewrite: build RAM matrix from per-date files, write memmap atomically."""
@@ -142,8 +143,7 @@ def pack_one(name: str, alpha_dump: Path, alpha_feature: Path,
     ram = {v: np.full((L, H), np.nan, dtype=DTYPE) for v in VERSIONS}
     offset = _offset_for_delay(delay)
 
-    factor_dump_dir = alpha_dump / name
-    for date, version, f in _iter_date_files(factor_dump_dir):
+    for date, version, f in _iter_date_files(paths.dump):
         di = date_to_idx.get(date)
         if di is None:
             continue
@@ -153,14 +153,14 @@ def pack_one(name: str, alpha_dump: Path, alpha_feature: Path,
         arr = np.load(f)
         h0 = arr.shape[0]
         if h0 > H:
-            raise ValueError(f"{name} {f.name} H={h0} > pack H={H}")
+            raise ValueError(f"{paths.name} {f.name} H={h0} > pack H={H}")
         ram[version][di, :h0] = arr
 
     for v in VERSIONS:
-        _atomic_write_memmap(alpha_feature / f"{name}.{v}.npy", ram[v])
+        _atomic_write_memmap(paths.feature(v), ram[v])
 
     if verify:
-        verify_sample(name, factor_dump_dir, alpha_feature, date_to_idx, shape, delay)
+        verify_sample(paths, date_to_idx, shape, delay)
 
 
 def pack_one_incremental(name: str, dates: list[int], config: Config) -> None:
@@ -170,22 +170,20 @@ def pack_one_incremental(name: str, dates: list[int], config: Config) -> None:
     nio = load_universe(config.nio_data_path)
     universe_dates, instruments, date_to_idx = nio
     shape = (PACK_L, len(instruments))
-    delay = _read_delay(name, config.alpha_src)
+    paths = FactorPaths.of(name, config)
+    delay = _read_delay(paths)
 
-    v1 = config.alpha_feature / f"{name}.v1.npy"
-    v2 = config.alpha_feature / f"{name}.v2.npy"
-    if not v1.exists() or not v2.exists():
-        pack_one(name, config.alpha_dump, config.alpha_feature, date_to_idx, shape, delay)
+    if not all(f.exists() for f in paths.features):
+        pack_one(paths, date_to_idx, shape, delay)
         return
 
-    factor_dump_dir = config.alpha_dump / name
     wanted = set(dates) if dates else None
     offset = _offset_for_delay(delay)
 
-    mms = {v: np.memmap(config.alpha_feature / f"{name}.{v}.npy",
+    mms = {v: np.memmap(paths.feature(v),
                         mode="r+", shape=shape, dtype=DTYPE) for v in VERSIONS}
     try:
-        for date, version, f in _iter_date_files(factor_dump_dir):
+        for date, version, f in _iter_date_files(paths.dump):
             if wanted is not None and date not in wanted:
                 continue
             di = date_to_idx.get(date)
@@ -213,18 +211,19 @@ def _list_dump_factors(alpha_dump: Path) -> list[str]:
                   if d.is_dir() and d.name.startswith("Alpha"))
 
 
-def _is_packed(name: str, alpha_feature: Path) -> bool:
-    return (alpha_feature / f"{name}.v1.npy").exists() and \
-           (alpha_feature / f"{name}.v2.npy").exists()
+def _is_packed(paths: FactorPaths) -> bool:
+    return all(f.exists() for f in paths.features)
 
 
-def _pack_worker(name: str, alpha_dump: Path, alpha_feature: Path,
+def _pack_worker(paths: FactorPaths,
                  date_to_idx: dict[int, int], shape: tuple[int, int],
                  delay: int, verify: bool, config: Config) -> tuple[str, str, str]:
-    """Returns (name, status, msg). status in {ok, locked, failed}."""
+    """Returns (name, status, msg). status in {ok, locked, failed}.
+    FactorPaths 是冻结 dataclass,可直接 pickle 进 ProcessPool worker。"""
+    name = paths.name
     try:
         with factor_lock(name, config):
-            pack_one(name, alpha_dump, alpha_feature, date_to_idx, shape, delay, verify=verify)
+            pack_one(paths, date_to_idx, shape, delay, verify=verify)
         return (name, "ok", "")
     except FactorLocked:
         return (name, "locked", "held by another process")
@@ -285,7 +284,7 @@ def run_pack(args):
 
     if not force:
         before = len(candidates)
-        candidates = [n for n in candidates if not _is_packed(n, config.alpha_feature)]
+        candidates = [n for n in candidates if not _is_packed(FactorPaths.of(n, config))]
         info(f"扫描 {before} 个因子,跳过已打包 {before - len(candidates)} 个,待处理 {len(candidates)}")
     else:
         info(f"扫描 {len(candidates)} 个因子 (--force)")
@@ -306,9 +305,10 @@ def run_pack(args):
 
     workers = max(1, min(workers, len(candidates)))
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_pack_worker, n, config.alpha_dump, config.alpha_feature,
-                               date_to_idx, shape, _read_delay(n, config.alpha_src), verify, config)
-                   for n in candidates]
+        futures = [pool.submit(_pack_worker, p_,
+                               date_to_idx, shape, _read_delay(p_), verify, config)
+                   for n in candidates
+                   for p_ in (FactorPaths.of(n, config),)]
         total = len(futures)
         for i, fut in enumerate(as_completed(futures), 1):
             name, status, msg = fut.result()

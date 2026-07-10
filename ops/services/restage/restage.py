@@ -23,6 +23,7 @@ SUBMITTED,让下一次 ops check 捡起重跑 7 阶段流水线。version 不变
 import shutil
 from pathlib import Path
 
+from ops.core.paths import FactorPaths
 from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
 from ops.infra.info import default_info_store
@@ -39,11 +40,8 @@ _SUPPORTED_STATUSES = {FactorStatus.ACTIVE, FactorStatus.REJECTED}
 def _locate_source(rec: FactorRecord, config: Config) -> Path | None:
     """按状态定位因子源目录。返回 None 表示无法找到可搬运的源。"""
     name = rec.name
-    if rec.status == FactorStatus.ACTIVE:
-        src = config.alpha_src / name
-        return src if src.exists() else None
-    if rec.status == FactorStatus.REJECTED:
-        src = config.alpha_src / name
+    if rec.status in (FactorStatus.ACTIVE, FactorStatus.REJECTED):
+        src = FactorPaths.of(name, config).src
         return src if src.exists() else None
     return None
 
@@ -124,7 +122,7 @@ def _print_plan(targets: list[FactorRecord],
 def _restage_one(rec: FactorRecord, src: Path, config: Config, store,
                  snapshot_store, purge: bool) -> None:
     name = rec.name
-    dst = config.staging / name
+    dst = FactorPaths.of(name, config).staging
 
     if not src.exists():
         raise FileNotFoundError(f"{src} 不存在")

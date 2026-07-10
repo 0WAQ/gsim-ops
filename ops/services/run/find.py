@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from ops.core.factormeta import FactorMeta
+from ops.core.paths import META_FILENAME
 from ops.infra.config import Config
 
 
@@ -42,7 +43,7 @@ def scan_factors(
     # Filter by submitted_by from meta.json
     filtered: list[tuple[Path, str | None]] = []
     for factor_dir, _ in candidates:
-        meta_path = factor_dir / "meta.json"
+        meta_path = factor_dir / META_FILENAME
         if not meta_path.exists():
             continue
         try:

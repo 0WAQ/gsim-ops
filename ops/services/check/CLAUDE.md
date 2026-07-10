@@ -109,6 +109,17 @@ The delay value is read from the factor's XML: `<Alpha delay="0">`.
 
 `checkbias_checker.py` never mutates the factor's original `.py`. Writes the injected source (firewall code + AST-decorated factor) to `{factor}_firewall.py`, points XML's `Modules.Alpha.@module` at the temp file for the backtest, and restores XML + deletes the temp in `finally`. A crash mid-injection therefore can't leave a half-decorated `.py` that double-decorates next run. AST also guards against pre-existing `@DataFirewall` decorators just in case.
 
+## 身份不变量(2026-07-10)
+
+**staging 目录名 == XML @id** 是 check 全程依赖的不变量(submit 的
+`normalize_factor_xml` 强制 @id := 目录名):state/lock/归档落点全键在 @id,
+staging 原物键在目录名。发散时(手工放置 / 中断 submit 的 stale XML)归档会
+rmtree `alpha_src/<@id>` —— 可能是另一个在库因子的唯一源码。防线两道:
+`run_one` 入口在**任何状态写入前**整单拒绝(返回 error,残留重新 ops submit);
+`to_lib` 兜底 RuntimeError(走 unexpected 臂)。to_lib 的 move 落点显式锚定
+`paths.src`/`paths.dump`(与 rmtree/rewrite 同锚点)。用例
+`tests/test_check_routing_json.py::test_identity_divergence_refused_before_state`。
+
 ## State drift & crash recovery
 
 reconcile 已下线(state 共享 PG 后,per-host 本地 `staging` 视图无权裁决全局 state)。
