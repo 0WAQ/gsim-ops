@@ -440,3 +440,71 @@ staging/AlphaWbaiCanary002:  无输出
 **阶段 3b 判读**:archive/recall/unstage 搬运正主收编 `FactorRepository`、S16 写
 命令注册派生后,金丝雀端到端环路(入库/回收/重跑/归档/删除/撤回)行为与
 phase3 第二轮完全一致,无回归。阶段 5(150/144)仍随合 main 后窗口滚存。
+
+---
+
+# 三机滚存(main · rev 4ffa4fd)
+
+**执行日期**:2026-07-10
+**背景**:PR #5 + #6 已合 main(阶段 2/3 聚合工程入库)。三机全部切回 main
+统一基线(160 原停在 phase3b,内容等价)。混版本兼容性已判定(PG 三表结构 /
+锁键命名空间 / 状态转移语义零变化),无窗口要求,逐台滚存。
+**执行方式**:160 本机操作,150/144 经 SSH。ops_test 严格串行(160→150→144,
+每台测试跑完再动下一台,U1 教训)。
+**结论**:**三机全绿**。rev 一致、fast suite 一致、Total 一致。
+
+## 三机 rev(`git log --oneline -1`,预期一致)
+
+```
+160 (server-160):            4ffa4fd Merge pull request #6 from 0WAQ/claude/factor-aggregate-phase3b
+150 (server-150):            4ffa4fd Merge pull request #6 from 0WAQ/claude/factor-aggregate-phase3b
+144 (intel-workstation-144): 4ffa4fd Merge pull request #6 from 0WAQ/claude/factor-aggregate-phase3b
+```
+
+## fast suite 汇总行(`uv run pytest -m "not slow" -q`,PG 可达真跑)
+
+```
+160:  106 passed, 8 skipped, 6 deselected in 2.94s
+150:  106 passed, 8 skipped, 6 deselected in 2.99s
+144:  106 passed, 8 skipped, 6 deselected in 48.07s   (PG 组走 10.6→10.9 跨段路由,慢于 IDC 内部属预期)
+```
+
+## Total 对照(`ops list | tail -1`,预期一致)
+
+```
+160:  Total: 8252 factors
+150:  Total: 8252 factors
+144:  Total: 8252 factors
+```
+
+三机 `ops info AlphaWbaiReversal` / `ops status AlphaWbaiReversal`(本次重写的读
+路径)均正常显示,status=rejected、author=wbai、metrics 快照一致。
+
+## lint 门禁(160 顺带一次)
+
+```
+uv run lint-imports → Contracts: 7 kept, 0 broken.
+```
+
+## 144 WAN 耗时(10.6 办公网 → 10.9/10.12 IDC,跨段路由)
+
+```
+git checkout main + pull:  6s
+uv sync + tool install:    71s   (UV_HTTP_TIMEOUT=180)
+fast suite:                50s   (含 PG 组跨段)
+只读 list/info/status:     12s
+```
+
+均在可接受范围,无超时。
+
+## 附:150/144 入口提示
+
+`uv tool install --editable . --force` 后 `~/.local/bin` 不在两台非交互 shell 的
+PATH 中(warning: `is not on your PATH`),验证时用 `export PATH="$HOME/.local/bin:$PATH"`
+或 `uv run ops`。仅执行提示,非缺陷。
+
+## 三机滚存判读
+
+三机 rev / fast suite / Total 全部一致,聚合工程阶段 2/3 在 main 上三机对齐。
+混版本兼容性判定得到实证(150/144 从旧 main `8455a66` 直升 `4ffa4fd`,读路径与
+测试全绿)。滚存收官,聚合工程剩两个小收官件(8 命令行数核对 + S8 list 内存镜像)。
