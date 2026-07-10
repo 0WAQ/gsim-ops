@@ -1,7 +1,6 @@
 import argparse
-from pathlib import Path
 
-from ops.infra.config import get_default_config_path
+from ops.cli.common import add_config_arg
 from ops.services.run.run import run_factors
 
 
@@ -23,6 +22,6 @@ Example:
     parser.add_argument("--end-date", "-e", type=str, default="20251231", help="backtest end date (default: 20251231)")
     # --pack 已删除:epilog 宣传 "run + pack" 但服务层从未读取该 dest(no-op 谎言,
     # full-review 第三部分 V 表)。要打包用独立的 ops pack。
-    parser.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
+    add_config_arg(parser)
 
     parser.set_defaults(func=run_factors)

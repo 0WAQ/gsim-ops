@@ -70,7 +70,7 @@ _OUTCOME_COUNTER = {
 
 
 @dataclass
-class FactorRow:
+class LiveRow:
     idx: int                    # 1-based for display
     name: str
     stages: dict[str, Status]   # full pipeline state, kept for is_in_flight()
@@ -92,17 +92,17 @@ class FactorRow:
         return not self.is_done() and any(s is not Status.PENDING for s in self.stages.values())
 
 
-def make_factor_rows(names: list[str], stages: tuple[str, ...]) -> dict[str, FactorRow]:
+def make_factor_rows(names: list[str], stages: tuple[str, ...]) -> dict[str, LiveRow]:
     """Build the initial rows dict (all stages PENDING)."""
     return {
-        name: FactorRow(idx=i + 1, name=name,
+        name: LiveRow(idx=i + 1, name=name,
                         stages={s: Status.PENDING for s in stages})
         for i, name in enumerate(names)
     }
 
 
 class LiveDriver:
-    def __init__(self, rows: dict[str, FactorRow],
+    def __init__(self, rows: dict[str, LiveRow],
                  q,
                  futures: list[Future],
                  stages: tuple[str, ...],
@@ -117,7 +117,7 @@ class LiveDriver:
         self.recent_done_window = recent_done_window
         self.refresh_per_second = refresh_per_second
 
-        self._recent: deque[FactorRow] = deque(maxlen=recent_done_window)
+        self._recent: deque[LiveRow] = deque(maxlen=recent_done_window)
         self._counts = {"pass": 0, "fail": 0, "error": 0, "locked": 0}
 
     # ---- event handling ----------------------------------------------------
@@ -214,7 +214,7 @@ class LiveDriver:
             ("  pending ", "dim"), (f"{pending}", "dim"),
         )
 
-    def _build_subtable(self, rows: list[FactorRow], title: str | None = None) -> Table:
+    def _build_subtable(self, rows: list[LiveRow], title: str | None = None) -> Table:
         t = Table(box=box.SIMPLE_HEAD, header_style="bold cyan",
                   pad_edge=False, show_header=True, title=title,
                   title_justify="left", title_style="bold")
@@ -300,4 +300,4 @@ class LiveDriver:
         return tuple(self._counts[k] for k in ("pass", "fail", "error", "locked"))
 
 
-__all__ = ["Status", "FactorRow", "LiveDriver", "make_factor_rows"]
+__all__ = ["Status", "LiveRow", "LiveDriver", "make_factor_rows"]

@@ -16,7 +16,7 @@ metadata:
 
 **其它生命周期命令**:approve(REJECTED→ACTIVE 的数据覆盖多样性人工豁免,不重跑)、cancel(撤回未入库 SUBMITTED,删 staging + 硬删 state)、clear(清 staging crash 孤儿)、rm(彻底硬删已入库因子,删 factor_info 级联 state+snapshot,不可逆,无墓碑)。
 
-**注 (2026-07-06 三表重构)**: metrics/datasources/bcorr 语义从"可 `ops refresh` 重算的最新表现"变为"入库时不可变快照";`ops refresh` 命令**已删除**。因子数据落三张 PG 表 (factor_info/state/snapshot)。restage/cancel/approve 批量模式 (`-u`) 先从 info_store 取 author 集合再与 state 交集 (因 FactorRecord 已无 author 字段)。详见 [[project_factor_library_storage_architecture]]。
+批量模式(restage/approve 阶段 2、cancel/status/pack 阶段 3 起)统一走 `repo.find(author=..., status=..., include_submitted=...)` 单条三表 JOIN(原 info_store 取 author 集合再与 state 交集的两次查已退役)。
 
 **How to apply:** 改这条线记住:submit 一个命令管新提交+覆盖(--overwrite);restage 管原代码召回;两者终点都是 SUBMITTED@staging 等 check。别再提 resubmit/recheck。
 

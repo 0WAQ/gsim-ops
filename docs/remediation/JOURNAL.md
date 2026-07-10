@@ -1016,3 +1016,45 @@ CI 常跑 + PG 组 5 用例待 160)。
    UndefinedTable。修:`gsim_available` 探测通过后 `ensure_schemas`。
 新用例 4 个(typo 比较符 / glob 预筛纯度 / 前置段崩溃发 done / 全 PENDING
 解锁)。门禁终态:46 passed、契约 6/6 KEPT、C2=18 持平、pyright 0。
+
+## U5 · Wave5 阶段 3 第一批:cli 接缝 + 7/7 契约 enforcing,ratchet 退役(2026-07-09)
+
+分支 `claude/factor-aggregate-phase3`(基于阶段 2 tip)。
+
+**C2 清零转 enforcing**:18 条边(14× `get_default_config_path` 手抄 + 4×
+FactorStatus choices)收敛到 `ops/cli/common.py` 单一接缝(re-export
+FactorStatus + STATUS_CHOICES + add_config_arg),pyproject 契约定点 ignore
+common 两条 import —— 其余 cli 文件再碰 infra/core 即红。**至此 7/7 契约全部
+enforcing**,ratchet 基建(contracts-baseline.toml + scripts/ci/import_baseline.py
++ CI step)完成历史使命,物理删除。
+
+**命令塌缩(第一批)**:`find` 加 `include_submitted`("任何记录"语义)后 ——
+status 塌缩到 repo.get / repo.find 单条 JOIN(退役 store.list + info.list 内存
+合并;json 后端单因子模式从"构造 info store 即炸"变为可用);cancel 迁
+Repository,删除从"先 state 再 info"两步改 `repo.delete` 级联一步(崩在两步
+之间泄漏孤儿 info 行的窗口消灭);pack 的 -u/--status 过滤同款塌缩。
+approve/restage/rm/info/list/backfill 已在阶段 2 迁毕。
+
+**类型普查收官**:live_table 的展示类 FactorRow → `LiveRow`(与领域 Factor
+区分);全仓 grep 无 FactorRow / 无扫盘 FactorInfo,12 投影 → 计划内的保留集
+(Factor 三件套 + FactorRecord + AlphaMetadata/FactorMeta/ScannedFactor)。
+
+**顺延**:archive/recall 收编(to_lib/restage 搬运)仍等金丝雀环路在 160 复跑
+通过后做(阶段 3 第二批)—— 归档路径连续改过身份守卫 + repo 迁移,未经生产
+验证前不再叠加改动。**待 160**:PG 组(新增 include_submitted 用例)+ 金丝雀
++ e2e + 三机滚存冒烟。
+
+**对抗评审(阶段 3,14 agent:4 维度 + 逐条证伪)**:确认 4(全 P3)、证伪 1,
+当轮全修:
+1. **find 的 factor_state 边是 INNER JOIN**:"任何记录"语义漏 info 孤儿
+  (info 有行 state 无行 —— register 事务化前的半截写入,7-06 迁移实测 20 个),
+  本批新增的 status/cancel"需对账"分支不可达、docstring"三表 LEFT JOIN"对
+  state 边不实。修:改真 LEFT JOIN + `_row_to_factor` 对 NULL 行产出
+  state=None;缺省因子集判据(`!= 'submitted'` 对 NULL 为假)天然排除孤儿,
+  ops list 不受影响;status 单因子模式对孤儿给显式提示(原打"未找到")。
+  新 PG 用例 `test_pg_find_surfaces_info_orphans`。
+2. pyproject 契约节头注释仍教已删除的 ratchet 流程 → 改述 7/7 enforcing。
+3. plan 附录 A 的"正主"声明仍指 contracts-baseline.toml → 同步。
+4. 提交纪律:8 个文档改动须与代码同批 staged(commit 前 git add -A 兜住)。
+另修 memory 两处漂移(query_factors/内存交集的过时描述,评审与 docs-updater
+双双诊断)。门禁终态:46 passed、7/7 契约 KEPT、pyright 0。

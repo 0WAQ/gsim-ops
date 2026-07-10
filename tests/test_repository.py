@@ -240,3 +240,43 @@ def test_pg_delete_cascades(test_config, seed_factor):
     assert repo.get("AlphaWbaiDel") is None
     assert repo.record("AlphaWbaiDel") is None
     assert repo.delete("AlphaWbaiDel") is False  # 幂等:再删报"不存在"
+
+
+def test_pg_find_include_submitted(test_config, seed_factor):
+    """include_submitted=True = "任何记录"语义(status/cancel/pack 的批量
+    resolve,2026-07-09 阶段 3);显式 status 给定时按其精确过滤,与该开关无关。"""
+    _, config = test_config
+    repo = FactorRepository(config)
+    seed_factor("AlphaWbaiInclA", FactorStatus.ACTIVE, entered_at="2026-07-01T00:00:00")
+    seed_factor("AlphaWbaiInclS", FactorStatus.SUBMITTED)
+
+    assert {f.name for f in repo.find()} == {"AlphaWbaiInclA"}
+    assert {f.name for f in repo.find(include_submitted=True)} == {
+        "AlphaWbaiInclA", "AlphaWbaiInclS"}
+    assert {f.name for f in repo.find(status="submitted", include_submitted=True)} == {
+        "AlphaWbaiInclS"}
+
+
+def test_pg_find_surfaces_info_orphans(test_config):
+    """info 有行、state 无行的孤儿(register 事务化前的半截写入/手工残留)——
+    include_submitted=True 的"任何记录"语义必须让它现形(state=None,status/
+    cancel 渲染"需对账");缺省因子集判据(!= 'submitted' 对 NULL 为假)则
+    天然排除它,ops list 不受影响。评审修正:find 的 factor_state 边原是
+    INNER JOIN,孤儿分支不可达。"""
+    from ops.infra.info import FactorInfo, default_info_store
+
+    _, config = test_config
+    repo = FactorRepository(config)
+    # 只写 info,不写 state —— 制造孤儿
+    default_info_store(config).upsert(FactorInfo(
+        name="AlphaWbaiOrphan", author="wbai", discovery_method="manual",
+        created_at="2026-07-09T00:00:00"))
+
+    assert repo.find() == []                                # 库内因子集不含孤儿
+    orphans = repo.find(include_submitted=True)
+    assert len(orphans) == 1
+    assert orphans[0].name == "AlphaWbaiOrphan"
+    assert orphans[0].state is None                         # 孤儿现形
+    assert orphans[0].identity.author == "wbai"
+    # 显式 status 过滤对 NULL 为假,不误纳
+    assert repo.find(status="submitted", include_submitted=True) == []

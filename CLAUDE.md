@@ -210,7 +210,7 @@ AlphaXxx/
 | stage 身份 / 顺序 / 路由策略 | `services/check/stages.py` 的 `PIPELINE` | 新增 stage = 加一行 |
 | 时间戳格式 | `ops/utils/clock.py::now_iso` | |
 | 状态值 | `FactorStatus` 枚举 | 与 DB CHECK 约束同一提交改 |
-| 依赖分层规则 | pyproject `[tool.importlinter]`(enforcing)+ `contracts-baseline.toml`(C2/C3 ratchet) | 2026-07-09 已进 CI |
+| 依赖分层规则 | pyproject `[tool.importlinter]`(7/7 enforcing;cli 接缝豁免点 `ops/cli/common.py`) | 2026-07-09 进 CI;ratchet 已退役(阶段 3) |
 | 盘面布局(src/pnl/dump/feature/staging/池副本/meta.json) | `ops/core/paths.py::FactorPaths` | 2026-07-09 收编(40+ 处拼接清零) |
 | 因子领域类型 | `ops/core/factor.py::Factor`(identity/state/snapshot 三切面) | 2026-07-09 阶段 2;全库唯一叫"因子"的类型 |
 | 因子记录读写 + 产物清理 | `ops/infra/repository.py::FactorRepository` | find 单条三表 JOIN;register 原子双表写;purge_artifacts 按 ArtifactScope 两面 |

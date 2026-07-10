@@ -1,8 +1,6 @@
 import argparse
-from pathlib import Path
 
-from ops.core.state import FactorStatus
-from ops.infra.config import get_default_config_path
+from ops.cli.common import STATUS_CHOICES, add_config_arg
 from ops.services.pack import run_pack
 
 
@@ -28,12 +26,12 @@ Example:
     # choices 从 FactorStatus 派生:手抄字符串曾与 enum/DB 约束漂移
     # (含 DB 拒收的 decaying/retired,full-review 第三部分 S10)
     parser.add_argument("--status", "-s", type=str, default=None,
-                        choices=[s.value for s in FactorStatus],
+                        choices=list(STATUS_CHOICES),
                         help="按状态过滤")
     parser.add_argument("--force", action="store_true", help="强制重写已打包因子")
     parser.add_argument("--dry-run", action="store_true", help="仅列出待打包因子,不执行")
     parser.add_argument("--no-verify", action="store_true", help="跳过抽样校验")
     parser.add_argument("--workers", "-w", type=int, default=10, help="并行进程数 (默认 10)")
-    parser.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
+    add_config_arg(parser)
 
     parser.set_defaults(func=run_pack)

@@ -21,7 +21,7 @@ Missing/unreadable `meta.json` defaults to `delay=1` with a warning, preserving 
 
 ## Access Paths
 
-1. **Batch CLI** (`ops pack`): scans `alpha_dump/`, skips already-packed unless `--force`, `ProcessPoolExecutor` parallel (default 10 workers), wraps each factor in `factor_lock`
+1. **Batch CLI** (`ops pack`): scans `alpha_dump/`, skips already-packed unless `--force`, `ProcessPoolExecutor` parallel (default 10 workers), wraps each factor in `factor_lock`。`-u`/`--status` 过滤走 `repo.find(author, status, include_submitted=True)` 单条三表 JOIN(2026-07-09 阶段 3,退役 store.list + info.list 内存交集;缺省全状态,显式 `--status` 按其精确过滤)
 2. **Incremental** (`pack_one_incremental`): if target memmap doesn't exist → falls back to full `pack_one`; otherwise opens `mode='r+'` and overwrites only requested date rows. Currently only callable directly or via future `ops pack --date`
 
 ## Atomic Write

@@ -61,8 +61,9 @@ select = ["F", "E7", "I", "UP006", "UP007", "UP035", "UP045", "B006", "B008"]
 # ---------------------------------------------------------------------------
 # import-linter:依赖分层契约(full-review §8.1,factor-aggregate-plan 附录 A)
 # 本节只放**今日全绿、enforcing** 的契约(CI 直接跑 `lint-imports` 红了就挂)。
-# 还有存量违例的 C2/C3 在 contracts-baseline.toml 走 ratchet(只许降不许升,
-# 脚本 scripts/ci/import_baseline.py);清零后并入本节。
+# 2026-07-09 阶段 3 起 7/7 契约全部 enforcing(CI 直接跑 lint-imports,红即挂);
+# ratchet 基线机制(contracts-baseline.toml + scripts/ci/import_baseline.py)
+# 已完成历史使命物理删除(C3 阶段 2 清零、C2 阶段 3 清零)。
 # exclude_type_checking_imports:TYPE_CHECKING 块内的 import 不算依赖 ——
 # core 对 Config 的纯类型引用不构成运行期分层违例(阶段 2 连类型也会摘掉)。
 # ---------------------------------------------------------------------------
@@ -75,6 +76,19 @@ exclude_type_checking_imports = true
 name = "C1 layers: cli -> services -> infra -> core -> utils"
 type = "layers"
 layers = ["ops.cli", "ops.services", "ops.infra", "ops.core", "ops.utils"]
+
+[[tool.importlinter.contracts]]
+# 2026-07-09 阶段 3 清零转 enforcing:18 条边(14× get_default_config_path 手抄
+# + 4× FactorStatus choices)收敛到 ops/cli/common.py 单一接缝,定点 ignore。
+name = "C2 cli must not import infra or core (directly)"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["ops.cli"]
+forbidden_modules = ["ops.infra", "ops.core"]
+ignore_imports = [
+    "ops.cli.common -> ops.infra.config",
+    "ops.cli.common -> ops.core.state",
+]
 
 [[tool.importlinter.contracts]]
 # 2026-07-09 阶段 2 清零转 enforcing(datasource→core ×4、parser→core ×2、

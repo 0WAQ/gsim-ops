@@ -1,8 +1,6 @@
 import argparse
-from pathlib import Path
 
-from ops.core.state import FactorStatus
-from ops.infra.config import get_default_config_path
+from ops.cli.common import STATUS_CHOICES, add_config_arg
 from ops.services.list import run_list
 from ops.utils.utils import LowerAction
 
@@ -33,7 +31,7 @@ Example:
         "-s",
         default=None,
         type=str,
-        choices=[s.value for s in FactorStatus],
+        choices=list(STATUS_CHOICES),
         help="Filter by lifecycle status (e.g., active, rejected)",
     )
     parser.add_argument(
@@ -75,8 +73,6 @@ Example:
         default=None,
         help="Limit output to first N factors",
     )
-    parser.add_argument(
-        "--config-path", "-c", type=Path, default=get_default_config_path()
-    )
+    add_config_arg(parser)
 
     parser.set_defaults(func=run_list)

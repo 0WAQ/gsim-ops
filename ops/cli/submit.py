@@ -1,8 +1,7 @@
 import argparse
 from datetime import datetime
-from pathlib import Path
 
-from ops.infra.config import get_default_config_path
+from ops.cli.common import add_config_arg
 from ops.services.submit import run_submit
 from ops.utils.utils import LowerAction
 
@@ -29,6 +28,6 @@ Example:
         action="store_true",
         help="覆盖已入库的同名因子,提交新代码并 version+1(默认跳过已入库因子)",
     )
-    parser.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
+    add_config_arg(parser)
 
     parser.set_defaults(func=run_submit)

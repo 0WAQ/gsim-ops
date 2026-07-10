@@ -2,7 +2,7 @@
 # 背景:三表重构后 fast suite 曾红 (10 failed) 三周无人察觉 —— 没有 CI,
 # 红测试落分支是无声的。PG 组 (marker: pg) 在 CI 里因 ops_test 不可达自动
 # skip;e2e (marker: slow) 默认排除。ruff/pyright(A1)与 import-linter
-# (阶段 0,enforcing 5 份 + C2/C3 ratchet)已进门禁。
+# (7/7 enforcing,ratchet 已退役)已进门禁。
 name: ci
 
 on:
@@ -24,10 +24,8 @@ jobs:
       - name: Typecheck (pyright)
         run: uv run pyright ops
       - name: Import contracts (enforcing)
-        # C1/C5/C6/C7/C8,配置在 pyproject [tool.importlinter],红即挂
+        # 全部 7 份契约(C1/C2/C3/C5/C6/C7/C8)在 pyproject [tool.importlinter],
+        # 红即挂。ratchet 基线阶段结束(2026-07-09 阶段 3:C2/C3 均清零)。
         run: uv run lint-imports
-      - name: Import contracts (ratchet baseline)
-        # C2/C3 存量违例只许降不许升;清零后转 enforcing(脚本头注释有指引)
-        run: uv run python scripts/ci/import_baseline.py
       - name: Fast test suite
         run: uv run pytest -m "not slow" -q

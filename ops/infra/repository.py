@@ -162,13 +162,16 @@ class FactorRepository:
         metrics: list[tuple[str, str, float]] | None = None,
         sort_by: str | None = None,
         limit: int | None = None,
+        include_submitted: bool = False,
     ) -> list[Factor]:
         """库内因子目录查询 —— 单条三表 LEFT JOIN(退役 query_factors)。
 
         **因子集判据**(2026-07-07 Wave 2,JOURNAL V1):库内因子 =
         `factor_state.status != 'submitted'`;`status` 给定时按其精确过滤
-        (包括显式查 submitted)。snapshot 侧条件(field/tables/metrics)沿用
-        GIN/LIKE 下推,无快照的因子在这些条件下自然落选(与旧内存合并一致)。
+        (包括显式查 submitted);`include_submitted=True` 且 status 未给时
+        返回全状态(status 命令的"任何记录"语义,2026-07-09 阶段 3)。
+        snapshot 侧条件(field/tables/metrics)沿用 GIN/LIKE 下推,无快照的
+        因子在这些条件下自然落选(与旧内存合并一致)。
 
         返回的 Factor.state 不含 check_history(批量读不取全史 JSONB);
         排序:sort_by 命中白名单时按其 DESC NULLS LAST,并以 name 兜底稳定。
@@ -178,13 +181,13 @@ class FactorRepository:
             raise NotImplementedError("find 只支持 Postgres 后端(单库永远 PG)")
         self._conninfo  # noqa: B018 — schema 引导
 
-        where = []
+        where = ["TRUE"]
         params: list = []
         if status is not None:
             status_value = status.value if isinstance(status, FactorStatus) else status
             where.append("s.status = %s")
             params.append(status_value)
-        else:
+        elif not include_submitted:
             where.append("s.status != 'submitted'")
         if author:
             where.append("i.author = %s")
@@ -207,10 +210,16 @@ class FactorRepository:
             limit_sql = "LIMIT %s"
             params.append(limit)
 
+        # factor_state 也是 LEFT JOIN(2026-07-09 阶段 3 评审修正,原 INNER):
+        # info 有行、state 无行的孤儿(register 事务化前的半截写入 / 手工残留,
+        # 7-06 迁移实测过 20 个)在 include_submitted=True 的"任何记录"语义下
+        # 必须现形(status 全列表 / cancel 批量的"需对账"提示),否则对账线索
+        # 为零。缺省因子集判据 `s.status != 'submitted'` 对 NULL 求值为假 ——
+        # 孤儿天然不算库内因子,ops list 不受影响。
         query = f"""
             SELECT {_FIND_COLS}
             FROM factor_info i
-            JOIN factor_state s ON s.name = i.name
+            LEFT JOIN factor_state s ON s.name = i.name
             LEFT JOIN factor_snapshot n ON n.name = i.name
             WHERE {" AND ".join(where)}
             {order_sql}
@@ -236,18 +245,20 @@ class FactorRepository:
             discovery_method=discovery_method,
             created_at=_ts_out(created_at),
         )
-        state = FactorRecord(
-            name=name,
-            status=FactorStatus(status),
-            updated_at=_ts_out(updated_at),
-            submitted_at=_ts_out(submitted_at),
-            entered_at=_ts_out(entered_at),
-            rejected_at=_ts_out(rejected_at),
-            last_fail_stage=last_fail_stage,
-            last_fail_reason=last_fail_reason,
-            version=version,
-            check_history=[],  # find 不取全史(见 _FIND_COLS 注)
-        )
+        state = None
+        if status is not None:  # LEFT JOIN:state 行缺失(info 孤儿)时全列 NULL
+            state = FactorRecord(
+                name=name,
+                status=FactorStatus(status),
+                updated_at=_ts_out(updated_at),
+                submitted_at=_ts_out(submitted_at),
+                entered_at=_ts_out(entered_at),
+                rejected_at=_ts_out(rejected_at),
+                last_fail_stage=last_fail_stage,
+                last_fail_reason=last_fail_reason,
+                version=version,
+                check_history=[],  # find 不取全史(见 _FIND_COLS 注)
+            )
         snapshot = None
         if snapshot_at is not None:  # snapshot_at 列 NOT NULL → 行存在的判据
             snapshot = FactorSnapshot(
