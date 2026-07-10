@@ -1,0 +1,380 @@
+"""FactorRepository —— 因子的存储门面(factor-aggregate-plan §3.2,full-review D1)。
+
+service 层与"因子的持久形态"之间的唯一通道:记录面(三表读写)+ 产物面(盘面
+文件)。原先 16 个命令各自手工构造 store、手工 join、手工拼路径 —— 现在:
+
+**记录面**
+  - `get(name)` / `find(...)` —— 组装 `Factor` 聚合(core/factor.py);find 是
+    单条三表 LEFT JOIN(退役 query_factors 的三次查 + 内存合并)。
+  - `register(identity, ...)` —— 原子写 info+state(一个 PG 事务;收编
+    submit/backfill/check 三份手抄的双表编排)。
+  - `record(name)` / `transition(...)` / `append_check(...)` —— state 轻量读写
+    (委托 StateStore;transition 的 CAS 语义原样透传)。
+  - `attach_snapshot(snapshot)` —— 入库快照落库:强制 snapshot_at = entered_at,
+    含 stale 自愈(原 check._persist_derived 的落库半边)。
+  - `discard_snapshot(name)` —— 离库时快照失效(restage / submit --overwrite)。
+  - `delete(name)` —— 删 factor_info,FK 级联 state+snapshot(ops rm)。
+  - `exists(name)` —— 一种语义:factor_info 有行(消灭"问 state 删 info")。
+  - `lock(name)` —— factor_lock 门面。
+
+**产物面**(PV7 两面模型进类型)
+  - `paths(name)` —— FactorPaths(S4 布局正主)。
+  - `purge_artifacts(name, scope)` —— 按 ArtifactScope 清产物(收编原
+    services/rm 的 _purge_artifacts/_recycle_check_artifacts 跨包 helper)。
+
+**后端语义**:postgres = 生产全功能。json = 单机 dev/test,只有 state ——
+identity/snapshot 操作按"尽力而为"降级(register 只写 state、get 合成仅含
+name 的 identity、discard_snapshot no-op、find 不支持),使 check/批量命令的
+控制流测试无需 PG 即可跑。
+"""
+from __future__ import annotations
+
+import shutil
+from dataclasses import replace
+from enum import Flag, auto
+from functools import cached_property
+from typing import TYPE_CHECKING
+
+from ops.core.factor import Factor, FactorIdentity, FactorSnapshot
+from ops.core.paths import FactorPaths
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus
+from ops.infra.info import default_info_store
+from ops.infra.lock import factor_lock
+from ops.infra.pg import get_pool
+from ops.infra.pg import ts_out as _ts_out
+from ops.infra.schema import ensure_schemas
+from ops.infra.snapshot import default_snapshot_store
+from ops.infra.snapshot.pg_store import metric_order_expr, snapshot_where
+from ops.infra.store import default_store
+from ops.utils.clock import now_iso
+from ops.utils.log import logger
+
+if TYPE_CHECKING:
+    from ops.infra.config import Config
+    from ops.infra.info.base import InfoStore
+    from ops.infra.snapshot.base import SnapshotStore
+    from ops.infra.store.base import StateStore
+
+
+class ArtifactScope(Flag):
+    """因子产物的两个面(PV7):
+
+    - CHECK:alpha_pnl + bcorr 池副本 —— 喂 correlation 对比池,**离库即失效**,
+      一律回收(否则重检时新 pnl 对自己旧 pnl corr≈1,"自鬼影"必拒)。
+    - SERVING:alpha_dump + alpha_feature —— 最后一次入库版本的 last-known-good,
+      生产 combo 在重检窗口继续消费;默认保留,--purge / REJECTED 召回才清。
+    """
+    CHECK = auto()
+    SERVING = auto()
+    ALL = CHECK | SERVING
+
+
+# find() 的 SELECT 列(三表 LEFT JOIN)。state 的 check_history 有意不取:
+# find 是批量目录读,全史 JSONB 很重;要全史走 get()/record()。
+_FIND_COLS = (
+    "i.name, i.author, i.discovery_method, i.created_at, "
+    "s.status, s.version, s.submitted_at, s.entered_at, s.rejected_at, "
+    "s.last_fail_stage, s.last_fail_reason, s.updated_at, "
+    "n.ret, n.shrp, n.mdd, n.tvr, n.fitness, n.fields, n.tables, n.delay, "
+    "n.max_bcorr, n.max_bcorr_factor, n.snapshot_at"
+)
+
+
+class FactorRepository:
+    """构造便宜(store 全懒加载);跨命令直接 `FactorRepository(config)`。"""
+
+    def __init__(self, config: Config):
+        self.config = config
+
+    # ------------------------------------------------------------------ 后端
+    @property
+    def _is_pg(self) -> bool:
+        backend = (getattr(self.config, "state_backend", None) or "").lower()
+        return backend == "postgres" and bool(
+            getattr(self.config, "state_postgres_conninfo", None))
+
+    @cached_property
+    def _conninfo(self) -> str:
+        conninfo = getattr(self.config, "state_postgres_conninfo", None)
+        if not conninfo:
+            raise ValueError("此操作需要 Postgres 后端(state.postgres 未配置)")
+        # 首次触达 PG 时引导三表(FK 依赖序;幂等,每进程一次)。生产表已存在,
+        # 这里兜的是 dev/test/新环境 —— DDL 已滚出 store __init__。
+        ensure_schemas(conninfo)
+        return conninfo
+
+    @cached_property
+    def _state(self) -> StateStore:
+        if self._is_pg:
+            # 触发 schema 引导:record/transition 等 state-only 方法常是命令的
+            # 第一个 PG 触点(submit 预过滤/check._ensure_record),不触发则
+            # "首次触达 PG 自动引导三表"的承诺对这些路径为假 —— 空库上
+            # SELECT factor_state 直接 UndefinedTable(对抗评审确认)。
+            self._conninfo  # noqa: B018
+        return default_store(self.config)
+
+    @cached_property
+    def _info(self) -> InfoStore:
+        self._conninfo  # noqa: B018 — 触发 schema 引导(info store 是 PG-only)
+        return default_info_store(self.config)
+
+    @cached_property
+    def _snapshot(self) -> SnapshotStore:
+        self._conninfo  # noqa: B018 — 同上
+        return default_snapshot_store(self.config)
+
+    # ------------------------------------------------------------ 记录面:读
+    def exists(self, name: str) -> bool:
+        """因子是否存在 —— 一种语义:factor_info 有行(三表之根)。
+        json dev/test 后端无 info 表,退化为 state 有记录。"""
+        if not self._is_pg:
+            return self._state.get(name) is not None
+        return self._info.get(name) is not None
+
+    def record(self, name: str) -> FactorRecord | None:
+        """state 轻量读(含 check_history 全史),不拼 Factor。"""
+        return self._state.get(name)
+
+    def get(self, name: str) -> Factor | None:
+        """单因子全景(identity + state + snapshot)。None = factor_info 无行。"""
+        if not self._is_pg:
+            rec = self._state.get(name)
+            if rec is None:
+                return None
+            return Factor(identity=FactorIdentity(name=name), state=rec)
+        identity = self._info.get(name)
+        if identity is None:
+            return None
+        return Factor(
+            identity=identity,
+            state=self._state.get(name),
+            snapshot=self._snapshot.get(name),
+        )
+
+    def find(
+        self,
+        *,
+        author: str | None = None,
+        status: str | FactorStatus | None = None,
+        fail_stage: str | None = None,
+        field: str | None = None,
+        table_glob: str | None = None,
+        metrics: list[tuple[str, str, float]] | None = None,
+        sort_by: str | None = None,
+        limit: int | None = None,
+    ) -> list[Factor]:
+        """库内因子目录查询 —— 单条三表 LEFT JOIN(退役 query_factors)。
+
+        **因子集判据**(2026-07-07 Wave 2,JOURNAL V1):库内因子 =
+        `factor_state.status != 'submitted'`;`status` 给定时按其精确过滤
+        (包括显式查 submitted)。snapshot 侧条件(field/tables/metrics)沿用
+        GIN/LIKE 下推,无快照的因子在这些条件下自然落选(与旧内存合并一致)。
+
+        返回的 Factor.state 不含 check_history(批量读不取全史 JSONB);
+        排序:sort_by 命中白名单时按其 DESC NULLS LAST,并以 name 兜底稳定。
+        limit 仅在给定时下推(ORDER BY 恒定,结果确定)。
+        """
+        if not self._is_pg:
+            raise NotImplementedError("find 只支持 Postgres 后端(单库永远 PG)")
+        self._conninfo  # noqa: B018 — schema 引导
+
+        where = []
+        params: list = []
+        if status is not None:
+            status_value = status.value if isinstance(status, FactorStatus) else status
+            where.append("s.status = %s")
+            params.append(status_value)
+        else:
+            where.append("s.status != 'submitted'")
+        if author:
+            where.append("i.author = %s")
+            params.append(author)
+        if fail_stage:
+            where.append("s.last_fail_stage = %s")
+            params.append(fail_stage)
+
+        snap_clauses, snap_params = snapshot_where(
+            field, table_glob, metrics, prefix="n.")
+        where += snap_clauses
+        params += snap_params
+
+        order_expr = metric_order_expr(sort_by, prefix="n.")
+        order_sql = (f"ORDER BY {order_expr} DESC NULLS LAST, i.name"
+                     if order_expr else "ORDER BY i.name")
+
+        limit_sql = ""
+        if limit:
+            limit_sql = "LIMIT %s"
+            params.append(limit)
+
+        query = f"""
+            SELECT {_FIND_COLS}
+            FROM factor_info i
+            JOIN factor_state s ON s.name = i.name
+            LEFT JOIN factor_snapshot n ON n.name = i.name
+            WHERE {" AND ".join(where)}
+            {order_sql}
+            {limit_sql}
+        """
+        pool = get_pool(self._conninfo)
+        with pool.connection() as conn:
+            # 动态片段全部来自白名单表达式,值走参数;psycopg stub 要求
+            # LiteralString,结构安全,定点豁免(与 snapshot_store.list 同款)。
+            rows = conn.execute(query, params).fetchall()  # pyright: ignore[reportArgumentType]
+        return [self._row_to_factor(r) for r in rows]
+
+    @staticmethod
+    def _row_to_factor(row) -> Factor:
+        (name, author, discovery_method, created_at,
+         status, version, submitted_at, entered_at, rejected_at,
+         last_fail_stage, last_fail_reason, updated_at,
+         ret, shrp, mdd, tvr, fitness, fields, tables, delay,
+         max_bcorr, max_bcorr_factor, snapshot_at) = row
+        identity = FactorIdentity(
+            name=name,
+            author=author,
+            discovery_method=discovery_method,
+            created_at=_ts_out(created_at),
+        )
+        state = FactorRecord(
+            name=name,
+            status=FactorStatus(status),
+            updated_at=_ts_out(updated_at),
+            submitted_at=_ts_out(submitted_at),
+            entered_at=_ts_out(entered_at),
+            rejected_at=_ts_out(rejected_at),
+            last_fail_stage=last_fail_stage,
+            last_fail_reason=last_fail_reason,
+            version=version,
+            check_history=[],  # find 不取全史(见 _FIND_COLS 注)
+        )
+        snapshot = None
+        if snapshot_at is not None:  # snapshot_at 列 NOT NULL → 行存在的判据
+            snapshot = FactorSnapshot(
+                name=name,
+                ret=ret, shrp=shrp, mdd=mdd, tvr=tvr, fitness=fitness,
+                fields=fields if fields else None,
+                tables=tables if tables else None,
+                delay=delay,
+                max_bcorr=max_bcorr,
+                max_bcorr_factor=max_bcorr_factor,
+                snapshot_at=_ts_out(snapshot_at),
+            )
+        return Factor(identity=identity, state=state, snapshot=snapshot)
+
+    # ------------------------------------------------------------ 记录面:写
+    def register(
+        self,
+        identity: FactorIdentity,
+        *,
+        status: FactorStatus = FactorStatus.SUBMITTED,
+        submitted_at: str | None = None,
+        entered_at: str | None = None,
+        version: int = 1,
+    ) -> None:
+        """登记因子:info(身份)+ state(状态)一个事务原子写。
+
+        调用方(submit/backfill/check._ensure_record)在 factor_lock 内先判
+        不存在再调;info 是 upsert、state 是 put(upsert),崩溃重跑幂等。
+        json dev/test 后端只有 state,identity 落不了库(尽力而为语义)。
+        """
+        record = FactorRecord(
+            name=identity.name,
+            status=status,
+            updated_at=now_iso(),
+            submitted_at=submitted_at,
+            entered_at=entered_at,
+            version=version,
+        )
+        if not self._is_pg:
+            self._state.put(record)
+            return
+        # 单事务:两表要么都写、要么都不写(原先 submit/backfill/check 各自
+        # 顺序两次调用,崩在中间留"有 info 无 state"的半截因子)。
+        from ops.infra.info.pg_store import PostgresInfoStore
+        from ops.infra.store.pg_store import PostgresStateStore
+
+        pool = get_pool(self._conninfo)
+        with pool.connection() as conn, conn.transaction():
+            PostgresInfoStore.upsert_on(conn, identity)
+            PostgresStateStore.put_on(conn, record)
+
+    def transition(self, name: str, to_status: FactorStatus,
+                   expect: FactorStatus | None = None, **updates) -> FactorRecord:
+        """状态转移(CAS 语义透传 StateStore.transition)。"""
+        return self._state.transition(name, to_status, expect=expect, **updates)
+
+    def append_check(self, name: str, check: CheckRecord) -> None:
+        self._state.append_check(name, check)
+
+    def attach_snapshot(self, snapshot: FactorSnapshot) -> None:
+        """入库快照落库。snapshot_at 由此处强制 = state.entered_at(快照语义:
+        "本次入库事件的快照"),调用方不需要也不应该自己填。
+
+        stale 自愈:restage/--overwrite 离库时删旧快照,但迁移期存量行 / 删除
+        步骤崩掉的残留仍可能在 —— 旧行必须让位,否则 insert 撞 name UNIQUE
+        被吞,反查/报告永远读到上一版代码的指标(full-review P0-1)。
+        """
+        rec = self._state.get(snapshot.name)
+        if rec is None or not rec.entered_at:
+            raise ValueError(
+                f"attach_snapshot: factor {snapshot.name} 无 entered_at "
+                "(须先 transition 到 ACTIVE 设入库时间)")
+        snap = replace(snapshot, snapshot_at=rec.entered_at)
+        if self._snapshot.get(snap.name) is not None:
+            logger.warning("stale snapshot exists, replacing factor={}", snap.name)
+            self._snapshot.delete(snap.name)
+        self._snapshot.insert(snap)
+
+    def discard_snapshot(self, name: str) -> bool:
+        """离库 → 旧快照失效(restage / submit --overwrite)。返回是否真删了行。
+        json dev/test 后端无快照表,no-op(使控制流测试无需 PG)。"""
+        if not self._is_pg:
+            return False
+        return self._snapshot.delete(name)
+
+    def delete(self, name: str) -> bool:
+        """删 factor_info,FK 级联删 state + snapshot(ops rm)。返回行是否存在。
+        json dev/test 后端退化为删 state 记录。"""
+        if not self._is_pg:
+            return self._state.delete(name)
+        return self._info.delete(name)
+
+    def lock(self, name: str):
+        """per-factor advisory lock 门面(with repo.lock(name): ...)。"""
+        return factor_lock(name, self.config)
+
+    # ---------------------------------------------------------------- 产物面
+    def paths(self, name: str) -> FactorPaths:
+        return FactorPaths.of(name, self.config)
+
+    def purge_artifacts(self, name: str, scope: ArtifactScope) -> list[str]:
+        """按面清产物,返回已删项标签(调用方负责打印/记账)。
+
+        CHECK 面(pnl + bcorr 池副本,均单文件):离库即失效一律回收 ——
+        旧 pnl 留在池里是"自鬼影"(重检时新 pnl 对自己旧 pnl corr≈1,高相关
+        分支要求打败几乎相同的自己 → 必拒),也让别的新因子撞上已离库因子的
+        旧 pnl(JOURNAL PV7)。两个池都查 —— 因子来源可能在历史上变过。
+
+        SERVING 面(dump 目录 + feature 单文件):last-known-good,rm /
+        restage --purge / REJECTED 召回才清。
+        """
+        removed: list[str] = []
+        p = self.paths(name)
+        if ArtifactScope.SERVING in scope:
+            if p.dump.exists():
+                shutil.rmtree(p.dump)
+                removed.append(f"alpha_dump/{name}")
+            for f in p.features:
+                if f.exists():
+                    f.unlink()
+                    removed.append(f"alpha_feature/{f.name}")
+        if ArtifactScope.CHECK in scope:
+            if p.pnl.exists():
+                p.pnl.unlink()
+                removed.append(f"alpha_pnl/{name}")
+            for pool_copy in p.pools:
+                if pool_copy.exists():
+                    pool_copy.unlink()
+                    removed.append(f"{pool_copy.parent.name}/{name}")
+        return removed

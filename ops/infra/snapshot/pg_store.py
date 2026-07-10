@@ -1,36 +1,16 @@
-"""PostgreSQL 实现 factor_snapshot store."""
-from datetime import datetime
+"""PostgreSQL 实现 factor_snapshot store.
 
+DDL 不在本类执行(2026-07-09 滚出 __init__):schema 归
+`ops/infra/schema.py::ensure_schemas` + 生产 scripts/postgres 迁移。
+_ts_in/_ts_out 正主收敛到 ops/infra/pg.py(与 state store 的镜像合并)。
+"""
 from psycopg.types.json import Jsonb
 
-from ops.infra.pg import ensure_schema, get_pool
+from ops.infra.pg import get_pool
+from ops.infra.pg import ts_in as _ts_in
+from ops.infra.pg import ts_out as _ts_out
 
 from .base import FactorSnapshot, SnapshotStore
-
-
-def _ts_in(v: str | None) -> str | None:
-    """Naive local ISO string -> TIMESTAMPTZ-ready value (与 state_store 一致)。"""
-    if not v:
-        return None
-    try:
-        dt = datetime.fromisoformat(v)
-    except ValueError:
-        return v
-    if dt.tzinfo is None:
-        dt = dt.astimezone()  # 打上本地时区
-    return dt.isoformat(timespec="seconds")
-
-
-def _ts_out(v) -> str | None:
-    """TIMESTAMPTZ -> naive local ISO string (与 state_store 一致)。"""
-    if v is None:
-        return None
-    if isinstance(v, datetime):
-        if v.tzinfo is not None:
-            v = v.astimezone().replace(tzinfo=None)
-        return v.isoformat(timespec="seconds")
-    return str(v)
-
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS factor_snapshot (
@@ -60,7 +40,8 @@ CREATE INDEX IF NOT EXISTS idx_factor_snapshot_ret ON factor_snapshot(ret);
 CREATE INDEX IF NOT EXISTS idx_factor_snapshot_shrp ON factor_snapshot(shrp);
 """
 
-# Metric 键到 SQL 表达式的映射（复用原 DerivedStore 逻辑）
+# Metric 键到 SQL 表达式的映射(复用原 DerivedStore 逻辑)。唯一定义 ——
+# repository.find 经下方 snapshot_where/metric_order_expr 复用,不再镜像(S8)。
 _METRIC_EXPR = {
     "ret": "ret",
     "shrp": "shrp",
@@ -73,15 +54,89 @@ _METRIC_EXPR = {
 _SQL_OPS = {"<": "<", ">": ">", "=": "=", "<=": "<=", ">=": ">="}
 
 
+def _prefixed_metric_expr(key: str, prefix: str) -> str | None:
+    """metric 键 → 带列前缀的 SQL 表达式(prefix 形如 "n.",JOIN 场景用)。"""
+    expr = _METRIC_EXPR.get(key)
+    if expr is None:
+        return None
+    # 表达式里的列名恰好都是裸列(ret / abs(max_bcorr)),按白名单逐个改写
+    if key == "bcorr":
+        return f"abs({prefix}max_bcorr)"
+    return f"{prefix}{expr}"
+
+
+def _glob_to_like(glob: str) -> str | None:
+    """fnmatch glob → LIKE pattern;LIKE 表达不了时返回 None(跳过下推)。
+
+    原实现只 `replace("*", "%")`:glob 值里的 `_`/`%` 变成 LIKE 通配(预筛
+    变宽,内存 fnmatch 兜底可收窄,无害但脏),而 `?`/`[seq]` 变成 LIKE
+    字面量 —— **预筛比 fnmatch 更窄,行在 SQL 层被丢、内存兜底永远看不到**,
+    打破"下推纯为预筛"契约(full-review S9,对抗评审在 find 共享此函数时
+    确认)。现在:转义 `\\ % _` → `*`→`%`、`?`→`_`;含 `[`(字符类,LIKE
+    无法表达)整体放弃下推,交给内存 fnmatch。
+    """
+    if "[" in glob:
+        return None
+    like = (glob.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+                .replace("*", "%")
+                .replace("?", "_"))
+    return like
+
+
+def snapshot_where(
+    field: str | None,
+    table_glob: str | None,
+    metrics: list[tuple[str, str, float]] | None,
+    *,
+    prefix: str = "",
+) -> tuple[list[str], list]:
+    """snapshot 侧过滤条件 → (WHERE 片段列表, 参数列表)。
+
+    list()(单表,prefix="")与 repository.find(三表 JOIN,prefix="n.")共用,
+    保证下推语义只有一份(fields GIN 包含 / tables glob→LIKE / metric 阈值)。
+    下推是**预筛**:结果集只许 ⊇ 精确语义,不许更窄(内存侧兜底只能收窄)。
+    """
+    clauses: list[str] = []
+    params: list = []
+
+    if field:
+        clauses.append(f"{prefix}fields @> %s")
+        params.append(Jsonb([field]))
+
+    if table_glob:
+        like_pattern = _glob_to_like(table_glob)
+        if like_pattern is not None:
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM jsonb_array_elements_text({prefix}tables) t "
+                "WHERE t LIKE %s)"
+            )
+            params.append(like_pattern)
+
+    if metrics:
+        for key, op, threshold in metrics:
+            expr = _prefixed_metric_expr(key, prefix)
+            sql_op = _SQL_OPS.get(op)
+            if expr and sql_op:
+                clauses.append(f"{expr} {sql_op} %s")
+                params.append(threshold)
+
+    return clauses, params
+
+
+def metric_order_expr(sort_by: str | None, *, prefix: str = "") -> str | None:
+    """sort 键 → ORDER BY 用的 SQL 表达式(白名单外返回 None)。"""
+    if not sort_by:
+        return None
+    return _prefixed_metric_expr(sort_by, prefix)
+
+
 class PostgresSnapshotStore(SnapshotStore):
     """factor_snapshot 表的 Postgres 实现（入库时快照，不可变）。"""
 
     def __init__(self, conninfo: str):
         self.pool = get_pool(conninfo)
-        self._init_schema()
-
-    def _init_schema(self):
-        ensure_schema(self.pool, _SCHEMA)
 
     def get(self, name: str) -> FactorSnapshot | None:
         with self.pool.connection() as conn:
@@ -135,35 +190,13 @@ class PostgresSnapshotStore(SnapshotStore):
         limit: int | None = None,
     ) -> dict[str, FactorSnapshot]:
         """列出快照，支持下推过滤（复用原 DerivedStore.get_all 逻辑）。"""
-        where_clauses = []
-        params = []
-
-        if field:
-            where_clauses.append("fields @> %s")
-            params.append(Jsonb([field]))
-
-        if table_glob:
-            like_pattern = table_glob.replace("*", "%")
-            where_clauses.append(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements_text(tables) t WHERE t LIKE %s)"
-            )
-            params.append(like_pattern)
-
-        if metrics:
-            for key, op, threshold in metrics:
-                expr = _METRIC_EXPR.get(key)
-                sql_op = _SQL_OPS.get(op)
-                if expr and sql_op:
-                    where_clauses.append(f"{expr} {sql_op} %s")
-                    params.append(threshold)
-
+        where_clauses, params = snapshot_where(field, table_glob, metrics)
         where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
 
         order_by_sql = ""
-        if sort_by:
-            expr = _METRIC_EXPR.get(sort_by)
-            if expr:
-                order_by_sql = f"ORDER BY {expr} DESC NULLS LAST"
+        order_expr = metric_order_expr(sort_by)
+        if order_expr:
+            order_by_sql = f"ORDER BY {order_expr} DESC NULLS LAST"
 
         # LIMIT 参数化(原 f-string 拼接是注入面/负数崩溃点,full-review 第三部分)
         limit_sql = ""

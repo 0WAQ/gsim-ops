@@ -38,13 +38,17 @@ def gsim_available() -> bool:
     if not _CC_DATA.exists():
         pytest.skip(f"cc 数据不可用 ({_CC_DATA}),跳过 E2E")
     pw = _read_pg_password()
+    conninfo = f"host=10.9.100.160 port=15432 dbname=ops_test user=ops password={pw}"
     try:
-        conn = psycopg.connect(
-            f"host=10.9.100.160 port=15432 dbname=ops_test user=ops password={pw}",
-            connect_timeout=5)
+        conn = psycopg.connect(conninfo, connect_timeout=5)
         conn.close()
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"ops_test PG 不可达,跳过 E2E: {e}")
+    # DDL 已滚出 store __init__(2026-07-09 阶段 2):独跑 -m e2e(不经 fast 组
+    # pg_conninfo fixture)时须自行按 FK 依赖序引导三表,否则全新 ops_test 上
+    # 第一笔 repo.record 就 UndefinedTable(对抗评审确认)。幂等,session 一次。
+    from ops.infra.schema import ensure_schemas
+    ensure_schemas(conninfo)
     return True
 
 

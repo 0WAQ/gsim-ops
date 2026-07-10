@@ -9,6 +9,9 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 - **infra/config.py**: `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var -> `./config.yaml` -> project root `config.yaml`. Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables (`OPS_GSIM_HOME`, `OPS_STORAGE`, `OPS_WORKSPACE`).
 - **core/alpha/metadata.py**: `AlphaMetadata` parses XML configs and Python factor code。构造只读盘解析,无写盘副作用。niodatapath 改写在 `_update_data_niodatapath`(纯内存,把 `/datasvc/data/cc/` 前缀换成 config 的 `nio_data_path`),由 check 的 `prepare_for_initial`(`ops/services/check/xml_prepare.py`)调用并经 `ops/utils/xmlio.save_xml` 落盘。
 - **core/library.py**: `LibraryScanner` — 磁盘视角的对账工具(2026-07-07 Wave 2 起退出命令热路径:list 因子集=factor_state、info 存在性=factor_info,均纯 PG)。`scan()` 纯磁盘遍历无缓存,留给未来 ops doctor;`get()` 供 info 做单因子现场 stat。扫描产物类 `ScannedFactor`(2026-07-09 更名,原名 FactorInfo 与 `infra/info/` 表模型同名撞车,D4;`author_guess` 明示目录名正则是猜测)。core 不再运行期 import infra(Config 走 TYPE_CHECKING 纯类型引用)。
+- **core/factor.py**: `Factor` 聚合 —— **全库唯一叫"因子"的类型**(2026-07-09 阶段 2):`identity: FactorIdentity`(身份,factor_info 的领域形态)+ `state: FactorRecord | None` + `snapshot: FactorSnapshot | None` 三切面,由 `FactorRepository` 组装,service 层只见它。软校验:snapshot 存在 ⇒ `snapshot_at == entered_at`(warn 不炸;注意 **approve 合法产生无快照的 ACTIVE**,故没有"ACTIVE ⇒ snapshot"不变量)。FactorIdentity / FactorSnapshot 的 dataclass 正主在此(infra/info、infra/snapshot 分别以别名/re-import 保存量路径)。
+- **core/datasource.py**: 数据源解析纯函数(2026-07-09 自 services/list 迁入):`parse_datasources`(AST 走查 `getData` 字面量)/ `build_npy_index`(扫 nio_data_path,L2 `cn_equity*` 软链特例)/ `resolve_tables`。submit/check/backfill 共用。
+- **core/factormeta.py**: `FactorMeta`(meta.json 身份证格式)+ `parse_factor`(因子目录 → FactorMeta,2026-07-09 自 services/submit/parser.py 迁入)+ `infer_author_from_dir`(目录名 → author 词法推断)。
 - **core/paths.py**: `FactorPaths` — 盘面布局唯一正主(SSOT S4,2026-07-09)。`FactorPaths.of(name, config)` 拼出因子在 alphalib 的全部落点;布局事实由类型承载:src/staging/dump 是目录,pnl/池副本/feature 是**单文件**;feature 命名 `<name>.<v1|v2>.npy`(`FEATURE_VERSIONS`);meta.json 文件名常量 `META_FILENAME`。冻结可 pickle(pack 的 ProcessPool worker 直传)。**任何地方不得再手写 `config.alpha_xxx / name`**。边界:check 期工作区路径(pnl_path/alpha_path/checkpoint_path)属 AlphaMetadata 工作台,不在此列。布局契约测试 `tests/test_factor_paths.py`。
 - **core/metrics.py**: `Metrics` dataclass (ret, tvr, shrp, mdd, fitness). Serialization keys use `ret%`, `tvr%`, `mdd%` to indicate percentage fields.
 - **infra/gsim/runner.py**: `Runner` static methods shell out to gsim tools (`run_backtest`, `run_simsummary`, `run_bcorr`) via `subprocess.run` with configurable timeout.
@@ -17,13 +20,14 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 
 | File | Purpose |
 |------|---------|
-| `core/state.py` | `FactorStatus` enum, `CheckRecord`, `FactorRecord`(纯状态机,2026-07-06 起不含 author / submitted_by) |
-| `core/factormeta.py` | `FactorMeta` dataclass + `META_VERSION` + load/save |
-| `infra/info/` | `FactorInfo` dataclass + `InfoStore` ABC + `PostgresInfoStore`(factor_info 表:身份信息 author/discovery_method/created_at) |
-| `infra/snapshot/` | `FactorSnapshot` dataclass + `SnapshotStore` ABC + `PostgresSnapshotStore`(factor_snapshot 表:入库时不可变快照 metrics+datasources+index+bcorr) |
+| `core/state.py` | `FactorStatus` enum, `CheckRecord`, `FactorRecord`(纯状态机,2026-07-06 起不含 author / submitted_by;`correlation_rejected()` 语义谓词 + `CORRELATION` 常量,approve 的放行判据) |
+| `core/factor.py` | `Factor` 聚合 + `FactorIdentity` + `FactorSnapshot`(三切面领域类型,2026-07-09) |
+| `core/factormeta.py` | `FactorMeta` dataclass + `META_VERSION` + load/save + `parse_factor`/`infer_author_from_dir` |
+| `infra/info/` | `InfoStore` ABC + `PostgresInfoStore`(factor_info 表;`FactorInfo` 是 core `FactorIdentity` 的别名) |
+| `infra/snapshot/` | `SnapshotStore` ABC + `PostgresSnapshotStore`(factor_snapshot 表;`FactorSnapshot` dataclass 正主在 core/factor.py) |
+| `infra/repository.py` | `FactorRepository` —— service 层读写因子的唯一门面(get/find/register/transition/attach_snapshot/delete/exists/lock + paths/purge_artifacts) |
 | `infra/store/pg_store.py` | Postgres state backend (真相源 since 2026-07-04), `SELECT FOR UPDATE` + check_history JSONB;2026-07-06 去 library_id / author,`id SERIAL` 主键 + `name UNIQUE`,外键引 factor_info |
 | `infra/store/json_store.py` | JSON state backend(单机 dev/test;非生产回退), fcntl cross-process lock, atomic write |
-| `infra/query.py` | `query_factors(config, ...)` — list 读 info+state+snapshot 三表的唯一入口,返回 `FactorRow = (info, status, last_fail_stage, snapshot)`(当前三次查 + 内存按 name JOIN,TODO 单条 SQL)。因子集定义处:status 缺省排除 submitted(2026-07-07 Wave 2) |
 | `infra/lock.py` | Per-factor advisory lock (`factor_lock(name, config)` / `FactorLocked`);postgres 后端跨机 PG advisory lock(conninfo 缺失硬错误),json dev/test 后端 fcntl |
 
 **三表外键**:`factor_state.name` / `factor_snapshot.name` 均 `REFERENCES factor_info(name) ON DELETE CASCADE`。删 factor_info 级联删 state + snapshot(`ops rm` 走这条)。

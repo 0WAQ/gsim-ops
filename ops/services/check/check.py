@@ -4,20 +4,19 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 
 from ops.core.alpha.metadata import AlphaMetadata
-from ops.core.factormeta import FactorMeta
-from ops.core.paths import META_FILENAME, FactorPaths
-from ops.core.state import CheckRecord, FactorRecord, FactorStatus
-from ops.infra.config import Config
-from ops.infra.gsim.runner import Runner
-from ops.infra.info import FactorInfo, default_info_store
-from ops.infra.lock import FactorLocked, factor_lock
-from ops.infra.snapshot import FactorSnapshot, default_snapshot_store
-from ops.infra.store import default_store
-from ops.services.list.datasource import (
-    _build_npy_index,
+from ops.core.datasource import (
+    build_npy_index,
     parse_datasources,
     resolve_tables,
 )
+from ops.core.factor import FactorIdentity, FactorSnapshot
+from ops.core.factormeta import FactorMeta
+from ops.core.paths import META_FILENAME, FactorPaths
+from ops.core.state import CheckRecord, FactorStatus
+from ops.infra.config import Config
+from ops.infra.gsim.runner import Runner
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.repository import FactorRepository
 from ops.utils.clock import now_iso
 from ops.utils.factor_dir import clean_pycache, rewrite_module_path
 from ops.utils.live_table import LiveDriver, Status, make_factor_rows
@@ -114,29 +113,23 @@ class CheckerPipeline:
 
         return mds
 
+    def _repo(self) -> FactorRepository:
+        """按需构造(不挂 self):worker 进程 fork 自父进程,父进程实例若已
+        materialize 懒加载 store,其 PG 池对象在子进程里是死的(worker 线程
+        不随 fork 存活,pg.py 的 fork 钩子只重置注册表救不了已捏在手里的引用)。
+        每次现构造 + get_pool 按 (pid, conninfo) 去重 → 子进程拿到自己的池。"""
+        return FactorRepository(self.config)
+
     def _persist_derived(self, factor: AlphaMetadata, metrics, corr_result) -> None:
         """入库前把所有派生数据写入 factor_snapshot (入库时快照，不可变)。
-
-        2026-07-06 重构: 从四次 upsert (index/metrics/datasources/bcorr) 改为一次性
-        写入 factor_snapshot。snapshot_at = factor_state.entered_at (入库时间)。
 
         必须在 to_lib 之前调 —— datasources 依赖 factor.py_file(此时仍在 staging)。
         各组独立 try，互不阻断入库（快照缺失可运维补救，但入库不能失败）。
 
-        delay 从 XML 解析定死 (factor.delay)，与 metrics 同性质不可变。原 index 组的
-        has_pnl/dump_days 是可变物理事实，已从快照删除 (需实时状态走 LibraryScanner)。
+        落库半边(snapshot_at = entered_at 强制 + stale 自愈)归
+        repo.attach_snapshot(2026-07-09 迁 Repository);本方法只负责**采集**
+        (metrics / datasources / bcorr / delay —— check 期领域知识)。
         """
-        snapshot_store = default_snapshot_store(self.config)
-        state_store = default_store(self.config)
-
-        # 获取入库时间（factor_state.entered_at）
-        state = state_store.get(factor.name)
-        if not state or not state.entered_at:
-            logger.error("Cannot persist snapshot: factor {} has no entered_at", factor.name)
-            return
-
-        snapshot_at = state.entered_at
-
         # 准备各组数据
         ret = shrp = mdd = tvr = fitness = None
         if metrics:
@@ -147,7 +140,7 @@ class CheckerPipeline:
         fields = tables = None
         try:
             fields = parse_datasources(factor.py_file)
-            tables = resolve_tables(fields, _build_npy_index(self.config.nio_data_path))
+            tables = resolve_tables(fields, build_npy_index(self.config.nio_data_path))
         except Exception:
             logger.exception("parse datasources failed factor={}", factor.name)
 
@@ -156,16 +149,18 @@ class CheckerPipeline:
             max_bcorr = corr_result.max_bcorr
             max_bcorr_factor = corr_result.max_bcorr_factor
 
-        # 一次性写入 snapshot
+        # state 读在吞噬 try **之外**(对抗评审):PG 瞬时故障要冒泡走 unexpected
+        # 臂 revert SUBMITTED(因子留 staging 重跑自愈,旧代码语义);若也吞掉,
+        # 因子会静默入库且不可变快照永久缺失(无重算路径,只能人工 restage 重跑
+        # 30min+ 全流水线)。entered_at 真缺失(数据问题)与旧代码等价:记日志
+        # 放弃快照,入库继续。
+        state = self._repo().record(factor.name)
+        if state is None or not state.entered_at:
+            logger.error("Cannot persist snapshot: factor {} has no entered_at", factor.name)
+            return
+
         try:
-            # Re-archive 自愈:restage / submit --overwrite 在离库时删旧快照,但
-            # 迁移期存量 REJECTED 快照行、或删除步骤崩掉的残留仍可能在。快照语义
-            # = "本次入库事件的快照",旧行必须让位 —— 否则 insert 撞 name UNIQUE
-            # 被吞,反查/报告永远读到上一版代码的指标(full-review P0-1)。
-            if snapshot_store.get(factor.name) is not None:
-                logger.warning("stale snapshot exists, replacing factor={}", factor.name)
-                snapshot_store.delete(factor.name)
-            snapshot_store.insert(FactorSnapshot(
+            self._repo().attach_snapshot(FactorSnapshot(
                 name=factor.name,
                 ret=ret,
                 shrp=shrp,
@@ -177,7 +172,6 @@ class CheckerPipeline:
                 delay=factor.delay,
                 max_bcorr=max_bcorr,
                 max_bcorr_factor=max_bcorr_factor,
-                snapshot_at=snapshot_at,
             ))
         except Exception:
             logger.exception("persist snapshot failed factor={}", factor.name)
@@ -258,11 +252,12 @@ class CheckerPipeline:
         # 清掉 staging 原物(src 已进 alpha_src,不再需要归档副本)
         shutil.rmtree(factor.dir, ignore_errors=True)
 
-    def _ensure_record(self, factor: AlphaMetadata, store) -> None:
-        if store.get(factor.name) is not None:
+    def _ensure_record(self, factor: AlphaMetadata, repo: FactorRepository) -> None:
+        if repo.record(factor.name) is not None:
             return
         # state record 缺失（crash 恢复 / 直接 check staging 未经 submit）时补建。
-        # 三表结构：author/discovery_method 写 factor_info，状态机字段写 factor_state。
+        # repo.register 原子写 info(身份)+ state(状态)一个事务(原先顺序两次
+        # 调用,崩在中间留半截;json dev/test 后端只写 state,不再硬碰 PG info)。
         meta_path = factor.dir / META_FILENAME
         author = factor.key.user
         discovery_method = factor.discovery_method
@@ -275,21 +270,15 @@ class CheckerPipeline:
                 submitted_at = meta.submitted_at or submitted_at
             except Exception:
                 pass
-        now = now_iso()
-        info_store = default_info_store(self.config)
-        info_store.upsert(FactorInfo(
-            name=factor.name,
-            author=author,
-            discovery_method=discovery_method,
-            created_at=submitted_at,
-        ))
-        store.put(FactorRecord(
-            name=factor.name,
-            status=FactorStatus.SUBMITTED,
-            version=1,
-            updated_at=now,
+        repo.register(
+            FactorIdentity(
+                name=factor.name,
+                author=author,
+                discovery_method=discovery_method,
+                created_at=submitted_at,
+            ),
             submitted_at=submitted_at,
-        ))
+        )
 
     def run_one(self, factor: AlphaMetadata, i: int, q) -> str:
         """Returns one of: 'pass' | 'fail' | 'error' | 'locked'.
@@ -318,12 +307,24 @@ class CheckerPipeline:
         except FactorLocked:
             q.put(("done", factor.name, "locked", "🔒 已被另一个进程占用", "yellow"))
             return "locked"
+        except Exception as e:
+            # 前置段兜底(对抗评审):_run_one_locked 的 try 只包 stage 循环,
+            # 之前的 _ensure_record/transition(以及锁连接本身)在 PG 不可达 /
+            # 空库时抛的异常会直接穿透 ProcessPool —— 父进程的 LiveDriver 无法
+            # 把崩溃的 future 映射回因子名(全表 PENDING 时旧版直接挂死)。
+            # worker 是唯一知道自己因子名的地方,在此归因并保证 done 事件必发。
+            logger.exception("check preamble crashed factor={}", factor.key)
+            q.put(("done", factor.name, "error",
+                   f"! pre-check: {str(e)[:80]}", "red"))
+            return "error"
 
     def _run_one_locked(self, factor: AlphaMetadata, q) -> str:
-        store = default_store(self.config)
-        self._ensure_record(factor, store)
+        # 全部 state 读写经 Repository:统一 schema 懒引导(空库上裸 store 的
+        # SELECT 直接 UndefinedTable)与 fork 池安全(见 _repo 注)。
+        repo = self._repo()
+        self._ensure_record(factor, repo)
         check = CheckRecord(started_at=now_iso())
-        store.transition(factor.name, FactorStatus.CHECKING)
+        repo.transition(factor.name, FactorStatus.CHECKING)
 
         # 清上一轮 check 的 checkpoint 残留(锁内,开跑前)。long_backtest 写的
         # checkpoint 无人善后(CheckpointChecker.clean 只清它之前的),restage
@@ -371,8 +372,8 @@ class CheckerPipeline:
             now = now_iso()
             check.finished_at = now
             check.passed = True
-            store.append_check(factor.name, check)
-            store.transition(factor.name, FactorStatus.ACTIVE, entered_at=now)
+            repo.append_check(factor.name, check)
+            repo.transition(factor.name, FactorStatus.ACTIVE, entered_at=now)
 
             # 再写入 snapshot (需要 entered_at 作为 snapshot_at)
             self._persist_derived(factor, metrics, corr_result)
@@ -397,8 +398,8 @@ class CheckerPipeline:
             check.passed = None
             check.failed_stage = stage_name
             check.fail_reason = str(e)
-            store.append_check(factor.name, check)
-            store.transition(factor.name, FactorStatus.SUBMITTED)
+            repo.append_check(factor.name, check)
+            repo.transition(factor.name, FactorStatus.SUBMITTED)
             q.put(("done", factor.name, "error",
                    f"⊝ {stage_name} skipped: {str(e)[:60]}", "yellow"))
             return "error"
@@ -415,8 +416,8 @@ class CheckerPipeline:
                 check.passed = False
                 check.failed_stage = stage_name
                 check.fail_reason = str(e)
-                store.append_check(factor.name, check)
-                store.transition(factor.name, FactorStatus.SUBMITTED)
+                repo.append_check(factor.name, check)
+                repo.transition(factor.name, FactorStatus.SUBMITTED)
                 q.put(("done", factor.name, "error",
                        f"↻ retry: {stage_name} ({str(e)[:60]})", "yellow"))
                 return "error"
@@ -432,8 +433,8 @@ class CheckerPipeline:
                 check.passed = False
                 check.failed_stage = stage_name
                 check.fail_reason = str(e)
-                store.append_check(factor.name, check)
-                store.transition(factor.name, FactorStatus.REJECTED,
+                repo.append_check(factor.name, check)
+                repo.transition(factor.name, FactorStatus.REJECTED,
                                  rejected_at=now,
                                  last_fail_stage=stage_name,
                                  last_fail_reason=str(e))
@@ -450,8 +451,8 @@ class CheckerPipeline:
             check.finished_at = now_iso()
             check.passed = None
             check.fail_reason = f"unexpected: {e}"
-            store.append_check(factor.name, check)
-            store.transition(factor.name, FactorStatus.SUBMITTED)
+            repo.append_check(factor.name, check)
+            repo.transition(factor.name, FactorStatus.SUBMITTED)
             q.put(("done", factor.name, "error",
                    f"! unexpected: {str(e)[:80]}", "red"))
             return "error"

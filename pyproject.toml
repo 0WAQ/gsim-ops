@@ -77,6 +77,13 @@ type = "layers"
 layers = ["ops.cli", "ops.services", "ops.infra", "ops.core", "ops.utils"]
 
 [[tool.importlinter.contracts]]
+# 2026-07-09 阶段 2 清零转 enforcing(datasource→core ×4、parser→core ×2、
+# purge→Repository ×2、approve 语义 API ×1;factor-aggregate-plan 阶段 2)
+name = "C3 service packages are independent"
+type = "independence"
+modules = ["ops.services.submit", "ops.services.check", "ops.services.list", "ops.services.rm", "ops.services.restage", "ops.services.approve", "ops.services.cancel", "ops.services.clear", "ops.services.backfill", "ops.services.status", "ops.services.info", "ops.services.pack", "ops.services.run", "ops.services.combo"]
+
+[[tool.importlinter.contracts]]
 name = "C5 utils is a leaf"
 type = "forbidden"
 allow_indirect_imports = true

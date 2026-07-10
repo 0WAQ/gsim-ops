@@ -1,13 +1,12 @@
 from pathlib import Path
 
-from ops.core.factormeta import FactorMeta
+from ops.core.datasource import build_npy_index
+from ops.core.factor import FactorIdentity
+from ops.core.factormeta import FactorMeta, parse_factor
 from ops.core.paths import META_FILENAME
-from ops.core.state import FactorRecord, FactorStatus
+from ops.core.state import FactorStatus
 from ops.infra.config import Config
-from ops.infra.info import FactorInfo, default_info_store
-from ops.infra.store import default_store
-from ops.services.list.datasource import _build_npy_index
-from ops.services.submit.parser import parse_factor
+from ops.infra.repository import FactorRepository
 from ops.utils.clock import now_iso
 from ops.utils.printer import banner, bottom, error, info
 
@@ -49,8 +48,7 @@ def run_backfill(args):
     dry_run: bool = args.dry_run
 
     config = Config.load(config_path)
-    store = default_store(config)
-    info_store = default_info_store(config)
+    repo = FactorRepository(config)
 
     banner("存量回填" + (" (dry-run)" if dry_run else ""))
 
@@ -60,7 +58,7 @@ def run_backfill(args):
     npy_index = None
     if not dry_run and dirs:
         info("构建 npy_index ...")
-        npy_index = _build_npy_index(config.nio_data_path)
+        npy_index = build_npy_index(config.nio_data_path)
 
     created = skipped = failed = state_added = 0
     failures: list[tuple[str, str]] = []
@@ -77,9 +75,10 @@ def run_backfill(args):
             failures.append((factor_dir.name, msg or ""))
             continue
 
-        # state record + info record
+        # info + state 记录:repo.register 一个事务原子写(legacy 因子已在库,
+        # status=ACTIVE + entered_at=now;submitted_at 留空 —— 真实提交时间不可知)
         name = msg or factor_dir.name
-        if not dry_run and store.get(name) is None:
+        if not dry_run and repo.record(name) is None:
             meta_path = factor_dir / META_FILENAME
             try:
                 meta = FactorMeta.load(meta_path)
@@ -89,22 +88,16 @@ def run_backfill(args):
                 author = "unknown"
                 discovery_method = "backfill"
 
-            # 先写 factor_info
-            info_store.upsert(FactorInfo(
-                name=name,
-                author=author,
-                discovery_method=discovery_method,
-                created_at=now,
-            ))
-
-            # 再写 factor_state
-            store.put(FactorRecord(
-                name=name,
+            repo.register(
+                FactorIdentity(
+                    name=name,
+                    author=author,
+                    discovery_method=discovery_method,
+                    created_at=now,
+                ),
                 status=FactorStatus.ACTIVE,
-                version=1,
-                updated_at=now,
                 entered_at=now,
-            ))
+            )
             state_added += 1
 
     banner("回填汇总")

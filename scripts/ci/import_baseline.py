@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""C2/C3 import 契约的 ratchet 基线断言:违例数只许降、不许升。
+"""C2 import 契约的 ratchet 基线断言:违例数只许降、不许升。
 
 全绿契约在 pyproject [tool.importlinter] 直接 enforcing;本脚本只管还有存量
-违例的 C2(cli 直接 import infra/core)与 C3(service 包互相独立)。某契约
-清零后,把它移入 pyproject 并从 contracts-baseline.toml + BASELINE 删除。
+违例的 C2(cli 直接 import infra/core)。某契约清零后,把它移入 pyproject 并
+从 contracts-baseline.toml + BASELINE 删除(C3 已于 2026-07-09 阶段 2 走完这条
+路:9 → 0,现 enforcing)。
 
 fail-closed 纪律(2026-07-09 对抗评审揪出首版 fail-open,JOURNAL U3):门禁
 脚本自己不能被无声解除 ——
@@ -19,8 +20,8 @@ import re
 import subprocess
 import sys
 
-# 2026-07-09 实测基线(docs/factor-aggregate-plan.md §2.3)
-BASELINE = {"C2": 18, "C3": 9}
+# 2026-07-09 实测基线(docs/factor-aggregate-plan.md §2.3);C3 清零已移出
+BASELINE = {"C2": 18}
 
 proc = subprocess.run(
     ["lint-imports", "--config", "contracts-baseline.toml"],

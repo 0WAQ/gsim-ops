@@ -17,61 +17,27 @@
 """
 import shutil
 
-from ops.core.paths import FactorPaths
 from ops.infra.config import Config
-from ops.infra.info import default_info_store
-from ops.infra.lock import FactorLocked, factor_lock
-from ops.infra.store import default_store
+from ops.infra.lock import FactorLocked
+from ops.infra.repository import ArtifactScope, FactorRepository
 from ops.utils.printer import banner, bottom, error, highlight, info
-
-
-def _purge_artifacts(name: str, config: Config) -> list[str]:
-    """删 alpha_dump/<name>/ + alpha_feature/<name>.{v}.npy。返回已删项。
-    restage --purge 复用此函数,故与 src/pnl/state 删除分开。"""
-    removed: list[str] = []
-    p = FactorPaths.of(name, config)
-    if p.dump.exists():
-        shutil.rmtree(p.dump)
-        removed.append(f"alpha_dump/{name}")
-    for f in p.features:
-        if f.exists():
-            f.unlink()
-            removed.append(f"alpha_feature/{f.name}")
-    return removed
-
-
-def _recycle_check_artifacts(name: str, config: Config) -> list[str]:
-    """删 check 面产物:alpha_pnl/<name> + bcorr 池副本(均单文件)。返回已删项。
-
-    rm / restage / submit --overwrite 共用:pnl 与池副本喂 correlation 的
-    对比池和竞品指标,因子**离库即失效** —— 留着就是"自鬼影":重检时新 pnl
-    对自己旧 pnl corr≈1,高相关分支要求打败几乎相同的自己 → 必拒;也让别的
-    新因子撞上已离库因子的旧 pnl(JOURNAL PV7)。与"离库删 snapshot"(R1)
-    同构。两个池都查 —— 因子来源可能在历史上变过。"""
-    removed: list[str] = []
-    p = FactorPaths.of(name, config)
-    if p.pnl.exists():
-        p.pnl.unlink()
-        removed.append(f"alpha_pnl/{name}")
-    for pool_copy in p.pools:
-        if pool_copy.exists():
-            pool_copy.unlink()
-            removed.append(f"{pool_copy.parent.name}/{name}")
-    return removed
 
 
 def run_rm(args) -> None:
     name: str = args.factor_name
     config: Config = Config.load(args.config_path)
-    store = default_store(config)
+    repo = FactorRepository(config)
 
-    rec = store.get(name)
-    if rec is None:
-        error(f"  ✘ 因子 {name} 不在 state 中")
+    # 存在性判据 = factor_info(三表之根;repo.get 的 None 语义)。原先"问
+    # state"会漏掉有 info 无 state 的异常孤儿 —— 那正是 rm 该能清走的东西。
+    factor = repo.get(name)
+    if factor is None:
+        error(f"  ✘ 因子 {name} 不存在(factor_info 无记录)")
         return
+    status_str = factor.status.value if factor.status else "?(无 state 记录)"
 
     banner(f"彻底删除因子 {name}")
-    highlight(f"  状态: {rec.status.value}(删除后即不存在,不可逆)")
+    highlight(f"  状态: {status_str}(删除后即不存在,不可逆)")
     info("  将删除以下全部落点:")
     info(f"    · alpha_src/{name}/          (源码,唯一代码副本)")
     info(f"    · staging/{name}/            (在途副本,如存在)")
@@ -88,31 +54,31 @@ def run_rm(args) -> None:
             return
 
     try:
-        with factor_lock(name, config):
-            # 数据产物: dump + feature
-            for r in _purge_artifacts(name, config):
+        with repo.lock(name):
+            # 服务面产物: dump + feature
+            for r in repo.purge_artifacts(name, ArtifactScope.SERVING):
                 info(f"  ✔ 已删除 {r}")
 
+            paths = repo.paths(name)
+
             # 源码目录
-            src_dir = FactorPaths.of(name, config).src
-            if src_dir.exists():
-                shutil.rmtree(src_dir)
+            if paths.src.exists():
+                shutil.rmtree(paths.src)
                 info(f"  ✔ 已删除 alpha_src/{name}/")
 
             # 在途副本:restage/overwrite 召回的因子代码在 staging。记录删除后
             # 该目录必成孤儿,且 ops check 按 staging 扫描会自动补建记录,把刚
             # 删的因子复活重新入库 —— rm 的"全落点"语义必须含它(JOURNAL U3)。
-            staging_dir = FactorPaths.of(name, config).staging
-            if staging_dir.exists():
-                shutil.rmtree(staging_dir)
+            if paths.staging.exists():
+                shutil.rmtree(paths.staging)
                 info(f"  ✔ 已删除 staging/{name}/")
 
             # check 面产物: pnl + bcorr 池副本
-            for r in _recycle_check_artifacts(name, config):
+            for r in repo.purge_artifacts(name, ArtifactScope.CHECK):
                 info(f"  ✔ 已删除 {r}")
 
             # factor_info (级联删除 state + snapshot)
-            if default_info_store(config).delete(name):
+            if repo.delete(name):
                 info("  ✔ 已删除 factor_info (级联删除 state + snapshot)")
     except FactorLocked:
         error(f"  ✘ {name} 被另一个进程占用,稍后再试")

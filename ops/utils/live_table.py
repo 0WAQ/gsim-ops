@@ -182,15 +182,19 @@ class LiveDriver:
             # emitted done yet and synthesize one. Best-effort: if multiple
             # rows are still pending, the matching is ambiguous, so we just
             # ensure the main loop unblocks.
-            for row in self.rows.values():
-                if row.name in seen_done or row.is_done():
-                    continue
-                # Heuristic: prefer rows that are in-flight over pending
-                if row.is_in_flight():
-                    seen_done.add(row.name)
-                    self.q.put(("done", row.name, "error",
-                                f"worker crashed: {type(exc).__name__}", "red"))
-                    break
+            # Prefer in-flight rows, but FALL BACK to a pending row —— worker
+            # 在第一个 stage_start 之前崩掉(SIGKILL/OOM,或 run_one 泛捕获
+            # 之外的极端路径)时全表 PENDING,若只匹配 in-flight,done 事件
+            # 永不合成,主循环 remaining 永不归零 → 整条命令挂死画面冻结
+            # (对抗评审确认,HEAD 既有)。
+            candidates = [r for r in self.rows.values()
+                          if r.name not in seen_done and not r.is_done()]
+            target = next((r for r in candidates if r.is_in_flight()),
+                          candidates[0] if candidates else None)
+            if target is not None:
+                seen_done.add(target.name)
+                self.q.put(("done", target.name, "error",
+                            f"worker crashed: {type(exc).__name__}", "red"))
 
     # ---- rendering ---------------------------------------------------------
 

@@ -1,20 +1,19 @@
 import shutil
 from pathlib import Path
 
+from ops.core.datasource import build_npy_index
+from ops.core.factor import FactorIdentity
+from ops.core.factormeta import parse_factor
 from ops.core.paths import META_FILENAME, FactorPaths
-from ops.core.state import FactorRecord, FactorStatus
+from ops.core.state import FactorStatus
 from ops.infra.config import Config
-from ops.infra.info import FactorInfo, default_info_store
 from ops.infra.lock import FactorLocked, factor_lock
-from ops.infra.snapshot import default_snapshot_store
-from ops.infra.store import StateStore, default_store
-from ops.services.list.datasource import _build_npy_index
+from ops.infra.repository import ArtifactScope, FactorRepository
 from ops.utils.clock import now_iso
 from ops.utils.func import date_range
 from ops.utils.printer import banner, bottom, error, info, progress, warn
 
 from .normalize import normalize_factor_xml
-from .parser import parse_factor
 
 
 def _iter_dropbox_dirs(config: Config, users: list[str], start: str, end: str,
@@ -68,13 +67,13 @@ def copy_to_staging(config: Config, factor_dirs: list[Path]) -> list[Path]:
 
 
 def submit_one(staging_dir: Path, submitted_by: str, config: Config,
-               store: StateStore, overwrite: bool = False,
+               repo: FactorRepository, overwrite: bool = False,
                npy_index: dict | None = None) -> str:
     """Submit one factor from staging into state. Returns "pass" | "skip" | "fail".
 
-    2026-07-06 重构: 拆分写入 factor_info (author/discovery_method) + factor_state (状态)。
-
-    New factor (no state record)     -> insert info + put state, version=1.
+    New factor (no state record)     -> repo.register(info + state 原子一个事务,
+                                        version=1;原先顺序两次写,崩在中间留
+                                        "有 info 无 state"半截因子)。
     Existing factor + overwrite=True -> transition state to SUBMITTED, version += 1
                                         (info 不变，只更新 state).
     Existing factor + overwrite=False -> "skip" (defensive; run_submit normally
@@ -109,47 +108,41 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
         return "fail"
 
     # Authoritative existence check under the caller's factor_lock.
-    rec = store.get(meta.name)
+    rec = repo.record(meta.name)
     if rec is not None and not overwrite:
         return "skip"
 
     meta_path = staging_dir / META_FILENAME
     meta.save(meta_path)
 
-    info_store = default_info_store(config)
-
     if rec is None:
-        # 新因子: 写 factor_info + factor_state
-        info_store.upsert(FactorInfo(
-            name=meta.name,
-            author=meta.author or submitted_by,
-            discovery_method=meta.discovery_method,
-            created_at=submitted_at,
-        ))
-        store.put(FactorRecord(
-            name=meta.name,
-            status=FactorStatus.SUBMITTED,
-            updated_at=submitted_at,
+        # 新因子: info(身份)+ state(状态)经 repo.register 原子写入
+        repo.register(
+            FactorIdentity(
+                name=meta.name,
+                author=meta.author or submitted_by,
+                discovery_method=meta.discovery_method,
+                created_at=submitted_at,
+            ),
             submitted_at=submitted_at,
-        ))
+        )
         info(f"  ✔  {meta.name} → submitted (version=1)")
     else:
         # 已存在: 只更新 state (version += 1)，info 不变
         new_version = rec.version + 1
-        store.transition(meta.name, FactorStatus.SUBMITTED,
-                         submitted_at=submitted_at,
-                         version=new_version)
+        repo.transition(meta.name, FactorStatus.SUBMITTED,
+                        submitted_at=submitted_at,
+                        version=new_version)
         # 覆盖提交 = 旧入库快照失效(新代码 re-check 通过后 archive 写新快照)。
         # 不删则 insert 撞 name UNIQUE 被吞,快照永远停在旧代码(full-review P0-1)。
         try:
-            default_snapshot_store(config).delete(meta.name)
+            repo.discard_snapshot(meta.name)
         except Exception:
             warn(f"  ⚠  {meta.name} 旧 snapshot 删除失败(archive 时会自愈)")
         # 同理回收 check 面产物(pnl + bcorr 池副本):旧版本 pnl 留在池里,
         # 新代码重检时 correlation 对它 corr 通常极高 → 被迫"打败"旧的自己
         # (自鬼影,PV7)。dump/feature 服务面保留(last-known-good)。
-        from ops.services.rm.rm import _recycle_check_artifacts
-        for r in _recycle_check_artifacts(meta.name, config):
+        for r in repo.purge_artifacts(meta.name, ArtifactScope.CHECK):
             info(f"  ✔  已回收 {r}")
         info(f"  ✔  {meta.name} → submitted (version={new_version},覆盖新代码)")
 
@@ -170,7 +163,7 @@ def run_submit(args):
     config_path: Path = args.config_path
 
     config = Config.load(config_path)
-    store = default_store(config)
+    repo = FactorRepository(config)
 
     banner("因子提交")
     found = _iter_dropbox_dirs(config, users, start, end, factor_name)
@@ -185,7 +178,7 @@ def run_submit(args):
     to_process: list[tuple[str, Path]] = []
     skipped = 0
     for user, src in found:
-        existing = store.get(src.name)
+        existing = repo.record(src.name)
         if existing is not None and not overwrite:
             info(f"  ⤼  {src.name} 已入库 (status={existing.status.value}),跳过")
             skipped += 1
@@ -200,7 +193,7 @@ def run_submit(args):
         return
 
     # npy_index 全量 scan 一次, 整个 batch 共享, 避免 N 个因子 N 次扫盘
-    npy_index = _build_npy_index(config.nio_data_path)
+    npy_index = build_npy_index(config.nio_data_path)
 
     passed = failed = 0
     for submitted_by, src in to_process:
@@ -211,7 +204,7 @@ def run_submit(args):
         try:
             with factor_lock(name, config):
                 staged = _copy_one_to_staging(config, src)
-                result = submit_one(staged, submitted_by, config, store,
+                result = submit_one(staged, submitted_by, config, repo,
                                     overwrite=overwrite, npy_index=npy_index)
                 if result != "pass":
                     # skip (并发下已入库且非 overwrite) / fail (parse / 文件数不合规):

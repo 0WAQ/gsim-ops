@@ -26,8 +26,9 @@ c.execute('CREATE DATABASE ops_test OWNER ops'); c.close()
 PY
 ```
 
-三表(factor_info / factor_state / factor_snapshot)由 store 首次连接时的幂等
-`_init_schema` 自建,无需手工灌 schema。
+三表(factor_info / factor_state / factor_snapshot)由
+`ops/infra/schema.py::ensure_schemas` 按 FK 依赖序幂等自建(`pg_conninfo` fixture
+显式调用;DDL 已滚出 store `__init__`,2026-07-09),无需手工灌 schema。
 
 ## 隔离模型
 
@@ -46,7 +47,8 @@ PY
 |---|---|---|
 | `test_pure.py` | JsonStateStore CRUD | 否 |
 | `test_batch.py` | `_batch.py` 批量骨架(apply_locked 四种结局路由、失败不阻断)+ `transition(expect=)` CAS | 否 |
-| `test_check_routing_json.py` | pipeline 5 个非 pass 结局(retry/reject-late/reject-early/skip/crash)+ stage 归因盖章 + prepare 失败响亮化 + short-circuit(json 后端,CI 常跑)| 否 |
+| `test_check_routing_json.py` | pipeline 5 个非 pass 结局(retry/reject-late/reject-early/skip/crash)+ stage 归因盖章 + prepare 失败响亮化 + short-circuit + `_ensure_record` 无 seed 补建(json 后端,CI 常跑)| 否 |
+| `test_repository.py` | `FactorRepository`:产物面 `ArtifactScope` 两面语义 + json 降级(register 只写 state / find 拒绝 / discard no-op,无 PG 组);register 原子双表写、find 单条 JOIN 因子集/过滤/快照拼装、attach_snapshot 强制 entered_at + stale 自愈、delete 级联(PG 组) | json 组否 / PG 组是 |
 | `test_state_store_pg.py` | PostgresStateStore:put/get round-trip、时间戳 tz 不偏 8h、transition、append_check、delete、list(**当前整组 skip**:state_store fixture 待重建,I2) | 是 |
 | `test_check_routing.py` | pipeline 6 结局含 **pass→archive**(snapshot 落库、pnl 分流)+ 派生局部失败不阻断 | 是 |
 | `test_check_scan.py` | `_scan_factors` 过滤、`_ensure_record` 补建/不覆盖、CHECKING 自愈、FactorLocked → locked | 是 |
@@ -112,4 +114,4 @@ uv run python -c "import psycopg; pw=next(l.split('=',1)[1].strip() for l in ope
 ```
 
 平时不用 drop;但隔离重建(I2)前测试行会残留在 ops_test,脏了就 drop 重建
-(三表由 store 首次连接自建)。
+(三表由 `ensure_schemas` 自建)。

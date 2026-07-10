@@ -150,6 +150,79 @@ def test_prepare_failure_is_loud(json_config, write_factor, fake_checkers, monke
     assert (config.staging / "AlphaWbaiPrep").exists()
 
 
+def test_ensure_record_works_without_seed(json_config, write_factor, fake_checkers):
+    """crash 恢复路径:staging 有目录、state 无记录 → _ensure_record 自动补建。
+
+    2026-07-09 起 _ensure_record 走 repo.register:json 后端只写 state,不再
+    硬碰 PG info store(原先本文件每个用例被迫 seed 就是为绕开这一点)。"""
+    cfg_path, config = json_config
+    write_factor(config, name="AlphaWbaiNoSeed")
+    checkers, _ = fake_checkers(fail_stage="validate", behavior="fail")
+
+    from ops.services.check.check import CheckerPipeline
+    pipe = CheckerPipeline(users=None, config_path=cfg_path,
+                           factor="AlphaWbaiNoSeed", checkers=checkers)
+    ret = pipe.run_one(pipe.metadatas[0], 0, queue.Queue())
+
+    store = default_store(config)
+    rec = store.get("AlphaWbaiNoSeed")
+    assert ret == "error"                       # validate fail → retryable
+    assert rec is not None                      # 记录被自动补建
+    assert rec.status == FactorStatus.SUBMITTED
+    assert rec.version == 1
+    assert rec.submitted_at == "2026-07-05T00:00:00"  # 从 meta.json 恢复
+
+
+def test_preamble_crash_emits_done(json_config, write_factor, fake_checkers,
+                                   monkeypatch):
+    """前置段(_ensure_record/transition,stage 循环 try 之前)崩溃不得穿透
+    worker:run_one 兜底泛捕获,归因到因子名并保证 done 事件必发 —— 否则
+    异常穿进 ProcessPool,父进程 LiveDriver 无法映射 future→因子,全表
+    PENDING 时主循环永久挂死(对抗评审,PG 不可达/空库场景)。"""
+    from ops.infra.repository import FactorRepository
+
+    cfg_path, config = json_config
+    write_factor(config, name="AlphaWbaiPre")
+    checkers, call_log = fake_checkers(fail_stage=None)
+
+    from ops.services.check.check import CheckerPipeline
+    pipe = CheckerPipeline(users=None, config_path=cfg_path,
+                           factor="AlphaWbaiPre", checkers=checkers)
+
+    def boom(self, name):
+        raise OSError("PG unreachable")
+    monkeypatch.setattr(FactorRepository, "record", boom)
+
+    q = queue.Queue()
+    ret = pipe.run_one(pipe.metadatas[0], 0, q)
+    assert ret == "error"
+    assert call_log == []                       # 没进 stage 循环
+    ev = q.get_nowait()
+    assert ev[0] == "done" and ev[1] == "AlphaWbaiPre" and ev[2] == "error"
+
+
+def test_watch_futures_unblocks_on_all_pending():
+    """worker 在第一个 stage_start 前被杀(SIGKILL/OOM)时全表 PENDING ——
+    _watch_futures 必须回退匹配 pending 行合成 done,否则 remaining 永不归零、
+    LiveDriver 主循环挂死(对抗评审,HEAD 既有)。"""
+    from concurrent.futures import Future
+
+    from rich.console import Console
+
+    from ops.services.check.stages import STAGES
+    from ops.utils.live_table import LiveDriver, make_factor_rows
+
+    fut = Future()
+    fut.set_exception(RuntimeError("killed before first stage_start"))
+    rows = make_factor_rows(["AlphaWbaiDead"], STAGES)   # 全 PENDING
+    q = queue.Queue()
+    driver = LiveDriver(rows, q, [fut], STAGES, Console())
+    driver._watch_futures()
+
+    ev = q.get_nowait()
+    assert ev[0] == "done" and ev[1] == "AlphaWbaiDead" and ev[2] == "error"
+
+
 def test_identity_divergence_refused_before_state(json_config, write_factor,
                                                   fake_checkers):
     """staging 目录名 != XML @id → run_one 在任何状态写入前整单拒绝(P2 guard)。

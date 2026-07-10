@@ -1,19 +1,15 @@
-"""Factor 身份信息数据模型与 store 抽象."""
+"""factor_info 表的 store 抽象(数据形态已正名迁 core)。
+
+数据类 2026-07-09 迁 `ops/core/factor.py::FactorIdentity`(Factor 聚合的身份
+切面;core 不能 import infra,聚合切面必须住 core)。`FactorInfo` 别名保住
+存量导入路径 —— store 层内部仍以"行网关"角色使用它,service 新代码应从
+core 取 FactorIdentity(经 FactorRepository,不直接碰本层)。
+"""
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 
+from ops.core.factor import FactorIdentity
 
-@dataclass
-class FactorInfo:
-    """因子身份信息（不可变）。
-
-    从 factor_state.author 移入，与生命周期状态分离。
-    discovery_method 用于 bcorr 池的选择 (automated/manual)。
-    """
-    name: str
-    author: str | None = None
-    discovery_method: str | None = None  # 'automated' | 'manual'
-    created_at: str | None = None  # ISO timestamp
+FactorInfo = FactorIdentity
 
 
 class InfoStore(ABC):

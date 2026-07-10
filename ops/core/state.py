@@ -12,6 +12,13 @@ class FactorStatus(str, Enum):
     REJECTED  = "rejected"
 
 
+# correlation 是唯一具有生命周期语义的 stage 名:它是 approve(多样性豁免)的
+# 放行判据(last_fail_stage == CORRELATION)。定义放 core 使 approve 不必跨包
+# import check(C3);stage 的顺序/路由/行为 SSOT 仍是 check/stages.py 的
+# PIPELINE(其 correlation 行引用本常量,单一定义)。
+CORRELATION = "correlation"
+
+
 @dataclass
 class CheckRecord:
     started_at: str
@@ -45,6 +52,12 @@ class FactorRecord:
     last_fail_reason: str | None = None
     version: int = 1
     check_history: list[CheckRecord] = field(default_factory=list)
+
+    def correlation_rejected(self) -> bool:
+        """approve(多样性豁免)的资格谓词:因 correlation stage 被拒。
+        其他阶段(checkbias/checkpoint/compliance)是质量问题,不属豁免范畴。"""
+        return (self.status == FactorStatus.REJECTED
+                and self.last_fail_stage == CORRELATION)
 
     def to_dict(self) -> dict:
         d = asdict(self)

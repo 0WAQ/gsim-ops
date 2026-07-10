@@ -16,8 +16,10 @@
 `Stage(name, make_checker, prepare, retryable, keep_artifacts_on_fail)`,顺序即执行
 顺序。`STAGES` / `RETRYABLE_STAGES` / `KEEP_ARTIFACTS_STAGES` 全部由 PIPELINE 派生,
 `_run_one_locked` 是一个 for-loop(原先 6 段复制粘贴的运行块 + 4 处手抄 stage
-集合已删)。**新增 stage = 在 PIPELINE 加一行**。`CORRELATION` 常量从这里导出
-(approve 的放行判定、archive 捕获 corr_result 落 bcorr 快照都引它,不再手写字符串)。
+集合已删)。**新增 stage = 在 PIPELINE 加一行**。`CORRELATION` 常量的定义
+2026-07-09 迁 `ops/core/state.py`(approve 的放行判据改语义 API
+`FactorRecord.correlation_rejected()`,不再跨包引 check);stages.py re-export
+保住包内路径,PIPELINE 的 correlation 行引用它 —— 顺序/路由 SSOT 仍是本表。
 
 **异常归因**:`CheckFail`/`CheckSkip` **不携带 stage** —— 流水线在捕获时按"当前
 正在跑的 stage"归因(`current_stage` 盖章)。原先 12 个单行异常子类
@@ -37,8 +39,8 @@ unexpected-error 臂接住 → revert SUBMITTED + 完整日志。`prepare_for_ar
 
 ## Archive 细节
 
-归档时先 `transition` state 设 `entered_at`(入库时间),再 `_persist_derived` 把四组派生数据一次性 **insert 进 `factor_snapshot`**(入库时不可变快照,`snapshot_at = entered_at`):**metrics**(simsummary)、**datasources**(AST parse `getData` + npy index)、**bcorr**(correlation stage 已算出的 `max_bcorr`,之前被丢弃,现捕获落库,零额外计算)、**delay**(XML 解析定死,入库时写真值;原 index 组的 has_pnl/dump_days 已删列)。必须在 `to_lib` 之前调 —— datasources 依赖 `factor.py_file`(此时仍在 staging)。各组独立 try,快照丢了不阻断入库(但快照不可 refresh 重算,`ops refresh` 已删除)。
-**stale 自愈**(2026-07-07):insert 前若已存在同名 snapshot 行(迁移期 REJECTED 存量 /
+归档时先 `transition` state 设 `entered_at`(入库时间),再 `_persist_derived` **采集**四组派生数据 —— **metrics**(simsummary)、**datasources**(AST parse `getData` + npy index,`ops/core/datasource.py`)、**bcorr**(correlation stage 已算出的 `max_bcorr`,之前被丢弃,现捕获落库,零额外计算)、**delay**(XML 解析定死,入库时写真值)—— 经 `repo.attach_snapshot` 一次性 **insert 进 `factor_snapshot`**(落库半边 2026-07-09 迁 Repository:内部强制 `snapshot_at = entered_at`,调用方不填)。必须在 `to_lib` 之前调 —— datasources 依赖 `factor.py_file`(此时仍在 staging)。各组独立 try,快照丢了不阻断入库(但快照不可 refresh 重算,`ops refresh` 已删除)。
+**stale 自愈**(2026-07-07;现在 `repo.attach_snapshot` 内):insert 前若已存在同名 snapshot 行(迁移期 REJECTED 存量 /
 restage 删失败残留)则先 delete 再 insert,并 warn 日志 —— 否则 UNIQUE 冲突被吞,
 快照永远停在旧代码(full-review P0-1)。正常路径下旧行已被 restage/--overwrite 删除。按 `discovery_method` 把 pnl 额外拷一份到 `pnl_automated/` 或 `pnl_manual/` (仅入库成功时,REJECTED 不拷;来源未知则 warn 跳过);Fail: mark REJECTED (src 归档到 alpha_src)
 
@@ -57,7 +59,7 @@ restage 删失败残留)则先 delete 再 insert,并 warn 日志 —— 否则 U
 
 **bcorr 排除自名**(2026-07-08 PV7):correlation checker 对 bcorr 结果过滤
 `name == factor.name` —— 因子永远不该和自己比相关性。主修是离库回收池副本
-(restage/`--overwrite`/rm 的 `_recycle_check_artifacts`),此处是防删除失败
+(restage/`--overwrite`/rm 走 `repo.purge_artifacts(name, ArtifactScope.CHECK)`),此处是防删除失败
 残留再造"自鬼影"(自相关≈1 → 被迫打败几乎相同的自己 → 必拒)的双保险。
 
 **bcorr 按因子来源分池** (`discovery_method`):bcorr 只在同类因子间比较,人工因子和机器因子互不撞车。`resolve_bcorr_pools(config, discovery_method)` (`infra/gsim/runner.py`) 决定对比池:`automated` → `pnl_automated/`,`manual` → `pnl_manual/`,来源未知 (legacy 因子 meta/XML 无此字段) 回退全库 (`pnl_prod_path` + `pnl_alphalib`,即分类前旧行为)。高相关时"打败竞品"的竞品业绩 (`_get_prod_factor_metrics`) 也从同类池取。`discovery_method` 由 `AlphaMetadata` 从 XML `<Description @discovery_method>` 读入(现存 `factor_info` 表)。`run_bcorr(pnl, config, pools=None)` 缺省 pools 时走全库统计。
@@ -70,6 +72,8 @@ restage 删失败残留)则先 delete 再 insert,并 warn 日志 —— 否则 U
 失败因子的 src 归档到 `alpha_src/`(与 ACTIVE 同库,状态靠 state 的 `status`/`last_fail_stage`/`last_fail_reason` 区分,不靠目录位置)。compliance/correlation(`keep_artifacts_on_fail`)失败额外保留 pnl + dump(数据完整,有分析价值);checkbias/checkpoint 失败清掉 dump/feature(短期数据不完整)。staging 原物在归档后清除。**不再有 recycle 目录**(见 `on_reject`,原 `to_recycle`)。
 
 Uses `ProcessPoolExecutor` (max 20 workers) for parallel factor checking.
+worker 里 `FactorRepository` 按需现构造(`check.py::_repo()`,不挂 self):fork 子进程
+继承的父进程 PG 池是死的,`get_pool` 按 (pid, conninfo) 去重让子进程拿自己的池。
 
 Checkers inherit from `Checker` ABC in `checker/base.py`(`check()` 必须实现 + `clean()` 默认 no-op 钩子,流水线对每个 stage 通过后统一调用)。Failures raise `CheckFail`; skippable issues raise `CheckSkip` —— **不带 stage 参数**,流水线捕获时归因。
 
@@ -125,7 +129,10 @@ rmtree `alpha_src/<@id>` —— 可能是另一个在库因子的唯一源码。
 reconcile 已下线(state 共享 PG 后,per-host 本地 `staging` 视图无权裁决全局 state)。
 crash 恢复靠两点自愈:`ops check` **按 staging 目录扫描**(不看 state status),崩在半路仍在
 staging 的因子下次照样重跑,并覆盖其 `CHECKING` 状态;PG state 事务原子写,drift 窗口只在
-"移动文件 → 改 state" 两步之间且极小。真正需要人工介入的残留用 `ops rm` / 后续 `ops doctor` 处理。
+"移动文件 → 改 state" 两步之间且极小。state 记录缺失(crash / 未经 submit 直接 check)时
+`_ensure_record` 经 `repo.register` 原子补建 info + state(一个 PG 事务;json dev/test
+后端只写 state,不硬碰 PG —— `tests/test_check_routing_json.py` 的无 seed 用例)。
+真正需要人工介入的残留用 `ops rm` / 后续 `ops doctor` 处理。
 
 ## Concurrency
 

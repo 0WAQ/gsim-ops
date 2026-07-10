@@ -22,7 +22,9 @@
 
 仅 `status == REJECTED` 且 `last_fail_stage == "correlation"`。其他失败阶段
 (checkbias / checkpoint / compliance)是因子**质量/正确性**问题,不属多样性豁免范畴,
-不允许 approve。
+不允许 approve。资格谓词是语义 API `FactorRecord.correlation_rejected()`
+(`ops/core/state.py`,`CORRELATION` 常量同处定义,check/stages.py re-export;
+2026-07-09 起 approve 不再跨包引 check 的 stage 表)。
 
 **放行宽度是整个 correlation stage(业绩门槛 + 相关性),不收窄到只放 bcorr**——因为
 "为覆盖多样性保留一个因子"本就可能意味着接受它业绩差一点(如 ret 8% 低于 10% 线,但它
@@ -32,10 +34,10 @@
 
 1. `_resolve_targets` — 按 name / user 筛选
    - 单因子:状态或失败阶段不匹配 → 报错退出(明确指定的失败要响亮)
-   - 批量(`-u`):先 `info_store.list(author=...)` 取 name 集合,再与 `store.list(status=REJECTED)` 取交集;不匹配的归入 `Skipped` 段,不阻断。显示 author 从 `info_store.get(name)` 取(FactorRecord 已无 author 字段)
+   - 批量(`-u`):`repo.find(author=..., status=REJECTED)` 单条三表 JOIN(2026-07-09 退役 info.list + state.list 内存交集);不匹配的归入 `Skipped` 段,不阻断。显示 author 从 `Factor.identity` 取(FactorRecord 已无 author 字段)
 2. apt 风格确认(`-y` 跳过)
 3. `_approve_one`:
-   - `store.transition(name, ACTIVE, entered_at=..., last_fail_stage=None, last_fail_reason=None)`
+   - `repo.transition(name, ACTIVE, entered_at=..., last_fail_stage=None, last_fail_reason=None)`
    - `append_check(CheckRecord(passed=True, fail_reason="approved"))` 留痕
 
 ## 不做的事
@@ -44,6 +46,7 @@
   (correlation 失败时 check.py on_reject 已保留这些产物)
 - 不动 `version`
 - 不重跑任何 check 阶段
+- 不写 `factor_snapshot`(快照只在 check archive 时产生)—— approve 放行的因子是**合法无快照的 ACTIVE**,不属数据异常
 - 不替换 / 不降级库内既有因子
 
 ## 并发安全
