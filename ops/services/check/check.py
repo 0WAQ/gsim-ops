@@ -177,45 +177,16 @@ class CheckerPipeline:
             logger.exception("persist snapshot failed factor={}", factor.name)
 
     def to_lib(self, factor: AlphaMetadata):
-        clean_pycache(factor.dir)
-        paths = FactorPaths.of(factor.name, self.config)
-
-        # 兜底断言(第一道闸在 run_one 入口):下方 rmtree/move/rewrite 三步共用
-        # paths.src(键=@id)锚点,其正确性依赖 目录名 == @id。发散时 rmtree 删的
-        # 是"另一个因子",绝不能带病归档 —— 抛错走 unexpected 臂 revert SUBMITTED。
-        if factor.dir.name != factor.name:
-            raise RuntimeError(
-                f"identity divergence: staging dir {factor.dir.name!r}"
-                f" != XML @id {factor.name!r}, refuse to archive")
-
-        if paths.src.exists():
-            shutil.rmtree(paths.src)
-        shutil.move(factor.dir, paths.src)
-        rewrite_module_path(paths.src)
-
-        if paths.dump.exists():
-            shutil.rmtree(paths.dump)
-        shutil.move(factor.alpha_dir, paths.dump)
-
-        # alpha_pnl/<name> 是单文件(FactorPaths 布局事实):restage 保留 pnl →
-        # re-archive 时此处必有旧文件,rmtree 对文件抛 NotADirectoryError
-        # (full-review 第一部分 1.2)。目录形态只可能是远古残留。
-        if paths.pnl.is_dir():
-            shutil.rmtree(paths.pnl)
-        elif paths.pnl.exists():
-            paths.pnl.unlink()
-        shutil.move(factor.pnl_file, paths.pnl)
-
-        # 按因子来源 (discovery_method) 把 pnl 额外分流一份到 pnl_automated / pnl_manual。
-        # factor.pnl_file 此时已被 move 走,从入库后的 paths.pnl 拷。pnl 是单文件,copy2。
-        bucket = {"automated": paths.pool_automated,
-                  "manual": paths.pool_manual}.get(factor.discovery_method or "")
-        if bucket is not None:
-            bucket.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(paths.pnl, bucket)
-        else:
-            logger.warning("discovery_method 缺失/非法, 跳过 pnl 分流 factor={} value={}",
-                           factor.name, factor.discovery_method)
+        """归档入库:搬运 + @module 重指 + pnl 分流全部收编 repo.archive
+        (2026-07-10 阶段 3 第二批;身份兜底断言随迁 —— 第一道闸仍在 run_one
+        入口)。"""
+        self._repo().archive(
+            factor.name,
+            src_dir=factor.dir,
+            dump_dir=factor.alpha_dir,
+            pnl_file=factor.pnl_file,
+            discovery_method=factor.discovery_method,
+        )
 
     def on_reject(self, factor: AlphaMetadata, failed_stage: str):
         """因子质量失败:src 归档到 alpha_src(与 ACTIVE 同库,状态由 state 区分),

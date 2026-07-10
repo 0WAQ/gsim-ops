@@ -21,23 +21,11 @@ import os
 import shutil
 import sys
 
-# 写 alpha_src / staging / alpha_pnl / alpha_feature 的子命令。
-# ⚠ 手抄名单是多真相源 (full-review S16),正确形态是子命令注册时声明
-# writes=True 由此派生 —— G-wave 工件。在那之前,新增写命令必须记得改这里。
-WRITE_COMMANDS = {
-    "submit",
-    "restage",
-    "check",
-    # run 改写 alpha_src 内 XML + gsim 写 alpha_pnl/alpha_dump,却一直缺席
-    # 本名单 → JFS 下非 root 直接 EACCES (full-review 第一部分 1.2, 2026-07-07 补)
-    "run",
-    "rm",
-    "approve",
-    "cancel",
-    "clear",
-    "pack",
-    "backfill",
-}
+# 写命令集不再手抄(S16 收编,2026-07-10 阶段 3 第二批):每个写子命令在
+# 注册处 `mark_write(parser)` 声明(ops/cli/common.py),parse 后落在
+# args.is_write_command 上,本模块只消费该声明 —— 单一定义,新增写命令
+# 漏声明会在 JFS 环境首次写时 EACCES 响亮暴露(而非静默绕过提权)。
+# (原 WRITE_COMMANDS 手抄集合是多真相源;`run` 曾缺席名单,full-review 1.2。)
 
 # 这些环境变量在 sudo 提权时必须保留 (sudo 默认 strip 用户 env)。
 # (OPS_STATE_REDIS_PASSWORD 随 redis state 后端退役移除, Wave 1 F2。)
@@ -66,18 +54,12 @@ def _alpha_src_is_root_owned(args) -> bool:
         return False
 
 
-def _get_subcommand(args) -> str | None:
-    # argparse dest 用了带连字符的 "sub-command", attribute 名带连字符不可用,
-    # 走 vars() 拿。
-    return vars(args).get("sub-command")
-
-
 def maybe_elevate(args) -> None:
     """提权检测 + exec sudo。
 
     满足以下全部条件才提权:
       - 当前 euid != 0
-      - args 的 sub-command ∈ WRITE_COMMANDS
+      - 子命令注册时声明了写性(cli/common.mark_write → args.is_write_command)
       - alpha_src.exists() 且 st_uid == 0 (JFS central-ops 模式)
 
     任一条件不满足都 no-op (legacy prod 或 read-only 命令直接走原路径)。
@@ -86,8 +68,7 @@ def maybe_elevate(args) -> None:
     """
     if os.geteuid() == 0:
         return
-    cmd = _get_subcommand(args)
-    if cmd not in WRITE_COMMANDS:
+    if not getattr(args, "is_write_command", False):
         return
     if not _alpha_src_is_root_owned(args):
         return

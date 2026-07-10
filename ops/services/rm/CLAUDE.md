@@ -20,8 +20,9 @@
 删除后因子即不存在,要恢复只能重新 `ops submit`。产物删除走
 `FactorRepository.purge_artifacts(name, scope)`(2026-07-09 收编原本包的
 `_purge_artifacts`/`_recycle_check_artifacts`;`ArtifactScope.SERVING`=dump+feature,
-`ArtifactScope.CHECK`=pnl+池副本,restage / submit --overwrite 同用);src/staging
-目录单独 rmtree,state/snapshot 由 `repo.delete(name)` 删 factor_info 级联带走。
+`ArtifactScope.CHECK`=pnl+池副本,restage / submit --overwrite 同用);src 目录
+单独 rmtree,staging 走 `repo.unstage`(2026-07-10,与 cancel/clear 共用),
+state/snapshot 由 `repo.delete(name)` 删 factor_info 级联带走。
 全程包在 `repo.lock`(factor_lock)内。
 
 **存在性判据 = `factor_info` 有行**(`repo.get`,2026-07-09 起;原"问 state 有无

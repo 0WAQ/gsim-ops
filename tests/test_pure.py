@@ -99,3 +99,23 @@ def test_glob_to_like_pushdown_is_prefilter_only():
 
     clauses, params = snapshot_where(None, "cn[ab]*", None)
     assert clauses == [] and params == []                      # 整体不产出 tables 子句
+
+
+def test_write_command_declarations_match_registry():
+    """S16:写命令集由注册处 mark_write 声明派生(sudo 提权据此),不再手抄。
+    经 ops.main.SUBPARSER_REGISTRARS(注册表单一正主)注册全部子命令 ——
+    新命令加进 main 的注册表即自动进入本断言;唯一钉死的是这 10 个名字的
+    决策本身(含 combo 有意不声明写性)。"""
+    import argparse
+
+    from ops.main import SUBPARSER_REGISTRARS
+
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="sub-command")
+    for add_subparser in SUBPARSER_REGISTRARS:
+        add_subparser(sub)
+
+    declared = {name for name, p in sub.choices.items()
+                if p.get_default("is_write_command")}
+    assert declared == {"submit", "restage", "check", "run", "rm",
+                        "approve", "cancel", "clear", "pack", "backfill"}

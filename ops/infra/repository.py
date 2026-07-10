@@ -33,6 +33,7 @@ import shutil
 from dataclasses import replace
 from enum import Flag, auto
 from functools import cached_property
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ops.core.factor import Factor, FactorIdentity, FactorSnapshot
@@ -47,6 +48,7 @@ from ops.infra.snapshot import default_snapshot_store
 from ops.infra.snapshot.pg_store import metric_order_expr, snapshot_where
 from ops.infra.store import default_store
 from ops.utils.clock import now_iso
+from ops.utils.factor_dir import clean_pycache, rewrite_module_path
 from ops.utils.log import logger
 
 if TYPE_CHECKING:
@@ -358,6 +360,79 @@ class FactorRepository:
     # ---------------------------------------------------------------- 产物面
     def paths(self, name: str) -> FactorPaths:
         return FactorPaths.of(name, self.config)
+
+    def archive(self, name: str, *, src_dir: Path, dump_dir: Path,
+                pnl_file: Path, discovery_method: str | None) -> None:
+        """staging/工作区产物归档入库(收编原 check.to_lib,2026-07-10):
+        src → alpha_src(+@module 重指)、dump → alpha_dump、pnl → alpha_pnl,
+        并按因子来源把 pnl 分流一份到 pnl_automated / pnl_manual 池。
+
+        身份兜底断言(第一道闸在 check.run_one 入口):下方 rmtree/move/rewrite
+        三步共用 paths.src(键=name/@id)锚点,其正确性依赖 src_dir.name == name。
+        发散时 rmtree 删的是"另一个因子"的唯一源码,绝不能带病归档 —— 抛错由
+        调用方的 unexpected 臂接住(check:revert SUBMITTED)。
+        """
+        paths = self.paths(name)
+        if src_dir.name != name:
+            raise RuntimeError(
+                f"identity divergence: staging dir {src_dir.name!r}"
+                f" != factor name {name!r}, refuse to archive")
+
+        clean_pycache(src_dir)
+        if paths.src.exists():
+            shutil.rmtree(paths.src)
+        shutil.move(src_dir, paths.src)
+        rewrite_module_path(paths.src)
+
+        if paths.dump.exists():
+            shutil.rmtree(paths.dump)
+        shutil.move(dump_dir, paths.dump)
+
+        # alpha_pnl/<name> 是单文件(FactorPaths 布局事实):restage 保留 pnl →
+        # re-archive 时此处必有旧文件,rmtree 对文件抛 NotADirectoryError
+        # (full-review 第一部分 1.2)。目录形态只可能是远古残留。
+        if paths.pnl.is_dir():
+            shutil.rmtree(paths.pnl)
+        elif paths.pnl.exists():
+            paths.pnl.unlink()
+        shutil.move(pnl_file, paths.pnl)
+
+        # 按因子来源 (discovery_method) 把 pnl 额外分流一份到对应池。
+        # pnl_file 此时已被 move 走,从入库后的 paths.pnl 拷。pnl 是单文件,copy2。
+        bucket = {"automated": paths.pool_automated,
+                  "manual": paths.pool_manual}.get(discovery_method or "")
+        if bucket is not None:
+            bucket.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(paths.pnl, bucket)
+        else:
+            logger.warning("discovery_method 缺失/非法, 跳过 pnl 分流 factor={} value={}",
+                           name, discovery_method)
+
+    def recall(self, name: str) -> None:
+        """alpha_src/<name> → staging/<name>(收编原 restage 的搬运半边,
+        2026-07-10):move + @module 重指。**move 不是 copy** —— 召回后 staging
+        是源码唯一副本(cancel 的 entered_at 守卫由此而来)。资格校验/产物回收/
+        状态转移仍是 restage 的政策,不在此处。
+        """
+        paths = self.paths(name)
+        if not paths.src.exists():
+            raise FileNotFoundError(f"{paths.src} 不存在")
+        if paths.staging.exists():
+            raise FileExistsError(f"{paths.staging} 已存在,拒绝覆盖")
+
+        paths.staging.parent.mkdir(parents=True, exist_ok=True)
+        clean_pycache(paths.src)
+        shutil.move(str(paths.src), str(paths.staging))
+        rewrite_module_path(paths.staging)
+
+    def unstage(self, name: str) -> bool:
+        """删 staging/<name> 整个目录(cancel / clear / rm 共用)。
+        返回 True 表示目录存在且已删。"""
+        d = self.paths(name).staging
+        if not d.exists():
+            return False
+        shutil.rmtree(d)
+        return True
 
     def purge_artifacts(self, name: str, scope: ArtifactScope) -> list[str]:
         """按面清产物,返回已删项标签(调用方负责打印/记账)。

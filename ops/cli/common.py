@@ -10,7 +10,7 @@ from pathlib import Path
 from ops.core.state import FactorStatus
 from ops.infra.config import get_default_config_path
 
-__all__ = ["FactorStatus", "STATUS_CHOICES", "add_config_arg"]
+__all__ = ["FactorStatus", "STATUS_CHOICES", "add_config_arg", "mark_write"]
 
 # argparse choices 用(list/pack/status 的 --status;restage 取枚举子集,
 # 经本模块 re-export 的 FactorStatus,不直接碰 core)
@@ -21,3 +21,14 @@ def add_config_arg(parser) -> None:
     """统一的 `--config-path/-c`(原 14 个子命令各内联一份)。"""
     parser.add_argument("--config-path", "-c", type=Path,
                         default=get_default_config_path())
+
+
+def mark_write(parser) -> None:
+    """声明该子命令会写共享盘(alpha_src/staging/alpha_pnl/...)。
+
+    sudo self-elevate(infra/sudo.py)据此派生提权名单 —— S16:原
+    `WRITE_COMMANDS` 手抄集合是多真相源,新增写命令漏改名单 = JFS 下非 root
+    直接 EACCES(`run` 曾因此缺席,full-review 第一部分 1.2)。现在写性随
+    子命令注册声明,漏声明的新写命令会在金丝雀环路第一步暴露。
+    """
+    parser.set_defaults(is_write_command=True)

@@ -1,6 +1,6 @@
 import argparse
 
-from ops.cli.common import add_config_arg
+from ops.cli.common import add_config_arg, mark_write
 from ops.services.backfill import run_backfill
 
 
@@ -17,5 +17,7 @@ Example:
     
     parser.add_argument("--dry-run", action="store_true", help="只扫描不写入")
     add_config_arg(parser)
+    
+    mark_write(parser)
     
     parser.set_defaults(func=run_backfill)

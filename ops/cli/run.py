@@ -1,6 +1,6 @@
 import argparse
 
-from ops.cli.common import add_config_arg
+from ops.cli.common import add_config_arg, mark_write
 from ops.services.run.run import run_factors
 
 
@@ -23,5 +23,7 @@ Example:
     # --pack 已删除:epilog 宣传 "run + pack" 但服务层从未读取该 dest(no-op 谎言,
     # full-review 第三部分 V 表)。要打包用独立的 ops pack。
     add_config_arg(parser)
+
+    mark_write(parser)
 
     parser.set_defaults(func=run_factors)

@@ -69,8 +69,7 @@ def run_rm(args) -> None:
             # 在途副本:restage/overwrite 召回的因子代码在 staging。记录删除后
             # 该目录必成孤儿,且 ops check 按 staging 扫描会自动补建记录,把刚
             # 删的因子复活重新入库 —— rm 的"全落点"语义必须含它(JOURNAL U3)。
-            if paths.staging.exists():
-                shutil.rmtree(paths.staging)
+            if repo.unstage(name):
                 info(f"  ✔ 已删除 staging/{name}/")
 
             # check 面产物: pnl + bcorr 池副本

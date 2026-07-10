@@ -1,6 +1,6 @@
 import argparse
 
-from ops.cli.common import add_config_arg
+from ops.cli.common import add_config_arg, mark_write
 from ops.services.rm import run_rm
 
 
@@ -24,5 +24,7 @@ factor_info 行(FK 级联删 factor_state + factor_snapshot)。**不可逆**,
     parser.add_argument("-y", "--yes", action="store_true",
                         help="Skip confirmation prompt")
     add_config_arg(parser)
+
+    mark_write(parser)
 
     parser.set_defaults(func=run_rm)

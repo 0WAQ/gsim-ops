@@ -13,7 +13,7 @@ metadata:
 
 1. **submit 吸收 resubmit,合并为一个命令。** ✅ done。submit 与 resubmit 骨架几乎相同,差异仅镜像守卫 + version 加不加一。合并后 submit 内部按 `store.get(name)` 分派:新因子 put version=1;已入库因子**默认跳过**(submit-新因子心智 + 破坏性 opt-in),`--overwrite` 才 version+1 覆盖。`submit_one` 返回三态 pass/skip/fail。顺带修分裂 bug:overwrite 路径也获得 discovery_method 校验 + npy_index 共享。删 cli/resubmit.py + services/resubmit/,不留别名。
 
-2. **recheck 改名 restage。** ✅ done。纯改名,行为不变。cli/recheck.py→restage.py、services/recheck/→restage/、run_recheck→run_restage、_recheck_one→_restage_one、子命令 recheck→restage。**关键:sudo WRITE_COMMANDS 同步改(漏了 restage 不自动提权,root-owned alpha_src EACCES)**。restage 名副其实——它不跑回测,只召回 alpha_src→staging 翻 SUBMITTED 等下次 ops check。
+2. **recheck 改名 restage。** ✅ done。纯改名,行为不变。cli/recheck.py→restage.py、services/recheck/→restage/、run_recheck→run_restage、_recheck_one→_restage_one、子命令 recheck→restage。**关键:sudo 写命令声明同步(2026-07-10 起 WRITE_COMMANDS 手抄已删,写性在 cli 注册处 mark_write 声明)(漏了 restage 不自动提权,root-owned alpha_src EACCES)**。restage 名副其实——它不跑回测,只召回 alpha_src→staging 翻 SUBMITTED 等下次 ops check。
 
 3. **rm 从软删墓碑改为彻底硬删 + 移除 DELETED 状态。** ✅ done。DELETED 当初是"方便留存"的软删标记,但后续需求证明无用。用户的状态机哲学:因子要么存在(active/rejected/未来 decay 等),要么被删而不存在——删除不是一种状态。`ops rm` 现在彻底删因子 6 个落点:alpha_src/pnl/dump/feature + ~~factor_state 行 + factor_derived 行~~ **factor_info 行 (级联删 state + snapshot, 2026-07-06 三表重构后)**。~~rm 是 DerivedStore.delete 的首个调用者~~ (derived 已被 snapshot 取代)。取消 `--force`(不再有半删档)。`FactorStatus.DELETED` 枚举 + `FactorRecord.deleted_at` 字段 + factor_state.deleted_at 列(schema + 活库 ALTER DROP)全部移除。清理消费点:restage 去 `-s deleted` 复活路径、list/health 去默认 DELETED 过滤、status/pack choices、sync 的 pull 跳过。默认交互确认 + `-y`,单因子接口(不加批量)。
 

@@ -16,7 +16,7 @@
 - **pnl 文件名按 config 的 Alpha id**（不是固定名）：`pnl_id_from_config` 取 Portfolio 下 `Alphas`（多腿/opt）优先否则 `Alpha`（单信号）的 `@id`。gsim 以它命名 pnl 文件。
 - **两个 python 解释器**：跑 qr 的 predict 用 gsim venv（`Runner.run_script` 的 `python=`）；跑 gsim/simsummary 用 `config.python_path`（`run_backtest`/`run_simsummary` 内部）。
 - **warmup**：`--predict-start` 应早于 `--start` ≥1 交易日，否则回测首日信号空（simple 静默空仓 / 优化器崩）。
-- **不在 `WRITE_COMMANDS`**：写的是 combo 自己的 `runs/`，非 root-owned alpha_src，无需 sudo 提权。
+- **未作 `mark_write` 写性声明(cli/common,S16)**：写的是 combo 自己的 `runs/`，非 root-owned alpha_src，无需 sudo 提权。
 
 ## 第一版不含 (见 docs/combo-calling-convention.md "未来扩展")
 

@@ -19,6 +19,26 @@ from ops.cli.submit import add_submit_subparser
 from ops.infra.sudo import maybe_elevate
 from ops.utils.log import logger
 
+# 子命令注册表 —— main 与测试共用的单一正主(对抗评审:S16 声明集测试原先
+# 手抄这 14 个注册函数,新命令不会自动进测试,又造一面镜子)。新增子命令 =
+# 在此加一行;写共享盘的命令还须在其注册函数里 mark_write(cli/common)。
+SUBPARSER_REGISTRARS = (
+    add_run_subparser,
+    add_check_subparser,
+    add_list_subparser,
+    add_info_subparser,
+    add_submit_subparser,
+    add_status_subparser,
+    add_backfill_subparser,
+    add_pack_subparser,
+    add_rm_subparser,
+    add_restage_subparser,
+    add_approve_subparser,
+    add_cancel_subparser,
+    add_clear_subparser,
+    add_combo_subparser,
+)
+
 
 def main():
     try:
@@ -32,20 +52,8 @@ def main():
             title="sub-command", dest="sub-command", required=True
         )
 
-        add_run_subparser(subparsers)
-        add_check_subparser(subparsers)
-        add_list_subparser(subparsers)
-        add_info_subparser(subparsers)
-        add_submit_subparser(subparsers)
-        add_status_subparser(subparsers)
-        add_backfill_subparser(subparsers)
-        add_pack_subparser(subparsers)
-        add_rm_subparser(subparsers)
-        add_restage_subparser(subparsers)
-        add_approve_subparser(subparsers)
-        add_cancel_subparser(subparsers)
-        add_clear_subparser(subparsers)
-        add_combo_subparser(subparsers)
+        for add_subparser in SUBPARSER_REGISTRARS:
+            add_subparser(subparsers)
 
         args = parser.parse_args()
         # JFS 集中运维: write 命令 + alpha_src root-owned 时自动 sudo 提权,

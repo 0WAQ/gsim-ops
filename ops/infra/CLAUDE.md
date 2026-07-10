@@ -20,10 +20,16 @@ Key attributes: all `path.*` fields as `Path`, `compliance`/`correlation`/`check
 
 JFS 集中运维模型下 `alpha_src` / `staging` / `alpha_pnl` 等都是 root-owned,wbai 直接写会 EACCES。
 
-`maybe_elevate(args)`:进程入口检测 `args.sub-command ∈ WRITE_COMMANDS` (submit/restage/check/**run**/rm/approve/cancel/clear/pack/backfill) **且** `alpha_src.st_uid == 0` → `os.execvp('sudo --preserve-env=OPS_* ops <argv>')` 替换自身。read-only 命令和 alpha_src 非 root-owned 环境都 no-op。
+`maybe_elevate(args)`:进程入口检测 `args.is_write_command` **且** `alpha_src.st_uid == 0` → `os.execvp('sudo --preserve-env=OPS_* ops <argv>')` 替换自身。read-only 命令和 alpha_src 非 root-owned 环境都 no-op。
+
+**写命令集由 cli 注册处 `mark_write(parser)` 声明派生**(S16,2026-07-10;
+`ops/cli/common.py`,`set_defaults(is_write_command=True)`):原 `WRITE_COMMANDS`
+手抄集合是多真相源(`run` 曾缺席 → JFS 下非 root 直接 EACCES,full-review 1.2),
+已删除。当前 10 个写命令声明:submit/restage/check/run/rm/approve/cancel/clear/
+pack/backfill;声明集钉在 `tests/test_pure.py::test_write_command_declarations_match_registry`。
 
 `ensure_redis_password` 钩子随 redis state 后端一并删除(2026-07-07 Wave 1)。
-`maybe_elevate(args)` 在 `ops/main.py` 入口调用;`run` 已补进 WRITE_COMMANDS,sudo 只用
+`maybe_elevate(args)` 在 `ops/main.py` 入口调用;sudo 只用
 `--preserve-env=<白名单>`(去掉了架空白名单的 `-E`)。
 
 ## Cache (`cache.py`)
@@ -103,6 +109,14 @@ check._ensure_record 的唯一双表写入口)/ `record`/`transition`(CAS 透传
 `ArtifactScope.CHECK`(pnl + bcorr 池副本,离库一律回收,防自鬼影 PV7)/
 `ArtifactScope.SERVING`(dump + feature,last-known-good,--purge/REJECTED 才清)。
 收编原 services/rm 的 `_purge_artifacts`/`_recycle_check_artifacts` 跨包 helper。
+搬运三件套(2026-07-10 阶段 3 第二批):`archive(name, *, src_dir, dump_dir,
+pnl_file, discovery_method)` —— 归档入库,收编原 check.to_lib 全部搬运
+(clean_pycache + src→alpha_src + @module 重指 + dump/pnl 搬库 + 按来源分流
+池副本 + 身份兜底断言,第一道闸仍在 check.run_one 入口)/ `recall(name)` ——
+alpha_src→staging,收编 restage 搬运半边(存在性/占用校验 + clean_pycache +
+move + @module 重指;**move 不是 copy**,召回后 staging 是唯一副本)/
+`unstage(name) -> bool` —— 删 staging 目录(cancel/clear/rm 三处 rmtree 收编,
+True = 存在且已删)。
 
 **json dev/test 后端降级语义**:register 只写 state、get 合成仅含 name 的
 identity、find 抛 NotImplementedError、discard_snapshot no-op —— 控制流测试

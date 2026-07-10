@@ -1,6 +1,6 @@
 import argparse
 
-from ops.cli.common import FactorStatus, add_config_arg
+from ops.cli.common import FactorStatus, add_config_arg, mark_write
 from ops.services.restage import run_restage
 from ops.utils.utils import LowerAction
 
@@ -44,5 +44,7 @@ Example:
     parser.add_argument("-y", "--yes", action="store_true",
                         help="跳过交互确认")
     add_config_arg(parser)
+
+    mark_write(parser)
 
     parser.set_defaults(func=run_restage)

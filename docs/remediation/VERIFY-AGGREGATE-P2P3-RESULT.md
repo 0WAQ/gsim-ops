@@ -293,3 +293,150 @@ ls: cannot access 'contracts-baseline.toml': No such file or directory
 ```
 
 阶段 0 全项符合预期。
+
+---
+
+# 第三轮(phase3b · rev c280b18)
+
+**分支**:`claude/factor-aggregate-phase3b`
+**执行日期**:2026-07-10
+**增量面**:阶段 3 第二批 —— archive/recall/unstage 搬运正主收编 `FactorRepository`;
+S16 写命令注册声明派生(sudo 提权名单从命令注册派生)。4 环路(尤其 4c
+restage 回收 / 4e re-check→archive / 4f cancel)正是本批的行为级回归对象。
+
+**结论**:**全绿通过**。阶段 1/2/4 复跑符合预期,阶段 0 门禁顺带全绿
+(阶段 3 冒烟按指示略过)。
+
+**160 rev**:
+
+```
+c280b18 feat(repository): archive/recall/unstage 收编搬运正主;S16 写命令注册声明派生(阶段 3 第二批)
+b17de9c Merge pull request #5 from 0WAQ/claude/factor-aggregate-phase3
+ef8ed79 docs: 160 验证全绿收账(VERIFY-AGGREGATE-P2P3 判读,archive/recall 前置解除)
+```
+
+## 阶段 0 · 静态门禁(顺带)—— 通过
+
+- `uv run ruff check ops tests` → `All checks passed!`
+- `uv run pyright ops` → `0 errors, 0 warnings, 0 informations`
+- `uv run lint-imports` → `Analyzed 148 files, 462 dependencies. ... Contracts: 7 kept, 0 broken.`
+
+## 阶段 1 · fast suite 含 PG 组 —— 通过
+
+```
+106 passed, 8 skipped, 6 deselected in 2.64s
+```
+
+0 failed。较第二轮(101 passed)增 5,来自阶段 3 第二批新增用例(archive/recall/
+unstage 收编 + S16 写命令注册)。
+
+## 阶段 2 · e2e(真 gsim + cc)—— 通过
+
+```
+6 passed, 114 deselected in 55.42s
+```
+
+archive 编排搬运正主收编 `repo.archive`/`repo.recall` 后,逐 stage 确定性失败
+因子回归全过。
+
+## 阶段 4 · 金丝雀行为环路 —— 通过
+
+前置:server-160,NOPASSWD-OK,孪生真因子 `AlphaWbaiReversal` 在 pnl_manual 池,
+金丝雀无残留,基线 Total=8252。两份 config corr_threshold=1.01/0.7。
+
+### 4a · 入库(register 原子 + attach 强制 + 身份守卫不误伤)
+
+`submit → check -c config.verify.yaml`:`[1/1] AlphaWbaiCanary001 → lib`,`✔ 通过 : 1`。
+三表核对(name/author/status/stamped):
+
+```
+('AlphaWbaiCanary001', 'wbai', 'active', True)
+```
+
+`stamped=True`,`pnl_manual/AlphaWbaiCanary001` 池副本存在,身份守卫无误伤。
+
+### 4b · check 期间连接占用
+
+4c re-check 运行中并发轮询 6 次,`SELECT count(*) FROM pg_stat_activity WHERE datname='ops'`:
+
+```
+(1,) (1,) (1,) (1,) (1,) (1,)
+```
+
+个位数,远低于 100。
+
+### 4c · 生产阈值 re-check → REJECTED(archive/recall 收编后回归)
+
+`restage -y` 输出含 `✔ 已回收 alpha_pnl/...` + `✔ 已回收 pnl_manual/...`
+(recall 搬运收编 `repo.recall` 后回收行为一致)。`check -c config.verify-pv7.yaml`:
+
+```
+[1/1] AlphaWbaiCanary001  → rejected/correlation: bcorr=1.0, ret=12.42%, shrp=1.18, mdd=40.41%, tvr=78.29%, fitness=0.47
+✘ 未通过 : 1
+```
+
+**自名过滤判读**:bcorr=1.0 的 fail metrics(ret=12.42%, shrp=1.18)与孪生真因子
+`AlphaWbaiReversal`(ret=12.44, shrp=1.19)一致 —— 竞品是孪生真因子,不是金丝雀
+自己。**判定 ✅**。产物策略:
+
+```
+alpha_pnl/AlphaWbaiCanary001   存在   （late-stage 保留）
+alpha_dump/AlphaWbaiCanary001  存在   （late-stage 保留）
+pnl_manual/AlphaWbaiCanary001  无输出 （REJECTED 不拷池)
+```
+
+### 4d · approve 语义 API
+
+`ops approve`(不带 -y)交互原文:
+
+```
+· AlphaWbaiCanary001                        author=wbai        rejected_at=2026-07-10T22:37:38
+确认 approve 1 个因子? [y/N]   ✔ AlphaWbaiCanary001 rejected → active
+```
+
+`author=wbai` 来自 repo。check_history 末条(PG `check_history->-1`):
+
+```
+{'passed': True, 'started_at': '2026-07-10T22:39:28', 'fail_reason': 'approved',
+ 'finished_at': '2026-07-10T22:39:28', 'failed_stage': None}
+```
+
+`ops info` Metrics 段 `—  (未入库或入库时未生成 metrics)` —— 合法无快照 ACTIVE。
+
+### 4e · REJECTED 闭环 + rm 全落点(archive 收编后回归)
+
+`restage -y`(回收 alpha_pnl)→ `check -c config.verify.yaml`(corr=1.01):
+`[1/1] → lib`,`✔ 通过 : 1`(stale snapshot 自愈 + archive 搬运收编 `repo.archive`)。
+`ops rm -y` 五条 `✔ 已删除`(alpha_dump/alpha_src/alpha_pnl/pnl_manual/factor_info
+级联)。零残留:
+
+```
+文件（src/dump/staging/pnl/pnl_manual/pnl_automated）: 全无输出
+PG:  ('info', 0)  ('state', 0)  ('snap', 0)
+```
+
+### 4f · cancel 级联一步(二号金丝雀)
+
+`submit AlphaWbaiCanary002` → submitted。`ops cancel`(不带 -y)交互原文:
+
+```
+· AlphaWbaiCanary002                        submitted  author=wbai        submitted_at=2026-07-10T22:41:13
+确认 cancel 1 个因子? [y/N]     ✔ 已删除 staging/AlphaWbaiCanary002/
+  ✔ 已删除 factor_info + 级联 state record AlphaWbaiCanary002
+```
+
+级联核心断言:
+
+```
+PG:  ('info', 0)  ('state', 0)
+staging/AlphaWbaiCanary002:  无输出
+```
+
+### 4g · 清理
+
+`ops list | tail -1` → `Total: 8252 factors`,回基线;工作树仅剩会话开始即存在
+的无关 untracked 文件。
+
+**阶段 3b 判读**:archive/recall/unstage 搬运正主收编 `FactorRepository`、S16 写
+命令注册派生后,金丝雀端到端环路(入库/回收/重跑/归档/删除/撤回)行为与
+phase3 第二轮完全一致,无回归。阶段 5(150/144)仍随合 main 后窗口滚存。
