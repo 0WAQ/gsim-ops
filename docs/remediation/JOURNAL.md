@@ -1058,3 +1058,13 @@ approve/restage/rm/info/list/backfill 已在阶段 2 迁毕。
 4. 提交纪律:8 个文档改动须与代码同批 staged(commit 前 git add -A 兜住)。
 另修 memory 两处漂移(query_factors/内存交集的过时描述,评审与 docs-updater
 双双诊断)。门禁终态:46 passed、7/7 契约 KEPT、pyright 0。
+
+**160 验证收官(2026-07-10,VERIFY-AGGREGATE-P2P3-RESULT)**:执行者两轮闭环 ——
+首轮按红线停在 fast suite 2 failed(test_check_scan 两用例给 _ensure_record 传
+裸 store,签名迁移漏更的陈旧夹具;PG 组"本地 skip、160 真跑"的盲区实证),
+b0b548e 修复后第二轮全绿:101 passed / e2e 6 passed / 只读冒烟 Total=8252 持平
+(`=>` typo 报错原文命中)/ 金丝雀 4a-4g 全过(register 原子 stamped=t、check 期
+连接数 1、correlation 归因与自名过滤判读、approve 合法无快照 ACTIVE、rm 级联
+三表零行、cancel 级联零孤儿 info)。**阶段 2 + 阶段 3 第一批至此生产验证完毕**;
+archive/recall(阶段 3 第二批)前置解除。侧记:AlphaWbaiReversal(rejected)仍在
+pnl_manual 池 —— bcorr 池存量鬼影挂账再次现形(审计 snippet 已交,待清)。
