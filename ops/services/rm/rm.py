@@ -2,6 +2,9 @@
 
 删除因子的全部落点:
   - alpha_src/<name>/           源码目录 (唯一代码副本)
+  - staging/<name>/             在途副本 (restage/overwrite 召回的因子在此;不清则
+    记录级联删除后必成孤儿,且 ops check 按 staging 目录扫描会自动补建记录**复活**
+    刚删的因子 —— 2026-07-09 评审发现,JOURNAL U3)
   - alpha_pnl/<name>            回测 PNL (单文件)
   - alpha_dump/<name>/          日频目标持仓目录
   - alpha_feature/<name>.*.npy  聚合 feature
@@ -72,6 +75,7 @@ def run_rm(args) -> None:
     highlight(f"  状态: {rec.status.value}(删除后即不存在,不可逆)")
     info("  将删除以下全部落点:")
     info(f"    · alpha_src/{name}/          (源码,唯一代码副本)")
+    info(f"    · staging/{name}/            (在途副本,如存在)")
     info(f"    · alpha_pnl/{name}           (PNL)")
     info(f"    · alpha_dump/{name}/         (dump)")
     info(f"    · alpha_feature/{name}.*.npy (feature)")
@@ -95,6 +99,14 @@ def run_rm(args) -> None:
             if src_dir.exists():
                 shutil.rmtree(src_dir)
                 info(f"  ✔ 已删除 alpha_src/{name}/")
+
+            # 在途副本:restage/overwrite 召回的因子代码在 staging。记录删除后
+            # 该目录必成孤儿,且 ops check 按 staging 扫描会自动补建记录,把刚
+            # 删的因子复活重新入库 —— rm 的"全落点"语义必须含它(JOURNAL U3)。
+            staging_dir = config.staging / name
+            if staging_dir.exists():
+                shutil.rmtree(staging_dir)
+                info(f"  ✔ 已删除 staging/{name}/")
 
             # check 面产物: pnl + bcorr 池副本
             for r in _recycle_check_artifacts(name, config):

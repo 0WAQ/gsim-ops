@@ -11,8 +11,9 @@
 - staging/<name>/  (整个目录,硬删)
 - state record     (store.delete,硬删)
 
-不动: alpha_src / alpha_pnl / alpha_dump / alpha_feature
-(SUBMITTED 因子按定义没有这些产物;CHECKING 残留若有 dump,留给 ops gc / 手工)
+不动: alpha_src / alpha_pnl / alpha_dump / alpha_feature —— 正因如此,资格判定
+拒绝任何在 alpha_src 有归档的因子(entered_at 非空的曾 ACTIVE、或曾 REJECTED 后
+重提的):对它们只删记录会留下孤儿产物,须走 ops rm(2026-07-09 生产实测,JOURNAL U3)。
 
 批量模式 (-u) apt 风格交互;-y 跳过确认。
 """
@@ -32,16 +33,23 @@ def _eligible_statuses(force: bool) -> set[FactorStatus]:
     return {FactorStatus.SUBMITTED}
 
 
-def _ineligible_reason(rec: FactorRecord, force: bool) -> str | None:
+def _ineligible_reason(rec: FactorRecord, force: bool, config: Config) -> str | None:
     """resolve 与锁内复验共用的资格谓词;返回 None=可 cancel,str=原因。"""
     if rec.status not in _eligible_statuses(force):
         return f"status={rec.status.value}"
     if rec.entered_at:
         return "曾入库(entered_at 非空),staging 或为唯一源码"
+    if (config.alpha_src / rec.name).exists():
+        # cancel 的前提"SUBMITTED 无产物"只对纯新提交成立。曾被 check 归档过的
+        # 因子(如 REJECTED 后 submit --overwrite 召回)在 alpha_src 有归档,
+        # late-stage 拒绝还留有 pnl/dump —— 只删记录会把这些产物变成任何命令都
+        # 够不到的孤儿(2026-07-09 生产实测:143 个孤儿目录即此路径产生,
+        # JOURNAL U3)。拒绝并指引 ops rm(全落点删除)。
+        return "alpha_src 有归档产物(曾被 check 归档),cancel 会留孤儿;用 ops rm"
     return None
 
 
-def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[tuple[FactorRecord, str]]]:
+def _resolve_targets(args, store, info_store, config: Config) -> tuple[list[FactorRecord], list[tuple[FactorRecord, str]]]:
     name: str | None = args.factor_name
     eligible = _eligible_statuses(args.force)
 
@@ -67,6 +75,10 @@ def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[
             error(f"  ✘ {name} 曾入库(entered_at={rec.entered_at}),staging 里可能是"
                   f"唯一源码副本,拒绝 cancel;要彻底删除用 ops rm,要重新入库跑 ops check")
             return [], []
+        if (config.alpha_src / name).exists():
+            error(f"  ✘ {name} 在 alpha_src 有归档产物(曾被 check 归档,如 REJECTED"
+                  f" 后重提),cancel 只删记录会留下孤儿产物;要彻底删除用 ops rm")
+            return [], []
         return [rec], []
 
     if not args.user:
@@ -86,7 +98,7 @@ def _resolve_targets(args, store, info_store) -> tuple[list[FactorRecord], list[
     targets: list[FactorRecord] = []
     skipped: list[tuple[FactorRecord, str]] = []
     for r in records:
-        reason = _ineligible_reason(r, args.force)
+        reason = _ineligible_reason(r, args.force, config)
         if reason:
             skipped.append((r, reason))
         else:
@@ -147,7 +159,7 @@ def run_cancel(args) -> BatchResult | None:
     store = default_store(config)
     info_store = default_info_store(config)
 
-    targets, skipped = _resolve_targets(args, store, info_store)
+    targets, skipped = _resolve_targets(args, store, info_store, config)
     if not targets:
         if not skipped:
             warn("  没有匹配的因子")
@@ -169,7 +181,7 @@ def run_cancel(args) -> BatchResult | None:
         fresh = store.get(name)
         if fresh is None:
             raise SkipFactor("state 记录已不存在")
-        reason = _ineligible_reason(fresh, args.force)
+        reason = _ineligible_reason(fresh, args.force, config)
         if reason:
             raise SkipFactor(f"确认期间状态已变: {reason}")
         _cancel_one(name, config, store, info_store)

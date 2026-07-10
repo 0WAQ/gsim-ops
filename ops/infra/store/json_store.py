@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus
+from ops.infra.errors import FactorNotFound
 
 from .base import StateConflict, StateStore
 
@@ -103,7 +104,7 @@ class JsonStateStore(StateStore):
             records = self._read_records()
             rec = records.get(name)
             if rec is None:
-                raise KeyError(f"factor not found: {name}")
+                raise FactorNotFound(f"factor not found: {name}")
             if expect is not None and rec.status != expect:
                 raise StateConflict(
                     f"{name}: status={rec.status.value}, expect={expect.value}")
@@ -120,7 +121,7 @@ class JsonStateStore(StateStore):
             records = self._read_records()
             rec = records.get(name)
             if rec is None:
-                raise KeyError(f"factor not found: {name}")
+                raise FactorNotFound(f"factor not found: {name}")
             rec.check_history.append(check)
             rec.updated_at = _now()
             records[name] = rec

@@ -2,14 +2,11 @@ from abc import ABC, abstractmethod
 
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus
 
+# 定义已迁 ops/infra/errors.py(D3 类型化异常集中地);此处 re-export 保住
+# `from ops.infra.store import StateConflict` 的存量导入路径。
+from ops.infra.errors import StateConflict
 
-class StateConflict(RuntimeError):
-    """transition(expect=...) 的 CAS 失败:当前 status 与期望不符。
-
-    TOCTOU 修复的一半 (full-review 第三部分 §3.2):resolve 与执行之间状态
-    可能被并发操作改变,transition 提供 from-status 条件更新,调用方捕获后
-    按'跳过'处理而不是盲改。
-    """
+__all__ = ["StateConflict", "StateStore"]
 
 
 class StateStore(ABC):

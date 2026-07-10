@@ -52,7 +52,7 @@ PY
 | `test_check_scan.py` | `_scan_factors` 过滤、`_ensure_record` 补建/不覆盖、CHECKING 自愈、FactorLocked → locked | 是 |
 | `test_submit.py` | submit:新因子 version=1、已入库跳过、`--overwrite` version+1、文件数/syntax/discovery_method 校验失败回滚 staging | 是 |
 | `test_restage.py` | restage:ACTIVE/REJECTED 召回 → SUBMITTED、REJECTED 清 pnl、`--purge` 清 dump/feature、不支持状态/源缺失跳过 | 是 |
-| `test_lifecycle_cmds.py` | cancel(SUBMITTED/`--force` CHECKING)、approve(仅 correlation-rejected)、clear(仅孤儿)、rm(硬删全落点 + factor_info 级联 state/snapshot) | 是 |
+| `test_lifecycle_cmds.py` | cancel(SUBMITTED/`--force` CHECKING、产物守卫拒绝/批量 skip)、approve(仅 correlation-rejected)、clear(仅孤儿)、rm(硬删全落点含 staging + factor_info 级联 state/snapshot) | 是 |
 
 ### 可测性接缝(依赖注入)
 

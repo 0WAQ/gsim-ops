@@ -67,6 +67,39 @@ def test_cancel_active_rejected(test_config, seed_factor):
     assert _store(config).get("AlphaWbaiActC").status == FactorStatus.ACTIVE
 
 
+def test_cancel_refuses_archived_artifacts(test_config, seed_factor):
+    """曾被 check 归档的因子(如 REJECTED 后 overwrite 召回,entered_at 为空但
+    alpha_src 有归档)不得 cancel —— 只删记录会留孤儿产物(2026-07-09 生产实测,
+    JOURNAL U3)。"""
+    from ops.services.cancel.cancel import run_cancel
+    cfg_path, config = test_config
+    name = "AlphaWbaiExRej"
+    (config.alpha_src / name).mkdir(parents=True, exist_ok=True)
+    (config.staging / name).mkdir(parents=True, exist_ok=True)
+    seed_factor(name, FactorStatus.SUBMITTED)   # entered_at 为空(从未入库)
+    run_cancel(_args(cfg_path, factor_name=name, force=False))
+    # 拒绝:记录保留、staging 保留、归档保留
+    assert _store(config).get(name) is not None
+    assert (config.staging / name).exists()
+    assert (config.alpha_src / name).exists()
+
+
+def test_cancel_batch_skips_archived_artifacts(test_config, seed_factor):
+    """批量模式下同款守卫走 skipped 通道,不阻断其它可 cancel 因子。"""
+    from ops.services.cancel.cancel import run_cancel
+    cfg_path, config = test_config
+    # 一个纯新提交(可删) + 一个有归档(跳过)
+    (config.staging / "AlphaWbaiPure").mkdir(parents=True, exist_ok=True)
+    seed_factor("AlphaWbaiPure", FactorStatus.SUBMITTED)
+    (config.alpha_src / "AlphaWbaiArch").mkdir(parents=True, exist_ok=True)
+    (config.staging / "AlphaWbaiArch").mkdir(parents=True, exist_ok=True)
+    seed_factor("AlphaWbaiArch", FactorStatus.SUBMITTED)
+    run_cancel(_args(cfg_path, user="wbai", force=False))
+    assert _store(config).get("AlphaWbaiPure") is None          # 删了
+    assert _store(config).get("AlphaWbaiArch") is not None      # 守卫跳过
+    assert (config.alpha_src / "AlphaWbaiArch").exists()
+
+
 # ---------------------------------------------------------------------------
 # approve
 # ---------------------------------------------------------------------------
@@ -141,6 +174,8 @@ def test_rm_hard_deletes_all(test_config, seed_factor):
     # bcorr 分流池副本(to_lib 写入;rm 不清则永远留在对比池,生产验证 L3-7 实测)
     (config.pnl_manual / name).write_text("pool-copy")
     (config.pnl_automated / name).write_text("pool-copy")
+    # 在途副本(restage/overwrite 召回场景;rm 不清则 check 扫 staging 会复活因子)
+    (config.staging / name).mkdir(parents=True, exist_ok=True)
     seed_factor(name, FactorStatus.ACTIVE)
     from ops.infra.snapshot import FactorSnapshot
     _snapshot(config).insert(FactorSnapshot(name=name, ret=1.0, shrp=1.0, mdd=1.0,
@@ -156,6 +191,7 @@ def test_rm_hard_deletes_all(test_config, seed_factor):
     assert not (config.alpha_feature / f"{name}.v1.npy").exists()
     assert not (config.pnl_manual / name).exists()      # 池副本一并清
     assert not (config.pnl_automated / name).exists()
+    assert not (config.staging / name).exists()          # 在途副本一并清(防 check 复活)
     assert _store(config).get(name) is None
     assert _snapshot(config).get(name) is None  # info 级联删 snapshot
 

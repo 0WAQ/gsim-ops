@@ -21,11 +21,6 @@ import os
 import shutil
 import sys
 
-from rich.console import Console
-
-_stderr = Console(stderr=True)
-
-
 # 写 alpha_src / staging / alpha_pnl / alpha_feature 的子命令。
 # ⚠ 手抄名单是多真相源 (full-review S16),正确形态是子命令注册时声明
 # writes=True 由此派生 —— G-wave 工件。在那之前,新增写命令必须记得改这里。
@@ -106,5 +101,5 @@ def maybe_elevate(args) -> None:
         f"--preserve-env={env_list}",
         ops_bin,
     ] + sys.argv[1:]
-    _stderr.print("  [dim][ops] alpha_src is root-owned; elevating via sudo[/]")
+    print("  [ops] alpha_src is root-owned; elevating via sudo", file=sys.stderr)
     os.execvp("sudo", sudo_argv)  # never returns

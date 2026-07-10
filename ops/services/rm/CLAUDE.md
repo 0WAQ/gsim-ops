@@ -7,6 +7,9 @@
 一次删掉因子的全部落点:
 
 - `alpha_src/<name>/`(源码目录,唯一代码副本)
+- `staging/<name>/`(在途副本,如存在;2026-07-09 补 —— restage/overwrite 召回的
+  因子代码在 staging,不清则记录级联删除后必成孤儿,且 `ops check` 按 staging
+  目录扫描会自动补建记录**复活**刚删的因子,JOURNAL U3)
 - `alpha_pnl/<name>`(PNL 单文件)
 - `alpha_dump/<name>/`(dump 目录)
 - `alpha_feature/<name>.{v1,v2}.npy`(feature)
@@ -26,9 +29,9 @@
 
 | | `ops rm` | `ops cancel` |
 |---|---|---|
-| 适用状态 | 已入库(ACTIVE/REJECTED 等) | SUBMITTED(`--force` + CHECKING) |
-| 删除范围 | src/pnl/dump/feature + factor_info(级联 state + snapshot)全删 | staging 目录 + state record(无产物可删) |
-| 因子曾入库 | 是 | 否(从未 ACTIVE) |
+| 适用状态 | 任何有 state 记录的因子(典型 ACTIVE/REJECTED;也承接被 cancel 守卫拒绝的"有归档的 SUBMITTED") | SUBMITTED(`--force` + CHECKING),且须**无任何归档产物** |
+| 删除范围 | src/staging/pnl/dump/feature/池副本 + factor_info(级联 state + snapshot)全删 | staging 目录 + state record |
+| 适用前提 | 因子有归档落点(曾入库或曾被 check 归档) | 纯新提交,除 staging 外零落点(entered_at / alpha_src 双守卫把关) |
 
 ---
 

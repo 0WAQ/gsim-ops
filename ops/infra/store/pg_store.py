@@ -21,6 +21,7 @@ from typing import Any
 from psycopg.types.json import Jsonb
 
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus
+from ops.infra.errors import FactorNotFound
 from ops.infra.pg import ensure_schema, get_pool
 
 from .base import StateConflict, StateStore
@@ -168,7 +169,7 @@ class PostgresStateStore(StateStore):
             with conn.transaction():
                 row = conn.execute(sql, (name,)).fetchone()
                 if row is None:
-                    raise KeyError(f"factor not found: {name}")
+                    raise FactorNotFound(f"factor not found: {name}")
                 rec = self._row_to_record(row)
                 if expect is not None and rec.status != expect:
                     # FOR UPDATE 行锁内的 CAS —— 并发安全的 from-status 守卫
@@ -203,7 +204,7 @@ class PostgresStateStore(StateStore):
                     (name,),
                 ).fetchone()
                 if row is None:
-                    raise KeyError(f"factor not found: {name}")
+                    raise FactorNotFound(f"factor not found: {name}")
                 conn.execute(
                     "UPDATE factor_state SET check_history = check_history || %s, "
                     "updated_at = %s WHERE name=%s",

@@ -39,7 +39,7 @@ def run_info(args):
 
     # 物理状态:单因子现场 stat(便宜,只碰本因子路径)。scanner.get 返回 None
     # 表示 src 目录缺失(PG 有记录但盘上没有 —— 显示出来,让漂移可见)。
-    scanner = LibraryScanner.from_config_path(args.config_path)
+    scanner = LibraryScanner(config)
     factor = scanner.get(name)
 
     first_date, last_date = scanner.get_dump_date_range(name)

@@ -64,8 +64,11 @@ class SnapshotStore(ABC):
         """
 
     @abstractmethod
-    def delete(self, name: str) -> None:
-        """删除因子快照（ops rm 时）。"""
+    def delete(self, name: str) -> bool:
+        """删除因子快照(rm / restage / overwrite 离库时)。
+
+        返回 True 表示行存在且已删除(与 StateStore/InfoStore 的 delete 契约
+        对齐,full-review D3 —— 同一动词一种返回约定)。"""
 
     @abstractmethod
     def list(

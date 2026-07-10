@@ -210,7 +210,7 @@ AlphaXxx/
 | stage 身份 / 顺序 / 路由策略 | `services/check/stages.py` 的 `PIPELINE` | 新增 stage = 加一行 |
 | 时间戳格式 | `ops/utils/clock.py::now_iso` | |
 | 状态值 | `FactorStatus` 枚举 | 与 DB CHECK 约束同一提交改 |
-| 依赖分层规则 | import-linter 契约(`docs/factor-aggregate-plan.md` 附录 A) | 阶段 0 进 CI |
+| 依赖分层规则 | pyproject `[tool.importlinter]`(enforcing)+ `contracts-baseline.toml`(C2/C3 ratchet) | 2026-07-09 已进 CI |
 | ⚠ 盘面布局(src/pnl/dump/feature/staging) | 待建 `FactorPaths`,今散布 40+ 处 | 聚合工程阶段 1 |
 | ⚠ 写命令集(sudo 提权名单) | `infra/sudo.py::WRITE_COMMANDS` 手抄 | 待从命令注册派生(S16) |
 | ⚠ metric 表达式 | snapshot `_METRIC_EXPR` 与 list 镜像 | 待注册表(S8) |

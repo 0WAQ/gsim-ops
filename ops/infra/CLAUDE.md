@@ -35,6 +35,15 @@ All ops state/cache files live under `~/.cache/ops/`.
 - `library_cache_dir(library_id)` returns the dir, ensuring it exists
 - Locks at `~/.cache/ops/locks/` — fcntl, per-machine(**仅 json dev/test 后端用**;postgres 后端走跨机 PG advisory lock,见 `lock.py`)
 - `cache.py` 现仅剩 json dev/test 后端的 factor_state.json + locks 用(derived.json 随僵尸层退役,2026-07-07 Wave 2)。
+- **`CACHE_ROOT` 常量的正主在 `ops/utils/cachedir.py`**(2026-07-09 迁出:utils.log 也要用它,原先 utils→infra 反向依赖违反分层,import-linter C1/C5);cache.py re-export 保住旧导入路径。
+
+## Errors (`errors.py`)
+
+infra 层类型化异常集中地(full-review D3,2026-07-09):`StateConflict`(自
+store/base 迁居,原处 re-export 保兼容)+ `FactorNotFound`(KeyError 子类 ——
+transition/append_check 原先抛裸 KeyError,存量 `except KeyError` 继续有效)。
+约定:变更操作返回 bool(delete = "存在且已删",State/Info/Snapshot 三家已对齐)
+或抛这里的类型化异常;只定义有 raise 方的异常,不预建空壳。
 
 ## PG Pool Registry (`pg.py`,full-review D2)
 
