@@ -1108,3 +1108,10 @@ pyright 0。
 (4a stamped=t、4b 连接数 1、4c 回收+归因+产物策略、4d approve、4e rm 三表零行、
 4f cancel 级联零孤儿)。archive/recall/unstage 收编与 S16 的行为等价性获生产
 实证;合 main 前置齐备。
+
+**三机滚存收官(2026-07-10)**:PR #5/#6 合 main 后,160/150/144 全部对齐
+`4ffa4fd` —— fast suite 三机各 106 passed(144 走跨段路由 48s 属预期)、
+Total=8252 三机一致、lint 7/7。混版本兼容性判定获实证(150/144 自旧 main
+8455a66 直升)。**Factor 聚合工程阶段 0-3(两批)至此全部入产**。剩余收官件:
+8 命令行数核对、S8 list 内存 metric 镜像;挂账不变:MinIO/Feishu 密钥轮换
+(最紧急)、bcorr 池鬼影清理。
