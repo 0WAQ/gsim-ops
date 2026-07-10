@@ -7,10 +7,10 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
+from ops.core.factor import Factor, FactorSnapshot
 from ops.core.state import FactorStatus
 from ops.infra.config import Config
-from ops.infra.query import FactorRow, query_factors
-from ops.infra.snapshot import FactorSnapshot
+from ops.infra.repository import FactorRepository
 
 DASH = "—"
 
@@ -51,16 +51,16 @@ def _datasource(snap: FactorSnapshot | None, key: str):
     return ", ".join(vals or [])
 
 
-def _fail_stage(row: FactorRow):
+def _fail_stage(row: Factor):
     if row.status == FactorStatus.REJECTED and row.last_fail_stage:
         return row.last_fail_stage
     return ""
 
 
-# (header, justify, extras, getter(row: FactorRow) -> str)
+# (header, justify, extras, getter(row: Factor) -> str)
 _BASE_COLS = [
-    ("name",    "left",  {"no_wrap": True, "max_width": 36, "overflow": "ellipsis"}, lambda x: x.info.name),
-    ("author",  "left",  {},                lambda x: x.info.author or ""),
+    ("name",    "left",  {"no_wrap": True, "max_width": 36, "overflow": "ellipsis"}, lambda x: x.identity.name),
+    ("author",  "left",  {},                lambda x: x.identity.author or ""),
     ("delay",   "right", {},                lambda x: str(x.snapshot.delay) if x.snapshot and x.snapshot.delay is not None else "?"),
     ("ret%",    "right", {},                lambda x: _metric(x.snapshot, "ret")),
     ("shrp",    "right", {},                lambda x: _metric(x.snapshot, "shrp")),
@@ -74,7 +74,7 @@ _TABLES_COL = ("tables",     "left", {"overflow": "fold"},  lambda x: _datasourc
 _FIELDS_COL = ("fields",     "left", {"overflow": "fold"},  lambda x: _datasource(x.snapshot, "fields"))
 
 
-def print_table(rows: list[FactorRow], show_tables=False, show_fields=False):
+def print_table(rows: list[Factor], show_tables=False, show_fields=False):
     if not rows:
         _console.print("[yellow]No factors found.[/]")
         return
@@ -101,8 +101,8 @@ def print_table(rows: list[FactorRow], show_tables=False, show_fields=False):
     _console.print(f"Total: {len(rows)} factors")
 
 
-def _row_to_json(row: FactorRow) -> dict:
-    """将 FactorRow 转换为 JSON 字典。
+def _row_to_json(row: Factor) -> dict:
+    """将 Factor 转换为 JSON 字典。
 
     ⚠ 2026-07-07 Wave 2 输出变更: has_pnl/dump_days 两个键移除 —— 它们是实时
     物理状态,唯一来源是全库扫盘(每次 list ~25s),与"list 是 PG catalog 查询"
@@ -124,8 +124,8 @@ def _row_to_json(row: FactorRow) -> dict:
         bcorr = {"max_bcorr": snap.max_bcorr, "max_bcorr_factor": snap.max_bcorr_factor}
 
     return {
-        "name": row.info.name,
-        "author": row.info.author,
+        "name": row.identity.name,
+        "author": row.identity.author,
         "status": row.status.value if row.status else None,
         "delay": snap.delay if snap else None,
         "metrics": metrics,
@@ -134,7 +134,7 @@ def _row_to_json(row: FactorRow) -> dict:
     }
 
 
-def print_json(rows: list[FactorRow]):
+def print_json(rows: list[Factor]):
     data = [_row_to_json(x) for x in rows]
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
@@ -144,6 +144,10 @@ _FILTER_PATTERN = re.compile(r"^(\w+)([><=!]+)(.+)$")
 # (不在 snapshot)，过滤/排序无对应快照列，故不再作为 filter/sort 键。
 _SORTABLE_KEYS = {"ret", "shrp", "mdd", "tvr", "fitness", "bcorr"}
 FILTER_KEYS = {"tables", "field"} | _SORTABLE_KEYS
+# 合法比较符白名单:typo(=>、=<、>< 等)能通过正则但下推白名单和内存 if 链都
+# 没有分支 —— 旧行为是**静默吞掉该条件**且新旧路径因子集还不一致(对抗评审),
+# 一律在解析期响亮拒绝。
+_VALID_OPS = {">", ">=", "<", "<=", "=", "!="}
 
 
 def _metric_get(snap: FactorSnapshot | None, key: str) -> float | None:
@@ -169,6 +173,13 @@ def parse_filters(filter_str: str) -> list[tuple[str, str, str]] | None:
                 _console.print(f"[red]Unknown filter key:[/] '{key}'. Supported: {', '.join(sorted(FILTER_KEYS))}")
                 has_error = True
                 continue
+            if op not in _VALID_OPS:
+                hint = " (did you mean '>=')" if op == "=>" else \
+                       " (did you mean '<=')" if op == "=<" else ""
+                _console.print(f"[red]Unknown operator:[/] '{op}'{hint}. "
+                               f"Supported: {', '.join(sorted(_VALID_OPS))}")
+                has_error = True
+                continue
             filters.append((key, op, value))
         else:
             _console.print(f"[red]Invalid filter syntax:[/] '{part}'. Expected: key=value or key>value (use quotes: --filter-by \"...\")")
@@ -178,7 +189,7 @@ def parse_filters(filter_str: str) -> list[tuple[str, str, str]] | None:
     return filters
 
 
-def apply_filters(rows: list[FactorRow], filters: list[tuple[str, str, str]]) -> list[FactorRow]:
+def apply_filters(rows: list[Factor], filters: list[tuple[str, str, str]]) -> list[Factor]:
     """内存侧过滤（兜底，保证与下推结果逐位等价）。"""
     result = rows
     for key, op, value in filters:
@@ -228,7 +239,7 @@ def run_list(args):
     """列出库内因子 —— 零扫盘,纯 PG catalog 查询。
 
     2026-07-07 Wave 2 (JOURNAL V1): 因子集判据收敛为
-    `factor_state.status != 'submitted'`(在 query_factors 里定义,PG 是唯一
+    `factor_state.status != 'submitted'`(在 repo.find 里定义,PG 是唯一
     权威)。原扫盘白名单 + derived 索引缓存路径删除 —— 缓存自三表迁移起已坏,
     每次 list 都在付 ~25s 全库扫盘税(full-review P0-4/G6)。PG 与磁盘的漂移
     属对账问题(后续 ops doctor),不由 list 承担。
@@ -252,18 +263,17 @@ def run_list(args):
     metric_pd = _metric_pushdown(filters) if filters else []
     sort_pd = args.sort_by if args.sort_by in _SORTABLE_KEYS else None
 
-    # query_factors 联合读 info + state + snapshot 三表 (author/field/tables/
-    # metrics/status/sort 下推)。下面仍全量跑一遍 filter/status/sort/[:n],故
-    # 下推纯为预筛,结果与不下推逐位等价。limit 由此处 [:n] 截断(P0-5 修复后
-    # 不再下推,见 query.py docstring)。
-    rows = query_factors(
-        config,
+    # repo.find 单条三表 LEFT JOIN(author/field/tables/metrics/status/sort
+    # 下推;2026-07-09 退役 query_factors 的三次查 + 内存合并)。下面仍全量跑
+    # 一遍 filter/status/sort/[:n],故下推纯为预筛,结果与不下推逐位等价。
+    # limit 不下推,由此处 [:n] 在内存过滤后截断(P0-5 语义:先滤后截)。
+    rows = FactorRepository(config).find(
         author=args.user, field=field_pd, table_glob=table_pd,
         metrics=metric_pd,
-        status=args.status, sort_by=sort_pd, n=args.n,
+        status=args.status, sort_by=sort_pd,
     )
     # 兜底基线:默认 name ASC,下方 sort/filter 再叠加。
-    rows.sort(key=lambda x: x.info.name)
+    rows.sort(key=lambda x: x.identity.name)
 
     if args.status:
         rows = [x for x in rows if x.status is not None and x.status.value == args.status]

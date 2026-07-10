@@ -9,11 +9,11 @@
 
 ## 操作流程
 
-1. `_resolve_targets` — 按 name / user / status 筛选目标(批量 `-u` 先 `info_store.list(author=...)` 取 name 集合,再与 `store.list(status=...)` 取交集;author 从 factor_info 读)
+1. `_resolve_targets` — 按 name / user / status 筛选目标(批量走 `repo.find(author=..., status=...)` 单条三表 JOIN 下推,2026-07-09 退役 info.list + state.list 内存交集;author 显示自 `Factor.identity`)
 2. `_locate_source` — 按状态定位因子源目录
 3. 显示计划，apt-install 风格确认 (`-y` 跳过)
 4. `_restage_one` — move src → staging, rewrite XML module path, transition state → SUBMITTED,
-   **删除 factor_snapshot 行**(2026-07-07:离库即旧快照失效;不删则 re-check 通过后
+   **删除 factor_snapshot 行**(`repo.discard_snapshot`;2026-07-07:离库即旧快照失效;不删则 re-check 通过后
    archive 的 insert 撞 name UNIQUE 被吞,快照永远停在旧代码,full-review P0-1。
    删失败不阻断,archive 侧有 stale 自愈兜底)
 
@@ -28,12 +28,13 @@
 
 ## Destructive 行为(2026-07-08 PV7:产物分两个面)
 
-- **check 面(pnl + bcorr 池副本)一律回收**(ACTIVE/REJECTED 都是,复用 rm 的
-  `_recycle_check_artifacts`):离库即失效 —— 旧 pnl 留在池里是**自鬼影**
+- **check 面(pnl + bcorr 池副本)一律回收**(ACTIVE/REJECTED 都是,走
+  `repo.purge_artifacts(name, ArtifactScope.CHECK)`,2026-07-09 收编 Repository):
+  离库即失效 —— 旧 pnl 留在池里是**自鬼影**
   (重检时新 pnl 对自己旧 pnl corr≈1,高相关分支要求打败几乎相同的自己 → 必拒),
   与"离库删 snapshot"(R1)同构。`submit --overwrite` 同款回收。
 - **服务面(dump / feature)= 最后一次入库版本的 last-known-good**,生产 combo
-  在重检窗口内继续消费,默认保留;`--purge` = 立即下架(复用 `_purge_artifacts`);
+  在重检窗口内继续消费,默认保留;`--purge` = 立即下架(`ArtifactScope.SERVING`);
   REJECTED 召回无服务价值,一律自动清。
 - 双保险:correlation checker 对 bcorr 结果**排除自名**(防删除失败残留再造自鬼影)。
 - 搬源是 `shutil.move`:召回后 staging 是 src **唯一副本**(cancel 的 entered_at 守卫由此而来)

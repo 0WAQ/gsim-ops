@@ -70,7 +70,7 @@ _OUTCOME_COUNTER = {
 
 
 @dataclass
-class FactorRow:
+class LiveRow:
     idx: int                    # 1-based for display
     name: str
     stages: dict[str, Status]   # full pipeline state, kept for is_in_flight()
@@ -92,17 +92,17 @@ class FactorRow:
         return not self.is_done() and any(s is not Status.PENDING for s in self.stages.values())
 
 
-def make_factor_rows(names: list[str], stages: tuple[str, ...]) -> dict[str, FactorRow]:
+def make_factor_rows(names: list[str], stages: tuple[str, ...]) -> dict[str, LiveRow]:
     """Build the initial rows dict (all stages PENDING)."""
     return {
-        name: FactorRow(idx=i + 1, name=name,
+        name: LiveRow(idx=i + 1, name=name,
                         stages={s: Status.PENDING for s in stages})
         for i, name in enumerate(names)
     }
 
 
 class LiveDriver:
-    def __init__(self, rows: dict[str, FactorRow],
+    def __init__(self, rows: dict[str, LiveRow],
                  q,
                  futures: list[Future],
                  stages: tuple[str, ...],
@@ -117,7 +117,7 @@ class LiveDriver:
         self.recent_done_window = recent_done_window
         self.refresh_per_second = refresh_per_second
 
-        self._recent: deque[FactorRow] = deque(maxlen=recent_done_window)
+        self._recent: deque[LiveRow] = deque(maxlen=recent_done_window)
         self._counts = {"pass": 0, "fail": 0, "error": 0, "locked": 0}
 
     # ---- event handling ----------------------------------------------------
@@ -182,15 +182,19 @@ class LiveDriver:
             # emitted done yet and synthesize one. Best-effort: if multiple
             # rows are still pending, the matching is ambiguous, so we just
             # ensure the main loop unblocks.
-            for row in self.rows.values():
-                if row.name in seen_done or row.is_done():
-                    continue
-                # Heuristic: prefer rows that are in-flight over pending
-                if row.is_in_flight():
-                    seen_done.add(row.name)
-                    self.q.put(("done", row.name, "error",
-                                f"worker crashed: {type(exc).__name__}", "red"))
-                    break
+            # Prefer in-flight rows, but FALL BACK to a pending row —— worker
+            # 在第一个 stage_start 之前崩掉(SIGKILL/OOM,或 run_one 泛捕获
+            # 之外的极端路径)时全表 PENDING,若只匹配 in-flight,done 事件
+            # 永不合成,主循环 remaining 永不归零 → 整条命令挂死画面冻结
+            # (对抗评审确认,HEAD 既有)。
+            candidates = [r for r in self.rows.values()
+                          if r.name not in seen_done and not r.is_done()]
+            target = next((r for r in candidates if r.is_in_flight()),
+                          candidates[0] if candidates else None)
+            if target is not None:
+                seen_done.add(target.name)
+                self.q.put(("done", target.name, "error",
+                            f"worker crashed: {type(exc).__name__}", "red"))
 
     # ---- rendering ---------------------------------------------------------
 
@@ -210,7 +214,7 @@ class LiveDriver:
             ("  pending ", "dim"), (f"{pending}", "dim"),
         )
 
-    def _build_subtable(self, rows: list[FactorRow], title: str | None = None) -> Table:
+    def _build_subtable(self, rows: list[LiveRow], title: str | None = None) -> Table:
         t = Table(box=box.SIMPLE_HEAD, header_style="bold cyan",
                   pad_edge=False, show_header=True, title=title,
                   title_justify="left", title_style="bold")
@@ -296,4 +300,4 @@ class LiveDriver:
         return tuple(self._counts[k] for k in ("pass", "fail", "error", "locked"))
 
 
-__all__ = ["Status", "FactorRow", "LiveDriver", "make_factor_rows"]
+__all__ = ["Status", "LiveRow", "LiveDriver", "make_factor_rows"]

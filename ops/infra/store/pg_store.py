@@ -15,13 +15,15 @@ local)。PG 列是 TIMESTAMPTZ。转换只在本 store 读写边界发生:写时
 (psycopg 解析),读时 datetime -> .isoformat(timespec="seconds") 转回 string 喂给
 FactorRecord。check_history 存 JSONB,内部时间戳原样留在 json 里不动。
 """
-from datetime import datetime
 from typing import Any
 
 from psycopg.types.json import Jsonb
 
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus
-from ops.infra.pg import ensure_schema, get_pool
+from ops.infra.errors import FactorNotFound
+from ops.infra.pg import get_pool
+from ops.infra.pg import ts_in as _ts_in
+from ops.infra.pg import ts_out as _ts_out
 
 from .base import StateConflict, StateStore
 
@@ -57,43 +59,15 @@ _TS_FIELDS = {"submitted_at", "entered_at", "rejected_at", "updated_at"}
 
 from ops.utils.clock import now_iso as _now  # 单一真相源, 见 utils/clock.py
 
-
-def _ts_in(v: str | None) -> str | None:
-    """FactorRecord ISO string (naive local, e.g. 2026-07-04T01:45:33) -> a value
-    PG can store correctly. The string carries no tz; it's local wall-clock time.
-    Stamp it with the local tz so TIMESTAMPTZ records the right instant instead
-    of assuming UTC."""
-    if not v:
-        return None
-    try:
-        dt = datetime.fromisoformat(v)
-    except ValueError:
-        return v  # let PG try to parse it
-    if dt.tzinfo is None:
-        dt = dt.astimezone()  # attach local tz
-    return dt.isoformat(timespec="seconds")
-
-
-def _ts_out(v) -> str | None:
-    """TIMESTAMPTZ (tz-aware datetime from psycopg) -> naive local ISO string,
-    matching Redis's _now() format (datetime.now().isoformat, no tz suffix)."""
-    if v is None:
-        return None
-    if isinstance(v, datetime):
-        if v.tzinfo is not None:
-            v = v.astimezone().replace(tzinfo=None)  # to local wall-clock, drop tz
-        return v.isoformat(timespec="seconds")
-    return str(v)
+# _ts_in/_ts_out 正主已收敛到 ops/infra/pg.py(ts_in/ts_out),此处只留别名 ——
+# 与 snapshot/pg_store 的镜像自 2026-07-09 合并(repository 是第三个消费者)。
 
 
 class PostgresStateStore(StateStore):
     def __init__(self, conninfo: str):
-        """不再需要 library_id 参数（永远单库）。"""
+        """构造零副作用:DDL 归 ops/infra/schema.py::ensure_schemas(2026-07-09
+        滚出 __init__)+ 生产 scripts/postgres 迁移。"""
         self.pool = get_pool(conninfo)
-        self._init_schema()
-
-    def _init_schema(self) -> None:
-        ensure_schema(self.pool, _SCHEMA)
 
     def _row_to_record(self, row) -> FactorRecord:
         (name, status, version, submitted_at, entered_at,
@@ -119,7 +93,10 @@ class PostgresStateStore(StateStore):
             row = conn.execute(sql, (name,)).fetchone()
             return self._row_to_record(row) if row else None
 
-    def put(self, record: FactorRecord, stamp: bool = True) -> None:
+    @staticmethod
+    def put_on(conn, record: FactorRecord, stamp: bool = True) -> None:
+        """在调用方给定的连接/事务上执行 put —— repository.register 用它与
+        factor_info 的 upsert 合进同一个事务(原子入库)。"""
         # stamp=False preserves record.updated_at as-is (used by migration to
         # keep the original Redis timestamp). Normal writes bump it to now.
         if stamp:
@@ -139,14 +116,17 @@ class PostgresStateStore(StateStore):
             "last_fail_reason=EXCLUDED.last_fail_reason, "
             "check_history=EXCLUDED.check_history, updated_at=EXCLUDED.updated_at"
         )
+        conn.execute(sql, (
+            record.name, record.status.value, record.version,
+            _ts_in(record.submitted_at),
+            _ts_in(record.entered_at), _ts_in(record.rejected_at),
+            record.last_fail_stage, record.last_fail_reason,
+            checks, _ts_in(record.updated_at),
+        ))
+
+    def put(self, record: FactorRecord, stamp: bool = True) -> None:
         with self.pool.connection() as conn:
-            conn.execute(sql, (
-                record.name, record.status.value, record.version,
-                _ts_in(record.submitted_at),
-                _ts_in(record.entered_at), _ts_in(record.rejected_at),
-                record.last_fail_stage, record.last_fail_reason,
-                checks, _ts_in(record.updated_at),
-            ))
+            self.put_on(conn, record, stamp=stamp)
 
     def list(self, status: FactorStatus | None = None) -> list[FactorRecord]:
         """列出所有因子状态，可按 status 过滤。
@@ -168,7 +148,7 @@ class PostgresStateStore(StateStore):
             with conn.transaction():
                 row = conn.execute(sql, (name,)).fetchone()
                 if row is None:
-                    raise KeyError(f"factor not found: {name}")
+                    raise FactorNotFound(f"factor not found: {name}")
                 rec = self._row_to_record(row)
                 if expect is not None and rec.status != expect:
                     # FOR UPDATE 行锁内的 CAS —— 并发安全的 from-status 守卫
@@ -203,7 +183,7 @@ class PostgresStateStore(StateStore):
                     (name,),
                 ).fetchone()
                 if row is None:
-                    raise KeyError(f"factor not found: {name}")
+                    raise FactorNotFound(f"factor not found: {name}")
                 conn.execute(
                     "UPDATE factor_state SET check_history = check_history || %s, "
                     "updated_at = %s WHERE name=%s",

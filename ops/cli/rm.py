@@ -1,7 +1,6 @@
 import argparse
-from pathlib import Path
 
-from ops.infra.config import get_default_config_path
+from ops.cli.common import add_config_arg
 from ops.services.rm import run_rm
 
 
@@ -24,7 +23,6 @@ factor_info 行(FK 级联删 factor_state + factor_snapshot)。**不可逆**,
     parser.add_argument("factor_name", type=str, help="Factor name to delete")
     parser.add_argument("-y", "--yes", action="store_true",
                         help="Skip confirmation prompt")
-    parser.add_argument("--config-path", "-c", type=Path,
-                        default=get_default_config_path())
+    add_config_arg(parser)
 
     parser.set_defaults(func=run_rm)

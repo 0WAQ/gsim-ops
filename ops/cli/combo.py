@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 
-from ops.infra.config import get_default_config_path
+from ops.cli.common import add_config_arg
 from ops.services.combo import run_combo
 
 
@@ -35,5 +35,5 @@ Example:
     run_p.add_argument("--stats", default="simple,bench,layer,opt",
                        help="跑哪些 stats, 逗号分隔 (默认全部)")
     run_p.add_argument("--device", default="cpu", help="predict 设备 (默认 cpu)")
-    run_p.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
+    add_config_arg(run_p)
     run_p.set_defaults(func=run_combo)

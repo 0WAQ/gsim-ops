@@ -5,10 +5,10 @@ from rich.console import Console
 from rich.rule import Rule
 from rich.table import Table
 
+from ops.core.factor import Factor
 from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
-from ops.infra.info import default_info_store
-from ops.infra.store import default_store
+from ops.infra.repository import FactorRepository
 
 _console = Console(width=shutil.get_terminal_size((140, 50)).columns)
 
@@ -55,15 +55,19 @@ def _print_detail(rec: FactorRecord, author: str | None) -> None:
     _console.print(Rule(style="cyan", characters="━"))
 
 
-def _print_list(records: list[tuple[FactorRecord, str | None]]) -> None:
-    """打印因子列表（每项是 (FactorRecord, author) 元组）。"""
+def _print_list(factors: list[Factor]) -> None:
     table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", pad_edge=False)
     table.add_column("name", no_wrap=True)
     table.add_column("status", no_wrap=True)
     table.add_column("author", no_wrap=True)
     table.add_column("updated_at", no_wrap=True)
     table.add_column("note", overflow="fold")
-    for rec, author in records:
+    for f in factors:
+        rec = f.state
+        if rec is None:
+            table.add_row(f.name, "[red]?(无 state 记录)[/]",
+                          f.identity.author or "—", "—", "info 孤儿,需对账")
+            continue
         style = _STATUS_STYLE.get(rec.status, "")
         note = ""
         if rec.status == FactorStatus.REJECTED and rec.last_fail_stage:
@@ -71,7 +75,7 @@ def _print_list(records: list[tuple[FactorRecord, str | None]]) -> None:
         table.add_row(
             rec.name,
             f"[{style}]{rec.status.value}[/]",
-            author or "—",
+            f.identity.author or "—",
             str(rec.updated_at),
             note,
         )
@@ -79,43 +83,30 @@ def _print_list(records: list[tuple[FactorRecord, str | None]]) -> None:
 
 
 def run_status(args) -> None:
+    """单因子详情 / 列表。2026-07-09 阶段 3 塌缩:repo.get / repo.find
+    (include_submitted=True —— status 的语义是"任何记录",单条三表 JOIN
+    退役原 store.list + info_store.list 的内存合并)。"""
     config = Config.load(args.config_path)
-    store = default_store(config)
-    info_store = default_info_store(config)
+    repo = FactorRepository(config)
 
-    name: str | None = args.name
-    author_filter: str | None = args.author
-    status_filter: str | None = args.status
-
-    if name is not None:
-        # 单因子详情模式
-        rec = store.get(name)
-        if rec is None:
-            _console.print(f"[yellow]未找到因子: {name}[/]")
+    if args.name is not None:
+        factor = repo.get(args.name)
+        if factor is None:
+            _console.print(f"[yellow]未找到因子: {args.name}[/]")
             return
-        info = info_store.get(name)
-        author = info.author if info else None
-        _print_detail(rec, author)
+        if factor.state is None:
+            _console.print(f"[red]⚠ {args.name} 有身份记录(factor_info)但无 state 行"
+                           f" —— info 孤儿,需对账(ops rm 可清走)[/]")
+            return
+        _print_detail(factor.state, factor.identity.author)
         return
 
-    # 列表模式
-    status_enum = FactorStatus(status_filter) if status_filter else None
-    records = store.list(status=status_enum)
-
-    # 按 author 过滤（需要从 factor_info 读取）
-    if author_filter:
-        infos = {i.name: i for i in info_store.list(author=author_filter)}
-        records = [r for r in records if r.name in infos]
-    else:
-        infos = {i.name: i for i in info_store.list()}
-
-    # 附加 author 信息
-    records_with_author = [(r, i.author if (i := infos.get(r.name)) else None) for r in records]
-    records_with_author.sort(key=lambda x: x[0].name)
+    factors = repo.find(author=args.author, status=args.status,
+                        include_submitted=True)
 
     _console.print(Rule("[bold cyan]因子状态[/]", style="cyan", characters="━"))
-    if not records_with_author:
+    if not factors:
         _console.print("[yellow]没有匹配的因子记录[/]")
     else:
-        _print_list(records_with_author)
+        _print_list(factors)
     _console.print(Rule(style="cyan", characters="━"))

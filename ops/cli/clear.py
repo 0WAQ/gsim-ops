@@ -1,7 +1,6 @@
 import argparse
-from pathlib import Path
 
-from ops.infra.config import get_default_config_path
+from ops.cli.common import add_config_arg
 from ops.services.clear import run_clear
 from ops.utils.utils import LowerAction
 
@@ -32,7 +31,6 @@ state 中有 record 的(SUBMITTED / CHECKING)请用 ops cancel。
                         help="按推断的 author 过滤(批量)")
     parser.add_argument("-y", "--yes", action="store_true",
                         help="跳过交互确认")
-    parser.add_argument("--config-path", "-c", type=Path,
-                        default=get_default_config_path())
+    add_config_arg(parser)
 
     parser.set_defaults(func=run_clear)

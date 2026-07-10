@@ -1,15 +1,22 @@
-"""数据源解析(AST + npy 索引)。
+"""数据源解析 —— submit/check/backfill 共用的领域能力(纯函数)。
 
-submit/check/backfill 共用的领域能力(⚠ 住在 list 包下是历史遗留,迁往共享
-模块属 Wave 4;full-review 第三部分 L 表)。2026-07-07 Wave 2:derived 层删除,
-本文件的 refresh_datasources/load_datasources/_store 写读僵尸表的半边随之删除,
-只留纯解析函数 —— datasources 的唯一落库点是 check archive 时的 factor_snapshot。
+2026-07-09 自 `ops/services/list/datasource.py` 迁入(factor-aggregate-plan 阶段 2):
+原先住在 list 包下是历史遗留,submit/backfill/check 跨包借用构成 4 条 C3 违例边
+(service 包相互独立契约)。datasources 的唯一落库点是 check archive 时的
+factor_snapshot(入库时不可变快照)。
+
+- `parse_datasources`:AST 走查因子 .py 里的 `*.getData("xxx")` 字面量 → fields
+  (XML `<Data>` 声明不可信,以代码实际调用为准,见根 CLAUDE.md)。
+- `build_npy_index`:扫 nio_data_path(/datasvc/data/cc/)建 {npy_stem → 表名}
+  索引。L2 特例:`cn_equity*` 目录多一层,真 .npy 在子目录、父目录放软链,
+  索引只认软链并以子目录名为表名。
+- `resolve_tables`:fields 经索引映射为表名集合。
 """
 import ast
 from pathlib import Path
 
 
-def _build_npy_index(nio_data_path: Path) -> dict[str, str]:
+def build_npy_index(nio_data_path: Path) -> dict[str, str]:
     index: dict[str, str] = {}
     if not nio_data_path.exists():
         return index

@@ -5,7 +5,7 @@
 ## 孤儿从哪来
 
 `ops submit` 流程: `copy_to_staging` 先把因子目录复制到 staging,再 `submit_one`
-里 normalize_xml + parse_factor + `store.put`。若 parse 抛错(命名不规范 /
+里 normalize_xml + parse_factor + `repo.register`。若 parse 抛错(命名不规范 /
 XML 异常 / py syntax error),staging 目录已就位但 state 没写入 → 孤儿。
 
 ## 与 ops cancel 的分工
@@ -24,7 +24,7 @@ XML 异常 / py syntax error),staging 目录已就位但 state 没写入 → 孤
 2. `_resolve_targets`:
    - 单因子 `clear AlphaXxx`: 校验目录在 + state 无 record,否则报错
    - 批量 `clear`: 全部孤儿
-   - 批量 `clear -u <user>`: `_infer_author_from_dir` 推断 author 过滤(复用 submit/parser.py 同名函数)
+   - 批量 `clear -u <user>`: `infer_author_from_dir` 推断 author 过滤(`ops/core/factormeta.py`,与 submit 的 parse_factor 同一函数;2026-07-09 自 submit/parser.py 迁入)
 3. apt 风格确认 (`-y` 跳过)
 4. `_clear_one`: `shutil.rmtree(staging_dir)`
 

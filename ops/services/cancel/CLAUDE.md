@@ -10,34 +10,44 @@
   SUBMITTED,但 restage 是 move 不是 copy —— staging 里是**唯一源码副本**,cancel
   的 rmtree 会毁掉它(full-review 第一部分 1.2)。此类因子要么 `ops rm` 彻底删,
   要么 `ops check` 重新入库。批量模式归入 Skipped 段。
+- **`alpha_src/<name>` 存在一律拒绝**(2026-07-09,JOURNAL U3):曾被 check 归档
+  的因子(典型:REJECTED 后 `submit --overwrite` 重提,entered_at 为空)在
+  alpha_src 有归档、late-stage 拒绝还留 pnl/dump —— cancel 只删记录会把这些产物
+  变成孤儿(生产实测 143 个)。指引 `ops rm`(rm 已含 staging,全落点删除)。
+  批量模式归入 Skipped 段。
 
 ## 与 ops rm 的区别
 
 | | `ops cancel` | `ops rm` |
 |---|---|---|
-| 适用状态 | SUBMITTED (`--force` + CHECKING) | ACTIVE / REJECTED |
-| 删除范围 | staging 目录 + **硬删** state record | src/pnl/dump/feature + factor_info(级联 state + snapshot)全删 |
-| 因子曾入库 | 否(从未 ACTIVE) | 是 |
+| 适用状态 | SUBMITTED (`--force` + CHECKING),且**无任何归档产物** | 任何有 state 记录的因子(典型 ACTIVE/REJECTED;也承接被 cancel 守卫拒绝的"有归档的 SUBMITTED") |
+| 删除范围 | staging 目录 + **硬删**记录(factor_info,FK 级联 state) | src/staging/pnl/dump/feature/池副本 + factor_info(级联 state + snapshot)全删 |
+| 适用前提 | 纯新提交,除 staging 外零落点(entered_at / alpha_src 双守卫把关) | 因子有归档落点(曾入库或曾被 check 归档) |
 
-因子从未 ACTIVE 过,没有产物/快照可清,只删 staging + state record。
+cancel 的前提是"纯新提交:除 staging 外无任何落点"——上面两道产物守卫
+(entered_at / alpha_src)就是在保证走到删除这步的因子确实如此。
 
 ## 操作流程
 
 1. `_resolve_targets` — 按 name / user 筛选,状态不匹配
    - 单因子:报错退出
-   - 批量 (`-u`):先 `info_store.list(author=...)` 取 name 集合,与 `store.list()` 取交集;归入 `Skipped` 段,不阻断。显示 author 从 `info_store.get(name)` 取
+   - 批量 (`-u`):`repo.find(author=..., include_submitted=True)` 单条三表 JOIN
+     (2026-07-09 阶段 3,退役 info.list + state.list 内存交集);不合资格归
+     `Skipped` 段,不阻断;无 state 的 info 孤儿也归 Skipped("需对账")。
+     author 显示自 `Factor.identity`
 2. apt 风格确认 (`-y` 跳过)
 3. `_cancel_one`:
    - `shutil.rmtree(staging/<name>/)`
-   - `store.delete(name)` 硬删
-   - `info_store.delete(name)`(2026-07-07:FK 级联方向是 info→state,不删则每次
-     cancel 泄漏一行孤儿 factor_info 且任何命令都够不到;entered_at 守卫保证走到
-     这里的因子从未入库,身份行可安全移除)
+   - `repo.delete(name)` —— 删 factor_info,FK 级联带走 state,**一步**完成
+     (2026-07-09 阶段 3:原"先删 state 再删 info"两步,崩在中间泄漏孤儿
+     factor_info 且任何命令都够不到;级联消灭该中间态)。entered_at 守卫保证
+     走到这里的因子从未入库,身份行可安全移除;重新 submit 会重建
 
 ## 不动的产物
 
-`alpha_src / alpha_pnl / alpha_dump / alpha_feature` 都不动。
-SUBMITTED 因子按定义没有这些产物;CHECKING 残留若有 dump,留给后续 gc。
+`alpha_src / alpha_pnl / alpha_dump / alpha_feature` 都不动 —— 正因如此,资格
+判定拒绝任何有 alpha_src 归档的因子("SUBMITTED 无产物"对 REJECTED 后重提的
+因子不成立,U3 事故即此,143 个孤儿)。CHECKING 残留若有 dump,留给后续 gc。
 
 ## 并发安全
 
@@ -51,10 +61,11 @@ StateConflict 按跳过处理)。`run_*` 返回 `BatchResult`(done/skipped/faile
 
 ## 崩溃恢复
 
-先删 staging 再删 state record — 崩在中间留下 orphan state(SUBMITTED、无文件)。
-reconcile 已下线,不再自动清理;但 `ops check` 按 staging 目录扫描,该 orphan 不影响后续流程,
-必要时人工 `ops rm` / 后续 `ops doctor` 处理。
+先删 staging 再删记录 — 崩在中间留下 orphan record(SUBMITTED、无文件)。记录删除
+本身是 `repo.delete` 级联一步(info+state 同生共死),不再有"删了 state 剩孤儿
+info"的中间态。reconcile 已下线,不再自动清理;但 `ops check` 按 staging 目录扫描,
+该 orphan 不影响后续流程,必要时人工 `ops rm` / 后续 `ops doctor` 处理。
 
 ---
 
-Tests: `tests/test_lifecycle_cmds.py` (SUBMITTED/--force CHECKING deletion, batch -u filters).
+Tests: `tests/test_lifecycle_cmds.py` (SUBMITTED/--force CHECKING deletion, batch -u filters, archived-artifact guard 单因子拒绝 + 批量 skip)。

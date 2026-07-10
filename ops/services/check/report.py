@@ -15,7 +15,7 @@ from ops.infra.config import Config, get_project_root
 from ops.infra.info import default_info_store
 from ops.infra.snapshot import default_snapshot_store
 from ops.infra.store import default_store
-from ops.utils.live_table import FactorRow
+from ops.utils.live_table import LiveRow
 
 REPORT_VERSION = 1
 
@@ -32,7 +32,7 @@ def _scope(user: str | None, factor: str | None) -> str:
 
 
 def write_check_report(config: Config, config_path: Path,
-                       rows: dict[str, FactorRow],
+                       rows: dict[str, LiveRow],
                        *, user: str | None, factor: str | None) -> Path:
     """把本次 check 涉及因子的终态汇总成 JSON,返回文件路径。
 

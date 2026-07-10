@@ -4,19 +4,19 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 
 from ops.core.alpha.metadata import AlphaMetadata
-from ops.core.factormeta import FactorMeta
-from ops.core.state import CheckRecord, FactorRecord, FactorStatus
-from ops.infra.config import Config
-from ops.infra.gsim.runner import Runner
-from ops.infra.info import FactorInfo, default_info_store
-from ops.infra.lock import FactorLocked, factor_lock
-from ops.infra.snapshot import FactorSnapshot, default_snapshot_store
-from ops.infra.store import default_store
-from ops.services.list.datasource import (
-    _build_npy_index,
+from ops.core.datasource import (
+    build_npy_index,
     parse_datasources,
     resolve_tables,
 )
+from ops.core.factor import FactorIdentity, FactorSnapshot
+from ops.core.factormeta import FactorMeta
+from ops.core.paths import META_FILENAME, FactorPaths
+from ops.core.state import CheckRecord, FactorStatus
+from ops.infra.config import Config
+from ops.infra.gsim.runner import Runner
+from ops.infra.lock import FactorLocked, factor_lock
+from ops.infra.repository import FactorRepository
 from ops.utils.clock import now_iso
 from ops.utils.factor_dir import clean_pycache, rewrite_module_path
 from ops.utils.live_table import LiveDriver, Status, make_factor_rows
@@ -83,7 +83,7 @@ class CheckerPipeline:
 
         candidates: list[Path] = []
         if factor_name is not None:
-            d = staging / factor_name
+            d = FactorPaths.of(factor_name, self.config).staging
             if d.is_dir():
                 candidates.append(d)
         else:
@@ -93,7 +93,7 @@ class CheckerPipeline:
 
         mds: list[AlphaMetadata] = []
         for factor_dir in candidates:
-            meta_path = factor_dir / "meta.json"
+            meta_path = factor_dir / META_FILENAME
             if not meta_path.exists():
                 warn(f"  ⚠  {factor_dir.name} 缺少 meta.json,跳过(请先 ops submit)")
                 continue
@@ -113,29 +113,23 @@ class CheckerPipeline:
 
         return mds
 
+    def _repo(self) -> FactorRepository:
+        """按需构造(不挂 self):worker 进程 fork 自父进程,父进程实例若已
+        materialize 懒加载 store,其 PG 池对象在子进程里是死的(worker 线程
+        不随 fork 存活,pg.py 的 fork 钩子只重置注册表救不了已捏在手里的引用)。
+        每次现构造 + get_pool 按 (pid, conninfo) 去重 → 子进程拿到自己的池。"""
+        return FactorRepository(self.config)
+
     def _persist_derived(self, factor: AlphaMetadata, metrics, corr_result) -> None:
         """入库前把所有派生数据写入 factor_snapshot (入库时快照，不可变)。
-
-        2026-07-06 重构: 从四次 upsert (index/metrics/datasources/bcorr) 改为一次性
-        写入 factor_snapshot。snapshot_at = factor_state.entered_at (入库时间)。
 
         必须在 to_lib 之前调 —— datasources 依赖 factor.py_file(此时仍在 staging)。
         各组独立 try，互不阻断入库（快照缺失可运维补救，但入库不能失败）。
 
-        delay 从 XML 解析定死 (factor.delay)，与 metrics 同性质不可变。原 index 组的
-        has_pnl/dump_days 是可变物理事实，已从快照删除 (需实时状态走 LibraryScanner)。
+        落库半边(snapshot_at = entered_at 强制 + stale 自愈)归
+        repo.attach_snapshot(2026-07-09 迁 Repository);本方法只负责**采集**
+        (metrics / datasources / bcorr / delay —— check 期领域知识)。
         """
-        snapshot_store = default_snapshot_store(self.config)
-        state_store = default_store(self.config)
-
-        # 获取入库时间（factor_state.entered_at）
-        state = state_store.get(factor.name)
-        if not state or not state.entered_at:
-            logger.error("Cannot persist snapshot: factor {} has no entered_at", factor.name)
-            return
-
-        snapshot_at = state.entered_at
-
         # 准备各组数据
         ret = shrp = mdd = tvr = fitness = None
         if metrics:
@@ -146,7 +140,7 @@ class CheckerPipeline:
         fields = tables = None
         try:
             fields = parse_datasources(factor.py_file)
-            tables = resolve_tables(fields, _build_npy_index(self.config.nio_data_path))
+            tables = resolve_tables(fields, build_npy_index(self.config.nio_data_path))
         except Exception:
             logger.exception("parse datasources failed factor={}", factor.name)
 
@@ -155,16 +149,18 @@ class CheckerPipeline:
             max_bcorr = corr_result.max_bcorr
             max_bcorr_factor = corr_result.max_bcorr_factor
 
-        # 一次性写入 snapshot
+        # state 读在吞噬 try **之外**(对抗评审):PG 瞬时故障要冒泡走 unexpected
+        # 臂 revert SUBMITTED(因子留 staging 重跑自愈,旧代码语义);若也吞掉,
+        # 因子会静默入库且不可变快照永久缺失(无重算路径,只能人工 restage 重跑
+        # 30min+ 全流水线)。entered_at 真缺失(数据问题)与旧代码等价:记日志
+        # 放弃快照,入库继续。
+        state = self._repo().record(factor.name)
+        if state is None or not state.entered_at:
+            logger.error("Cannot persist snapshot: factor {} has no entered_at", factor.name)
+            return
+
         try:
-            # Re-archive 自愈:restage / submit --overwrite 在离库时删旧快照,但
-            # 迁移期存量 REJECTED 快照行、或删除步骤崩掉的残留仍可能在。快照语义
-            # = "本次入库事件的快照",旧行必须让位 —— 否则 insert 撞 name UNIQUE
-            # 被吞,反查/报告永远读到上一版代码的指标(full-review P0-1)。
-            if snapshot_store.get(factor.name) is not None:
-                logger.warning("stale snapshot exists, replacing factor={}", factor.name)
-                snapshot_store.delete(factor.name)
-            snapshot_store.insert(FactorSnapshot(
+            self._repo().attach_snapshot(FactorSnapshot(
                 name=factor.name,
                 ret=ret,
                 shrp=shrp,
@@ -176,42 +172,47 @@ class CheckerPipeline:
                 delay=factor.delay,
                 max_bcorr=max_bcorr,
                 max_bcorr_factor=max_bcorr_factor,
-                snapshot_at=snapshot_at,
             ))
         except Exception:
             logger.exception("persist snapshot failed factor={}", factor.name)
 
     def to_lib(self, factor: AlphaMetadata):
         clean_pycache(factor.dir)
+        paths = FactorPaths.of(factor.name, self.config)
 
-        src_dst = self.config.alpha_src / factor.dir.name
-        if src_dst.exists():
-            shutil.rmtree(src_dst)
-        shutil.move(factor.dir, self.config.alpha_src)
-        rewrite_module_path(src_dst)
+        # 兜底断言(第一道闸在 run_one 入口):下方 rmtree/move/rewrite 三步共用
+        # paths.src(键=@id)锚点,其正确性依赖 目录名 == @id。发散时 rmtree 删的
+        # 是"另一个因子",绝不能带病归档 —— 抛错走 unexpected 臂 revert SUBMITTED。
+        if factor.dir.name != factor.name:
+            raise RuntimeError(
+                f"identity divergence: staging dir {factor.dir.name!r}"
+                f" != XML @id {factor.name!r}, refuse to archive")
 
-        dump_dst = self.config.alpha_dump / factor.alpha_dir.name
-        if dump_dst.exists():
-            shutil.rmtree(dump_dst)
-        shutil.move(factor.alpha_dir, self.config.alpha_dump)
+        if paths.src.exists():
+            shutil.rmtree(paths.src)
+        shutil.move(factor.dir, paths.src)
+        rewrite_module_path(paths.src)
 
-        # alpha_pnl/<name> 是单文件(根 CLAUDE.md 明文警告的 Errno 20 反模式):
-        # restage 保留 pnl → re-archive 时此处必有旧文件,rmtree 对文件抛
-        # NotADirectoryError(full-review 第一部分 1.2)。目录形态只可能是远古残留。
-        pnl_dst = self.config.alpha_pnl / factor.name
-        if pnl_dst.is_dir():
-            shutil.rmtree(pnl_dst)
-        elif pnl_dst.exists():
-            pnl_dst.unlink()
-        shutil.move(factor.pnl_file, pnl_dst)
+        if paths.dump.exists():
+            shutil.rmtree(paths.dump)
+        shutil.move(factor.alpha_dir, paths.dump)
+
+        # alpha_pnl/<name> 是单文件(FactorPaths 布局事实):restage 保留 pnl →
+        # re-archive 时此处必有旧文件,rmtree 对文件抛 NotADirectoryError
+        # (full-review 第一部分 1.2)。目录形态只可能是远古残留。
+        if paths.pnl.is_dir():
+            shutil.rmtree(paths.pnl)
+        elif paths.pnl.exists():
+            paths.pnl.unlink()
+        shutil.move(factor.pnl_file, paths.pnl)
 
         # 按因子来源 (discovery_method) 把 pnl 额外分流一份到 pnl_automated / pnl_manual。
-        # factor.pnl_file 此时已被 move 走,从入库后的 pnl_dst 拷。pnl 是单文件,copy2。
-        bucket = {"automated": self.config.pnl_automated,
-                  "manual": self.config.pnl_manual}.get(factor.discovery_method or "")
+        # factor.pnl_file 此时已被 move 走,从入库后的 paths.pnl 拷。pnl 是单文件,copy2。
+        bucket = {"automated": paths.pool_automated,
+                  "manual": paths.pool_manual}.get(factor.discovery_method or "")
         if bucket is not None:
-            bucket.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(pnl_dst, bucket / factor.name)
+            bucket.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(paths.pnl, bucket)
         else:
             logger.warning("discovery_method 缺失/非法, 跳过 pnl 分流 factor={} value={}",
                            factor.name, factor.discovery_method)
@@ -224,11 +225,11 @@ class CheckerPipeline:
 
         # alpha_src: 从 staging 复制一份(REJECTED 与 ACTIVE 的 src 都在 alpha_src,
         # 状态靠 state 区分,不靠目录位置)
-        src_dst = self.config.alpha_src / factor.name
-        if src_dst.exists():
-            shutil.rmtree(src_dst)
-        shutil.copytree(factor.dir, src_dst)
-        rewrite_module_path(src_dst)
+        paths = FactorPaths.of(factor.name, self.config)
+        if paths.src.exists():
+            shutil.rmtree(paths.src)
+        shutil.copytree(factor.dir, paths.src)
+        rewrite_module_path(paths.src)
 
         # 产物保留策略由 Stage 表的 keep_artifacts_on_fail 声明:
         # 晚期 stage(compliance/correlation)数据完整,保留 pnl + dump 供分析;
@@ -236,30 +237,28 @@ class CheckerPipeline:
         if failed_stage in KEEP_ARTIFACTS_STAGES:
             # 保留 pnl
             if factor.pnl_file.exists():
-                shutil.copy2(factor.pnl_file, self.config.alpha_pnl / factor.name)
+                shutil.copy2(factor.pnl_file, paths.pnl)
             # 保留 dump
-            dump_src = self.config.alpha_dump / factor.alpha_dir.name
-            if factor.alpha_dir.exists() and not dump_src.exists():
-                shutil.move(str(factor.alpha_dir), str(dump_src))
+            if factor.alpha_dir.exists() and not paths.dump.exists():
+                shutil.move(str(factor.alpha_dir), str(paths.dump))
         else:
             # checkbias/checkpoint: 清掉 dump + feature(短期数据不完整)
-            dump_dir = self.config.alpha_dump / factor.name
-            if dump_dir.exists():
-                shutil.rmtree(dump_dir)
-            for v in ("v1", "v2"):
-                f = self.config.alpha_feature / f"{factor.name}.{v}.npy"
+            if paths.dump.exists():
+                shutil.rmtree(paths.dump)
+            for f in paths.features:
                 if f.exists():
                     f.unlink()
 
         # 清掉 staging 原物(src 已进 alpha_src,不再需要归档副本)
         shutil.rmtree(factor.dir, ignore_errors=True)
 
-    def _ensure_record(self, factor: AlphaMetadata, store) -> None:
-        if store.get(factor.name) is not None:
+    def _ensure_record(self, factor: AlphaMetadata, repo: FactorRepository) -> None:
+        if repo.record(factor.name) is not None:
             return
         # state record 缺失（crash 恢复 / 直接 check staging 未经 submit）时补建。
-        # 三表结构：author/discovery_method 写 factor_info，状态机字段写 factor_state。
-        meta_path = factor.dir / "meta.json"
+        # repo.register 原子写 info(身份)+ state(状态)一个事务(原先顺序两次
+        # 调用,崩在中间留半截;json dev/test 后端只写 state,不再硬碰 PG info)。
+        meta_path = factor.dir / META_FILENAME
         author = factor.key.user
         discovery_method = factor.discovery_method
         submitted_at = now_iso()
@@ -271,21 +270,15 @@ class CheckerPipeline:
                 submitted_at = meta.submitted_at or submitted_at
             except Exception:
                 pass
-        now = now_iso()
-        info_store = default_info_store(self.config)
-        info_store.upsert(FactorInfo(
-            name=factor.name,
-            author=author,
-            discovery_method=discovery_method,
-            created_at=submitted_at,
-        ))
-        store.put(FactorRecord(
-            name=factor.name,
-            status=FactorStatus.SUBMITTED,
-            version=1,
-            updated_at=now,
+        repo.register(
+            FactorIdentity(
+                name=factor.name,
+                author=author,
+                discovery_method=discovery_method,
+                created_at=submitted_at,
+            ),
             submitted_at=submitted_at,
-        ))
+        )
 
     def run_one(self, factor: AlphaMetadata, i: int, q) -> str:
         """Returns one of: 'pass' | 'fail' | 'error' | 'locked'.
@@ -294,18 +287,44 @@ class CheckerPipeline:
         can render them. The return string is also still consumed by the
         parent for counter accumulation.
         """
+        # 身份不变量:staging 目录名必须等于 XML @id(submit 的 normalize_factor_xml
+        # 强制 @id := 目录名)。发散时(手工放置 / 中断 submit 留下的 stale XML)
+        # state/lock/归档落点全键在 @id 上,而 staging 原物键在目录名上 —— 归档会
+        # rmtree alpha_src/<@id>,那可能是**另一个在库因子的唯一源码**。必须在任何
+        # 状态写入(_ensure_record/transition)之前整单拒绝;残留由人工重新
+        # ops submit(或 ops clear)处理。
+        if factor.dir.name != factor.name:
+            logger.error(
+                "身份发散拒绝 check: staging 目录 {} != XML @id {} "
+                "(stale/手工 XML;重新 ops submit 以恢复 @id := 目录名 的不变量)",
+                factor.dir.name, factor.name)
+            q.put(("done", factor.name, "error",
+                   f"! 目录名 {factor.dir.name} != @id {factor.name}", "red"))
+            return "error"
         try:
             with factor_lock(factor.name, self.config):
                 return self._run_one_locked(factor, q)
         except FactorLocked:
             q.put(("done", factor.name, "locked", "🔒 已被另一个进程占用", "yellow"))
             return "locked"
+        except Exception as e:
+            # 前置段兜底(对抗评审):_run_one_locked 的 try 只包 stage 循环,
+            # 之前的 _ensure_record/transition(以及锁连接本身)在 PG 不可达 /
+            # 空库时抛的异常会直接穿透 ProcessPool —— 父进程的 LiveDriver 无法
+            # 把崩溃的 future 映射回因子名(全表 PENDING 时旧版直接挂死)。
+            # worker 是唯一知道自己因子名的地方,在此归因并保证 done 事件必发。
+            logger.exception("check preamble crashed factor={}", factor.key)
+            q.put(("done", factor.name, "error",
+                   f"! pre-check: {str(e)[:80]}", "red"))
+            return "error"
 
     def _run_one_locked(self, factor: AlphaMetadata, q) -> str:
-        store = default_store(self.config)
-        self._ensure_record(factor, store)
+        # 全部 state 读写经 Repository:统一 schema 懒引导(空库上裸 store 的
+        # SELECT 直接 UndefinedTable)与 fork 池安全(见 _repo 注)。
+        repo = self._repo()
+        self._ensure_record(factor, repo)
         check = CheckRecord(started_at=now_iso())
-        store.transition(factor.name, FactorStatus.CHECKING)
+        repo.transition(factor.name, FactorStatus.CHECKING)
 
         # 清上一轮 check 的 checkpoint 残留(锁内,开跑前)。long_backtest 写的
         # checkpoint 无人善后(CheckpointChecker.clean 只清它之前的),restage
@@ -353,8 +372,8 @@ class CheckerPipeline:
             now = now_iso()
             check.finished_at = now
             check.passed = True
-            store.append_check(factor.name, check)
-            store.transition(factor.name, FactorStatus.ACTIVE, entered_at=now)
+            repo.append_check(factor.name, check)
+            repo.transition(factor.name, FactorStatus.ACTIVE, entered_at=now)
 
             # 再写入 snapshot (需要 entered_at 作为 snapshot_at)
             self._persist_derived(factor, metrics, corr_result)
@@ -379,8 +398,8 @@ class CheckerPipeline:
             check.passed = None
             check.failed_stage = stage_name
             check.fail_reason = str(e)
-            store.append_check(factor.name, check)
-            store.transition(factor.name, FactorStatus.SUBMITTED)
+            repo.append_check(factor.name, check)
+            repo.transition(factor.name, FactorStatus.SUBMITTED)
             q.put(("done", factor.name, "error",
                    f"⊝ {stage_name} skipped: {str(e)[:60]}", "yellow"))
             return "error"
@@ -397,8 +416,8 @@ class CheckerPipeline:
                 check.passed = False
                 check.failed_stage = stage_name
                 check.fail_reason = str(e)
-                store.append_check(factor.name, check)
-                store.transition(factor.name, FactorStatus.SUBMITTED)
+                repo.append_check(factor.name, check)
+                repo.transition(factor.name, FactorStatus.SUBMITTED)
                 q.put(("done", factor.name, "error",
                        f"↻ retry: {stage_name} ({str(e)[:60]})", "yellow"))
                 return "error"
@@ -414,8 +433,8 @@ class CheckerPipeline:
                 check.passed = False
                 check.failed_stage = stage_name
                 check.fail_reason = str(e)
-                store.append_check(factor.name, check)
-                store.transition(factor.name, FactorStatus.REJECTED,
+                repo.append_check(factor.name, check)
+                repo.transition(factor.name, FactorStatus.REJECTED,
                                  rejected_at=now,
                                  last_fail_stage=stage_name,
                                  last_fail_reason=str(e))
@@ -432,8 +451,8 @@ class CheckerPipeline:
             check.finished_at = now_iso()
             check.passed = None
             check.fail_reason = f"unexpected: {e}"
-            store.append_check(factor.name, check)
-            store.transition(factor.name, FactorStatus.SUBMITTED)
+            repo.append_check(factor.name, check)
+            repo.transition(factor.name, FactorStatus.SUBMITTED)
             q.put(("done", factor.name, "error",
                    f"! unexpected: {str(e)[:80]}", "red"))
             return "error"

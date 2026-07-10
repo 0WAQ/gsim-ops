@@ -5,9 +5,7 @@ from rich.tree import Tree
 
 from ops.core.library import LibraryScanner
 from ops.infra.config import Config
-from ops.infra.info import default_info_store
-from ops.infra.snapshot import default_snapshot_store
-from ops.infra.store import default_store
+from ops.infra.repository import FactorRepository
 
 _console = Console(width=shutil.get_terminal_size((140, 50)).columns)
 
@@ -24,22 +22,23 @@ def run_info(args):
     name = args.factor_name
     config = Config.load(args.config_path)
 
-    # 存在性判据 = PG(factor_info 是三表的根)。2026-07-07 Wave 2 前用
-    # "alpha_src 目录存在"判定 —— 与 status/rm/cancel 的 state 判据不一致,
-    # 同一因子可能 status 里存在、info 里 not found(full-review S5)。
-    info_store = default_info_store(config)
-    info = info_store.get(name)
-    if info is None:
+    # 存在性判据 = PG(factor_info 是三表的根,repo.get 的 None 语义)。
+    # 2026-07-07 Wave 2 前用"alpha_src 目录存在"判定 —— 与 status/rm/cancel 的
+    # state 判据不一致,同一因子可能 status 里存在、info 里 not found(S5)。
+    repo = FactorRepository(config)
+    factor_agg = repo.get(name)
+    if factor_agg is None:
         _console.print(f"[red]Factor not found:[/] {name} (factor_info 无记录)")
         _console.print("[yellow]用 ops list / ops status 确认名字;盘上目录与 PG 的漂移属对账问题[/]")
         return
 
-    snapshot = default_snapshot_store(config).get(name)
-    rec = default_store(config).get(name)
+    info = factor_agg.identity
+    snapshot = factor_agg.snapshot
+    rec = factor_agg.state
 
     # 物理状态:单因子现场 stat(便宜,只碰本因子路径)。scanner.get 返回 None
     # 表示 src 目录缺失(PG 有记录但盘上没有 —— 显示出来,让漂移可见)。
-    scanner = LibraryScanner.from_config_path(args.config_path)
+    scanner = LibraryScanner(config)
     factor = scanner.get(name)
 
     first_date, last_date = scanner.get_dump_date_range(name)
@@ -48,10 +47,11 @@ def run_info(args):
     status_str = rec.status.value if rec else "?(无 state 记录)"
     tree = Tree(f"[bold cyan]Factor: {name}[/]  [dim](author: {info.author or '?'}, status: {status_str})[/]")
 
+    fp = repo.paths(name)
     paths = tree.add("[yellow]Paths[/]")
-    paths.add(_kv("Source:", config.alpha_src / name if factor is None else factor.src_path))
-    paths.add(_kv("Dump:",   config.alpha_dump / name))
-    paths.add(_kv("PNL:",    config.alpha_pnl / name))
+    paths.add(_kv("Source:", fp.src if factor is None else factor.src_path))
+    paths.add(_kv("Dump:",   fp.dump))
+    paths.add(_kv("PNL:",    fp.pnl))
 
     stats = tree.add("[yellow]Statistics[/]")
     if factor is None:

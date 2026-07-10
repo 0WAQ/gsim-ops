@@ -1,10 +1,17 @@
+from __future__ import annotations
+
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from ops.infra.config import Config
 from ops.utils.xmlio import load_xml
 
 from .key import AlphaKey
+
+if TYPE_CHECKING:
+    # 仅类型引用:core 不得运行期依赖 infra(import-linter C1)。Config 实例
+    # 由调用方传入,这里只消费其路径属性。
+    from ops.infra.config import Config
 
 
 class AlphaMetadata:

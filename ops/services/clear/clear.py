@@ -17,10 +17,11 @@ syntax error 都会触发。
 import shutil
 from pathlib import Path
 
+from ops.core.factormeta import infer_author_from_dir
+from ops.core.paths import FactorPaths
 from ops.infra.config import Config
 from ops.infra.store import default_store
 from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
-from ops.services.submit.parser import _infer_author_from_dir
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 
@@ -46,7 +47,7 @@ def _resolve_targets(args, config: Config, store) -> tuple[list[Path], list[tupl
         return [], []
 
     if name:
-        d = config.staging / name
+        d = FactorPaths.of(name, config).staging
         if not d.exists():
             error(f"  ✘ staging/{name}/ 不存在")
             return [], []
@@ -62,11 +63,11 @@ def _resolve_targets(args, config: Config, store) -> tuple[list[Path], list[tupl
     if not args.user:
         return orphans, []
 
-    # -u 过滤:用 _infer_author_from_dir,跟 submit/parser.py 一致
+    # -u 过滤:用 infer_author_from_dir,跟 submit 的 parse_factor 一致
     matched: list[Path] = []
     skipped: list[tuple[str, str]] = []
     for d in orphans:
-        author = _infer_author_from_dir(d.name)
+        author = infer_author_from_dir(d.name)
         if author == args.user:
             matched.append(d)
         else:
@@ -78,7 +79,7 @@ def _print_plan(targets: list[Path],
                 skipped: list[tuple[str, str]]) -> None:
     highlight(f"  将 clear {len(targets)} 个 staging 孤儿(仅删目录,无 state record 可删):")
     for d in targets:
-        author = _infer_author_from_dir(d.name)
+        author = infer_author_from_dir(d.name)
         info(f"    · {d.name:<40}  author≈{author}")
     if skipped:
         highlight(f"  跳过 {len(skipped)} 个(不匹配 -u):")

@@ -62,12 +62,9 @@ def pg_conninfo() -> str:
     except Exception as e:  # noqa: BLE001 — 任何连接失败都 skip
         pytest.skip(f"ops_test PG 不可达,跳过 pg 测试: {e}")
 
-    from ops.infra.info.pg_store import PostgresInfoStore
-    from ops.infra.snapshot.pg_store import PostgresSnapshotStore
-    from ops.infra.store.pg_store import PostgresStateStore
-    PostgresInfoStore(conninfo)
-    PostgresStateStore(conninfo)
-    PostgresSnapshotStore(conninfo)
+    # DDL 已滚出 store __init__(2026-07-09 阶段 2):显式按 FK 依赖序引导三表
+    from ops.infra.schema import ensure_schemas
+    ensure_schemas(conninfo)
     return conninfo
 
 

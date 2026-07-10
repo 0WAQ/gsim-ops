@@ -10,6 +10,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from ops.core.alpha.metadata import AlphaMetadata
+
+# CORRELATION 是唯一有生命周期语义的 stage 名(approve 的放行判据),定义在
+# core/state.py(2026-07-09 迁,消 approve→check 跨包边);PIPELINE 的
+# correlation 行引用它 —— 单一定义,顺序/路由 SSOT 仍是本表。此处 re-export
+# 保住 check 包内 `from .stages import CORRELATION` 的存量路径。
+from ops.core.state import CORRELATION
 from ops.infra.config import Config
 
 from .checker.base import Checker
@@ -25,11 +31,6 @@ from .xml_prepare import (
     prepare_for_long_backtest,
     prepare_for_validate,
 )
-
-# correlation 是唯一被流水线之外引用的 stage 名:approve 只放行 correlation
-# 失败(last_fail_stage 判定),archive 需捕获 correlation checker 的返回值落
-# bcorr 快照。导出常量,别处不再手写字符串。
-CORRELATION = "correlation"
 
 
 @dataclass(frozen=True)

@@ -22,7 +22,7 @@ import sys
 
 from loguru import logger
 
-from ops.infra.cache import CACHE_ROOT
+from ops.utils.cachedir import CACHE_ROOT
 
 LOG_DIR = CACHE_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)

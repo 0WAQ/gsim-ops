@@ -69,13 +69,18 @@ def test_scan_filters_by_factor_name(test_config, make_factor):
 # ---------------------------------------------------------------------------
 
 def test_ensure_record_creates_submitted(test_config, make_factor):
+    # _ensure_record 阶段 2 起收 FactorRepository(register 原子写 info+state;
+    # 原收裸 store —— 本用例曾滞后传 _store() 在 160 撞 AttributeError,
+    # VERIFY-AGGREGATE-P2P3 阶段 1)
+    from ops.infra.repository import FactorRepository
+
     cfg_path, config = test_config
     make_factor(name="AlphaEnsure", author="wbai")
     pipe = _pipeline(cfg_path, checkers={})
     factor = pipe.metadatas[0]
     store = _store(config)
     assert store.get("AlphaEnsure") is None
-    pipe._ensure_record(factor, store)
+    pipe._ensure_record(factor, FactorRepository(config))
     rec = store.get("AlphaEnsure")
     assert rec is not None
     assert rec.status == FactorStatus.SUBMITTED
@@ -86,6 +91,8 @@ def test_ensure_record_creates_submitted(test_config, make_factor):
 
 
 def test_ensure_record_does_not_overwrite(test_config, make_factor, seed_factor):
+    from ops.infra.repository import FactorRepository
+
     cfg_path, config = test_config
     make_factor(name="AlphaExists", author="wbai")
     pipe = _pipeline(cfg_path, checkers={})
@@ -93,7 +100,7 @@ def test_ensure_record_does_not_overwrite(test_config, make_factor, seed_factor)
     store = _store(config)
     # 预置一个 ACTIVE record
     seed_factor("AlphaExists", FactorStatus.ACTIVE)
-    pipe._ensure_record(factor, store)
+    pipe._ensure_record(factor, FactorRepository(config))
     # 不被覆盖
     assert store.get("AlphaExists").status == FactorStatus.ACTIVE
 

@@ -24,6 +24,7 @@ ops = "ops.main:main"
 
 [dependency-groups]
 dev = [
+    "import-linter>=2.13",
     "pyright>=1.1.411",
     "pytest>=8",
     "ruff>=0.15.20",
@@ -56,3 +57,70 @@ line-length = 100
 #   I import 排序, UP006/007/035/045 旧式 typing, B006/B008 可变默认参数。
 # 不开 pydocstyle(D)—— 与双语 docstring 约定冲突(风格守则 J10)。
 select = ["F", "E7", "I", "UP006", "UP007", "UP035", "UP045", "B006", "B008"]
+
+# ---------------------------------------------------------------------------
+# import-linter:依赖分层契约(full-review §8.1,factor-aggregate-plan 附录 A)
+# 本节只放**今日全绿、enforcing** 的契约(CI 直接跑 `lint-imports` 红了就挂)。
+# 2026-07-09 阶段 3 起 7/7 契约全部 enforcing(CI 直接跑 lint-imports,红即挂);
+# ratchet 基线机制(contracts-baseline.toml + scripts/ci/import_baseline.py)
+# 已完成历史使命物理删除(C3 阶段 2 清零、C2 阶段 3 清零)。
+# exclude_type_checking_imports:TYPE_CHECKING 块内的 import 不算依赖 ——
+# core 对 Config 的纯类型引用不构成运行期分层违例(阶段 2 连类型也会摘掉)。
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "ops"
+include_external_packages = true
+exclude_type_checking_imports = true
+
+[[tool.importlinter.contracts]]
+name = "C1 layers: cli -> services -> infra -> core -> utils"
+type = "layers"
+layers = ["ops.cli", "ops.services", "ops.infra", "ops.core", "ops.utils"]
+
+[[tool.importlinter.contracts]]
+# 2026-07-09 阶段 3 清零转 enforcing:18 条边(14× get_default_config_path 手抄
+# + 4× FactorStatus choices)收敛到 ops/cli/common.py 单一接缝,定点 ignore。
+name = "C2 cli must not import infra or core (directly)"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["ops.cli"]
+forbidden_modules = ["ops.infra", "ops.core"]
+ignore_imports = [
+    "ops.cli.common -> ops.infra.config",
+    "ops.cli.common -> ops.core.state",
+]
+
+[[tool.importlinter.contracts]]
+# 2026-07-09 阶段 2 清零转 enforcing(datasource→core ×4、parser→core ×2、
+# purge→Repository ×2、approve 语义 API ×1;factor-aggregate-plan 阶段 2)
+name = "C3 service packages are independent"
+type = "independence"
+modules = ["ops.services.submit", "ops.services.check", "ops.services.list", "ops.services.rm", "ops.services.restage", "ops.services.approve", "ops.services.cancel", "ops.services.clear", "ops.services.backfill", "ops.services.status", "ops.services.info", "ops.services.pack", "ops.services.run", "ops.services.combo"]
+
+[[tool.importlinter.contracts]]
+name = "C5 utils is a leaf"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["ops.utils"]
+forbidden_modules = ["ops.core", "ops.infra", "ops.services", "ops.cli"]
+
+[[tool.importlinter.contracts]]
+name = "C6 infra must not import presentation"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["ops.infra"]
+forbidden_modules = ["ops.utils.printer", "ops.utils.live_table", "rich"]
+
+[[tool.importlinter.contracts]]
+name = "C7 services use store factories, not concrete backends"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["ops.services"]
+forbidden_modules = ["ops.infra.store.json_store", "ops.infra.store.pg_store", "psycopg", "redis", "boto3"]
+
+[[tool.importlinter.contracts]]
+name = "C8 db drivers only in infra"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["ops.cli", "ops.services", "ops.core", "ops.utils"]
+forbidden_modules = ["psycopg", "psycopg_pool", "redis", "boto3"]

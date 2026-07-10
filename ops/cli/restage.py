@@ -1,8 +1,6 @@
 import argparse
-from pathlib import Path
 
-from ops.core.state import FactorStatus
-from ops.infra.config import get_default_config_path
+from ops.cli.common import FactorStatus, add_config_arg
 from ops.services.restage import run_restage
 from ops.utils.utils import LowerAction
 
@@ -45,7 +43,6 @@ Example:
                         help="同步清除 alpha_dump + alpha_feature(alpha_pnl 保留)")
     parser.add_argument("-y", "--yes", action="store_true",
                         help="跳过交互确认")
-    parser.add_argument("--config-path", "-c", type=Path,
-                        default=get_default_config_path())
+    add_config_arg(parser)
 
     parser.set_defaults(func=run_restage)

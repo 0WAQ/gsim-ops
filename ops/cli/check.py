@@ -1,7 +1,6 @@
 import argparse
-from pathlib import Path
 
-from ops.infra.config import get_default_config_path
+from ops.cli.common import add_config_arg
 from ops.services.check import run_check
 from ops.utils.utils import LowerAction
 
@@ -23,6 +22,6 @@ Example:
     # --retry 已删除:解析后从未被读取(no-op)。retry 语义早已由自动路由取代 ——
     # validate/long_backtest 失败自动回 SUBMITTED 留在 staging,下次 ops check
     # 无条件重扫(full-review 第三部分 V 表)。
-    parser.add_argument("--config-path", "-c", type=Path, default=get_default_config_path())
+    add_config_arg(parser)
 
     parser.set_defaults(func=run_check)

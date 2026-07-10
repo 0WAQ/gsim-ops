@@ -23,32 +23,26 @@ SUBMITTED,让下一次 ops check 捡起重跑 7 阶段流水线。version 不变
 import shutil
 from pathlib import Path
 
+from ops.core.factor import Factor
 from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
-from ops.infra.info import default_info_store
-from ops.infra.snapshot import default_snapshot_store
-from ops.infra.store import default_store
+from ops.infra.repository import ArtifactScope, FactorRepository
 from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
-from ops.services.rm.rm import _purge_artifacts, _recycle_check_artifacts
 from ops.utils.factor_dir import clean_pycache, rewrite_module_path
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 _SUPPORTED_STATUSES = {FactorStatus.ACTIVE, FactorStatus.REJECTED}
 
 
-def _locate_source(rec: FactorRecord, config: Config) -> Path | None:
+def _locate_source(rec: FactorRecord, repo: FactorRepository) -> Path | None:
     """按状态定位因子源目录。返回 None 表示无法找到可搬运的源。"""
-    name = rec.name
-    if rec.status == FactorStatus.ACTIVE:
-        src = config.alpha_src / name
-        return src if src.exists() else None
-    if rec.status == FactorStatus.REJECTED:
-        src = config.alpha_src / name
+    if rec.status in (FactorStatus.ACTIVE, FactorStatus.REJECTED):
+        src = repo.paths(rec.name).src
         return src if src.exists() else None
     return None
 
 
-def _resolve_targets(args, store, info_store, config: Config) -> list[FactorRecord]:
+def _resolve_targets(args, repo: FactorRepository) -> list[Factor]:
     name: str | None = args.factor_name
 
     # 与 approve/cancel/clear 对齐:name 与 -u 互斥(原先静默忽略 -u,是
@@ -58,14 +52,14 @@ def _resolve_targets(args, store, info_store, config: Config) -> list[FactorReco
         return []
 
     if name:
-        rec = store.get(name)
-        if rec is None:
+        factor = repo.get(name)
+        if factor is None or factor.state is None:
             error(f"  ✘ 因子 {name} 不在 state 中")
             return []
-        if rec.status not in _SUPPORTED_STATUSES:
-            error(f"  ✘ {name} 状态为 {rec.status.value},restage 不支持")
+        if factor.state.status not in _SUPPORTED_STATUSES:
+            error(f"  ✘ {name} 状态为 {factor.state.status.value},restage 不支持")
             return []
-        return [rec]
+        return [factor]
 
     # 批量模式守卫:必须显式给 -u 和/或 -s。--status 的 argparse 默认值为 None,
     # 否则本守卫永远不触发、裸 `ops restage` 会解析出全库 ACTIVE 因子。
@@ -78,40 +72,21 @@ def _resolve_targets(args, store, info_store, config: Config) -> list[FactorReco
         error(f"  ✘ --status 仅支持: {', '.join(s.value for s in _SUPPORTED_STATUSES)}")
         return []
 
-    # 批量模式：先从 info 获取符合 author 条件的 name 集合
-    if args.user:
-        info_records = info_store.list(author=args.user)
-        author_names = {i.name for i in info_records}
-    else:
-        author_names = None
-
-    # 再从 state 获取符合 status 条件的记录
-    records = store.list(status=status_enum)
-
-    # 取交集
-    if author_names is not None:
-        records = [r for r in records if r.name in author_names]
-
-    records.sort(key=lambda r: r.name)
-    return records
+    # 单条三表 JOIN(author + status 一并下推;原先 info.list + state.list
+    # 两次查 + 内存交集)
+    factors = repo.find(author=args.user, status=status_enum)
+    return factors  # find 已按 name 排序
 
 
-def _print_plan(targets: list[FactorRecord],
+def _print_plan(targets: list[Factor],
                 sources: dict[str, Path | None],
-                info_store,
                 purge: bool) -> None:
-    # 批量获取 author 信息
-    authors = {}
-    for r in targets:
-        info_rec = info_store.get(r.name)
-        authors[r.name] = info_rec.author if info_rec else "?"
-
     highlight(f"  将 restage {len(targets)} 个因子 → submitted:")
-    for r in targets:
-        src = sources.get(r.name)
+    for f in targets:
+        src = sources.get(f.name)
         src_str = str(src) if src else "✘ 源缺失"
-        author = authors.get(r.name, "?")
-        info(f"    · {r.name:<40}  {r.status.value:<9}  author={author:<10}  ← {src_str}")
+        status = f.status.value if f.status else "?"
+        info(f"    · {f.name:<40}  {status:<9}  author={f.identity.author or '?':<10}  ← {src_str}")
     if purge:
         highlight("  --purge: 立即下架 —— 同步清除 alpha_dump + alpha_feature")
     else:
@@ -121,10 +96,10 @@ def _print_plan(targets: list[FactorRecord],
         highlight("  REJECTED 因子将自动清除 dump + feature")
 
 
-def _restage_one(rec: FactorRecord, src: Path, config: Config, store,
-                 snapshot_store, purge: bool) -> None:
+def _restage_one(rec: FactorRecord, src: Path, config: Config,
+                 repo: FactorRepository, purge: bool) -> None:
     name = rec.name
-    dst = config.staging / name
+    dst = repo.paths(name).staging
 
     if not src.exists():
         raise FileNotFoundError(f"{src} 不存在")
@@ -150,23 +125,22 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config, store,
     # 服务面(dump/feature):REJECTED 无服务价值自动清;ACTIVE 默认保留
     # (last-known-good 供生产 combo 继续消费),--purge = 立即下架
     if rec.status == FactorStatus.REJECTED or purge:
-        removed = _purge_artifacts(name, config)
-        for r in removed:
+        for r in repo.purge_artifacts(name, ArtifactScope.SERVING):
             info(f"    ✔ 已删除 {r}")
 
     # check 面(pnl + bcorr 池副本):离库即失效,一律回收 —— 否则重检时
     # correlation 拿新 pnl 对池里自己的旧 pnl(corr≈1)必拒(自鬼影,PV7)
-    for r in _recycle_check_artifacts(name, config):
+    for r in repo.purge_artifacts(name, ArtifactScope.CHECK):
         info(f"    ✔ 已回收 {r}")
 
     # CAS: 只允许从召回前状态(ACTIVE/REJECTED)翻 SUBMITTED
-    store.transition(name, FactorStatus.SUBMITTED, expect=rec.status)
+    repo.transition(name, FactorStatus.SUBMITTED, expect=rec.status)
 
     # 离库 → 旧快照失效。快照语义是"入库事件的不可变快照",re-check 通过后 archive
     # 会写新快照;不删则 insert 撞 name UNIQUE 被吞,反查/报告永远停在旧代码的指标
     # (full-review P0-1)。删失败不阻断(archive 侧有 stale 自愈兜底)。
     try:
-        snapshot_store.delete(name)
+        repo.discard_snapshot(name)
     except Exception as e:
         warn(f"    ⚠ 删除旧 snapshot 失败(archive 时会自愈): {e}")
 
@@ -175,25 +149,24 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config, store,
 
 def run_restage(args) -> BatchResult | None:
     config: Config = Config.load(args.config_path)
-    store = default_store(config)
-    info_store = default_info_store(config)
-    snapshot_store = default_snapshot_store(config)
+    repo = FactorRepository(config)
 
-    targets = _resolve_targets(args, store, info_store, config)
+    targets = _resolve_targets(args, repo)
     if not targets:
         warn("  没有匹配的因子")
         return
 
-    sources: dict[str, Path | None] = {r.name: _locate_source(r, config) for r in targets}
+    sources: dict[str, Path | None] = {
+        f.name: _locate_source(f.state, repo) for f in targets if f.state is not None}
 
     banner(f"restage · {len(targets)} 个因子")
-    _print_plan(targets, sources, info_store, purge=args.purge)
+    _print_plan(targets, sources, purge=args.purge)
 
-    missing = [r.name for r in targets if sources[r.name] is None]
+    missing = [f.name for f in targets if sources.get(f.name) is None]
     if missing:
         warn(f"  ⚠ {len(missing)} 个因子源缺失,将被跳过(可能需要 ops submit 重新提交)")
 
-    runnable = [(r, src) for r in targets if (src := sources[r.name]) is not None]
+    runnable = [(f, src) for f in targets if (src := sources.get(f.name)) is not None]
     if not runnable:
         error("  ✘ 没有可处理的因子")
         bottom()
@@ -203,11 +176,11 @@ def run_restage(args) -> BatchResult | None:
         bottom()
         return None
 
-    src_by_name = {r.name: s for r, s in runnable}
+    src_by_name = {f.name: s for f, s in runnable}
 
     def _action(name: str) -> None:
         # 锁内复验(TOCTOU):确认挂起期间因子可能已被 check/rm/overwrite 动过
-        fresh = store.get(name)
+        fresh = repo.record(name)
         if fresh is None:
             raise SkipFactor("state 记录已不存在")
         if fresh.status not in _SUPPORTED_STATUSES:
@@ -215,9 +188,9 @@ def run_restage(args) -> BatchResult | None:
         src = src_by_name[name]
         if not src.exists():
             raise SkipFactor("源目录已不存在")
-        _restage_one(fresh, src, config, store, snapshot_store, purge=args.purge)
+        _restage_one(fresh, src, config, repo, purge=args.purge)
 
-    result = apply_locked([r.name for r, _ in runnable], config, _action, verb="restage")
+    result = apply_locked([f.name for f, _ in runnable], config, _action, verb="restage")
     if missing:
         info(f"  (另有 {len(missing)} 个源缺失,resolve 阶段已跳过)")
     bottom()

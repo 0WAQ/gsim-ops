@@ -1,7 +1,6 @@
 import argparse
-from pathlib import Path
 
-from ops.infra.config import get_default_config_path
+from ops.cli.common import add_config_arg
 from ops.services.cancel import run_cancel
 from ops.utils.utils import LowerAction
 
@@ -34,7 +33,6 @@ Example:
                         help="同时允许 CHECKING(清崩溃 / 中断的 check 残留)")
     parser.add_argument("-y", "--yes", action="store_true",
                         help="跳过交互确认")
-    parser.add_argument("--config-path", "-c", type=Path,
-                        default=get_default_config_path())
+    add_config_arg(parser)
 
     parser.set_defaults(func=run_cancel)

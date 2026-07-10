@@ -29,6 +29,7 @@ from __future__ import annotations
 import atexit
 import os
 import threading
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
 from psycopg_pool import ConnectionPool
@@ -104,3 +105,35 @@ def _reset_after_fork() -> None:
 
 atexit.register(_close_my_pools)
 os.register_at_fork(after_in_child=_reset_after_fork)
+
+
+# ---------------------------------------------------------------------------
+# ISO string <-> TIMESTAMPTZ 边界转换(2026-07-09 自 store/snapshot 两个
+# pg_store 的同名私有函数收敛至此 —— 第三个消费者 repository 出现后不再镜像)
+# ---------------------------------------------------------------------------
+
+def ts_in(v: str | None) -> str | None:
+    """FactorRecord/Snapshot 的 ISO string(naive local,如 2026-07-04T01:45:33)
+    -> TIMESTAMPTZ 可正确落库的值。string 不带时区,是本地墙钟;打上本地 tz,
+    否则 PG 按 UTC 解释偏 8h。"""
+    if not v:
+        return None
+    try:
+        dt = datetime.fromisoformat(v)
+    except ValueError:
+        return v  # 交给 PG 解析
+    if dt.tzinfo is None:
+        dt = dt.astimezone()
+    return dt.isoformat(timespec="seconds")
+
+
+def ts_out(v) -> str | None:
+    """TIMESTAMPTZ(psycopg 给 tz-aware datetime)-> naive local ISO string,
+    与 utils/clock.now_iso 格式一致(无 tz 后缀)。"""
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        if v.tzinfo is not None:
+            v = v.astimezone().replace(tzinfo=None)
+        return v.isoformat(timespec="seconds")
+    return str(v)
