@@ -20,7 +20,6 @@ SUBMITTED,让下一次 ops check 捡起重跑 7 阶段流水线。version 不变
 
 跨机:state 在共享 PG、staging 在共享 JFS,任一节点 restage 全局立即生效。
 """
-import shutil
 from pathlib import Path
 
 from ops.core.factor import Factor
@@ -28,7 +27,6 @@ from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
 from ops.infra.repository import ArtifactScope, FactorRepository
 from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
-from ops.utils.factor_dir import clean_pycache, rewrite_module_path
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 _SUPPORTED_STATUSES = {FactorStatus.ACTIVE, FactorStatus.REJECTED}
@@ -99,12 +97,6 @@ def _print_plan(targets: list[Factor],
 def _restage_one(rec: FactorRecord, src: Path, config: Config,
                  repo: FactorRepository, purge: bool) -> None:
     name = rec.name
-    dst = repo.paths(name).staging
-
-    if not src.exists():
-        raise FileNotFoundError(f"{src} 不存在")
-    if dst.exists():
-        raise FileExistsError(f"{dst} 已存在,拒绝覆盖")
 
     py_files = sorted(src.glob("*.py"))
     xml_files = sorted(src.glob("*.xml"))
@@ -114,13 +106,11 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config,
             f".xml={[x.name for x in xml_files]} (各需恰好 1 个)"
         )
 
-    config.staging.mkdir(parents=True, exist_ok=True)
-    clean_pycache(src)
-
-    # 先 move,再 transition:崩在中间留 orphan(reconcile 已下线),必要时人工处理
+    # 先 move,再 transition:崩在中间留 orphan(reconcile 已下线),必要时人工
+    # 处理。搬运 + @module 重指收编 repo.recall(2026-07-10;存在性/占用校验在
+    # 其内,move 不是 copy —— 召回后 staging 是唯一副本)。
     prev_status = rec.status.value
-    shutil.move(str(src), str(dst))
-    rewrite_module_path(dst)
+    repo.recall(name)
 
     # 服务面(dump/feature):REJECTED 无服务价值自动清;ACTIVE 默认保留
     # (last-known-good 供生产 combo 继续消费),--purge = 立即下架

@@ -1,7 +1,7 @@
 import argparse
 from datetime import datetime
 
-from ops.cli.common import add_config_arg
+from ops.cli.common import add_config_arg, mark_write
 from ops.services.submit import run_submit
 from ops.utils.utils import LowerAction
 
@@ -29,5 +29,7 @@ Example:
         help="覆盖已入库的同名因子,提交新代码并 version+1(默认跳过已入库因子)",
     )
     add_config_arg(parser)
+
+    mark_write(parser)
 
     parser.set_defaults(func=run_submit)

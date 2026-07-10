@@ -14,12 +14,12 @@ syntax error 都会触发。
 
 孤儿全在 JFS staging 上,集中清理一次到位,不需跨机传播。
 """
-import shutil
 from pathlib import Path
 
 from ops.core.factormeta import infer_author_from_dir
 from ops.core.paths import FactorPaths
 from ops.infra.config import Config
+from ops.infra.repository import FactorRepository
 from ops.infra.store import default_store
 from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
@@ -87,14 +87,15 @@ def _print_plan(targets: list[Path],
             info(f"    · {name:<40}  {why}")
 
 
-def _clear_one(staging_dir: Path) -> None:
-    shutil.rmtree(staging_dir)
-    info(f"    ✔ 已删除 staging/{staging_dir.name}/")
+def _clear_one(name: str, repo: FactorRepository) -> None:
+    repo.unstage(name)
+    info(f"    ✔ 已删除 staging/{name}/")
 
 
 def run_clear(args) -> BatchResult | None:
     config: Config = Config.load(args.config_path)
     store = default_store(config)
+    repo = FactorRepository(config)
 
     targets, skipped = _resolve_targets(args, config, store)
     if not targets:
@@ -123,7 +124,7 @@ def run_clear(args) -> BatchResult | None:
         d = dirs[name]
         if not d.exists():
             raise SkipFactor("目录已被外部清理")
-        _clear_one(d)
+        _clear_one(name, repo)
 
     result = apply_locked(list(dirs), config, _action, verb="clear")
     bottom()

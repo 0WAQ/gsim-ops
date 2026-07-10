@@ -280,3 +280,86 @@ def test_pg_find_surfaces_info_orphans(test_config):
     assert orphans[0].identity.author == "wbai"
     # 显式 status 过滤对 NULL 为假,不误纳
     assert repo.find(status="submitted", include_submitted=True) == []
+
+
+# ---------------------------------------------------------------------------
+# 产物面:archive / recall / unstage(2026-07-10 阶段 3 第二批,json 组)
+# ---------------------------------------------------------------------------
+
+def test_archive_moves_all_and_splits_pool(json_config, write_factor):
+    """archive 收编 to_lib:src 搬 alpha_src(+@module 重指)、dump/pnl 搬库、
+    按来源分流池副本。"""
+    _, config = json_config
+    repo = FactorRepository(config)
+    d = write_factor(config, name="AlphaWbaiArc", discovery_method="manual")
+    dump = config.alpha_path / "AlphaWbaiArc"
+    dump.mkdir(parents=True)
+    (dump / "20260101v2.npy").write_text("x")
+    pnl = config.pnl_path / "AlphaWbaiArc"
+    pnl.write_text("pnl")
+
+    repo.archive("AlphaWbaiArc", src_dir=d, dump_dir=dump, pnl_file=pnl,
+                 discovery_method="manual")
+
+    src = config.alpha_src / "AlphaWbaiArc"
+    assert (src / "AlphaWbaiArc.py").exists() and not d.exists()
+    assert (config.alpha_dump / "AlphaWbaiArc" / "20260101v2.npy").exists()
+    assert (config.alpha_pnl / "AlphaWbaiArc").read_text() == "pnl"
+    assert (config.pnl_manual / "AlphaWbaiArc").exists()      # 按来源分流
+    assert not (config.pnl_automated / "AlphaWbaiArc").exists()
+    # @module 重指到入库后的 .py(独立可跑)
+    xml = (src / "Config.AlphaWbaiArc.xml").read_text()
+    assert str(src / "AlphaWbaiArc.py") in xml
+
+
+def test_archive_refuses_identity_divergence(json_config, write_factor):
+    """身份兜底断言随迁 repository:src_dir.name != name → 拒绝归档,原物不动。"""
+    import pytest
+
+    _, config = json_config
+    repo = FactorRepository(config)
+    d = write_factor(config, name="AlphaWbaiImp")
+
+    with pytest.raises(RuntimeError, match="identity divergence"):
+        repo.archive("AlphaWbaiVictim", src_dir=d,
+                     dump_dir=config.alpha_path / "x",
+                     pnl_file=config.pnl_path / "x", discovery_method="manual")
+    assert d.exists()                                          # 原地未动
+
+
+def test_recall_roundtrip_and_guards(json_config, write_factor):
+    """recall 收编 restage 搬运:alpha_src → staging(move,唯一副本)+ @module
+    重指;src 缺失 / staging 占用的守卫。"""
+    import pytest
+
+    _, config = json_config
+    repo = FactorRepository(config)
+    d = write_factor(config, name="AlphaWbaiRec", discovery_method="manual")
+    dump = config.alpha_path / "AlphaWbaiRec"
+    dump.mkdir(parents=True)
+    pnl = config.pnl_path / "AlphaWbaiRec"
+    pnl.write_text("pnl")
+    repo.archive("AlphaWbaiRec", src_dir=d, dump_dir=dump, pnl_file=pnl,
+                 discovery_method="manual")
+
+    repo.recall("AlphaWbaiRec")
+
+    staging = config.staging / "AlphaWbaiRec"
+    assert staging.exists() and not (config.alpha_src / "AlphaWbaiRec").exists()
+    xml = (staging / "Config.AlphaWbaiRec.xml").read_text()
+    assert str(staging / "AlphaWbaiRec.py") in xml             # @module 指回 staging
+
+    with pytest.raises(FileNotFoundError):                     # src 已不在
+        repo.recall("AlphaWbaiRec")
+    # src 重新出现但 staging 被占 → 拒绝覆盖
+    (config.alpha_src / "AlphaWbaiRec").mkdir(parents=True)
+    with pytest.raises(FileExistsError):
+        repo.recall("AlphaWbaiRec")
+
+
+def test_unstage(json_config, write_factor):
+    _, config = json_config
+    repo = FactorRepository(config)
+    d = write_factor(config, name="AlphaWbaiUn")
+    assert repo.unstage("AlphaWbaiUn") is True and not d.exists()
+    assert repo.unstage("AlphaWbaiUn") is False                # 幂等:再删报不存在

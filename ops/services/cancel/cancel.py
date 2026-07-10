@@ -17,8 +17,6 @@
 
 批量模式 (-u) apt 风格交互;-y 跳过确认。
 """
-import shutil
-
 from ops.core.factor import Factor, FactorIdentity
 from ops.core.state import FactorRecord, FactorStatus
 from ops.infra.config import Config
@@ -123,13 +121,10 @@ def _print_plan(targets: list[Factor],
 
 
 def _cancel_one(name: str, repo: FactorRepository) -> None:
-    staging_dir = repo.paths(name).staging
-
     # 先删 staging,再删记录 — 崩在中间留下 orphan record(SUBMITTED、无文件)。
     # 不再自动清理(reconcile 已下线),但 ops check 按 staging 目录扫描,该 orphan 不影响
     # 后续流程;必要时人工 ops rm / 后续 doctor 处理。
-    if staging_dir.exists():
-        shutil.rmtree(staging_dir)
+    if repo.unstage(name):
         info(f"    ✔ 已删除 staging/{name}/")
     else:
         warn(f"    ⚠ staging/{name}/ 不存在(可能已被外部清理)")

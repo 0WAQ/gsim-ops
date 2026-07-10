@@ -1,6 +1,6 @@
 import argparse
 
-from ops.cli.common import add_config_arg
+from ops.cli.common import add_config_arg, mark_write
 from ops.services.check import run_check
 from ops.utils.utils import LowerAction
 
@@ -23,5 +23,7 @@ Example:
     # validate/long_backtest 失败自动回 SUBMITTED 留在 staging,下次 ops check
     # 无条件重扫(full-review 第三部分 V 表)。
     add_config_arg(parser)
+
+    mark_write(parser)
 
     parser.set_defaults(func=run_check)

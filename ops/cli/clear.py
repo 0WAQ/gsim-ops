@@ -1,6 +1,6 @@
 import argparse
 
-from ops.cli.common import add_config_arg
+from ops.cli.common import add_config_arg, mark_write
 from ops.services.clear import run_clear
 from ops.utils.utils import LowerAction
 
@@ -32,5 +32,7 @@ state 中有 record 的(SUBMITTED / CHECKING)请用 ops cancel。
     parser.add_argument("-y", "--yes", action="store_true",
                         help="跳过交互确认")
     add_config_arg(parser)
+
+    mark_write(parser)
 
     parser.set_defaults(func=run_clear)

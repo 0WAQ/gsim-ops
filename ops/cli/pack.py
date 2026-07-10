@@ -1,6 +1,6 @@
 import argparse
 
-from ops.cli.common import STATUS_CHOICES, add_config_arg
+from ops.cli.common import STATUS_CHOICES, add_config_arg, mark_write
 from ops.services.pack import run_pack
 
 
@@ -33,5 +33,7 @@ Example:
     parser.add_argument("--no-verify", action="store_true", help="跳过抽样校验")
     parser.add_argument("--workers", "-w", type=int, default=10, help="并行进程数 (默认 10)")
     add_config_arg(parser)
+
+    mark_write(parser)
 
     parser.set_defaults(func=run_pack)

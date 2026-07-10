@@ -1068,3 +1068,37 @@ b0b548e 修复后第二轮全绿:101 passed / e2e 6 passed / 只读冒烟 Total=
 三表零行、cancel 级联零孤儿 info)。**阶段 2 + 阶段 3 第一批至此生产验证完毕**;
 archive/recall(阶段 3 第二批)前置解除。侧记:AlphaWbaiReversal(rejected)仍在
 pnl_manual 池 —— bcorr 池存量鬼影挂账再次现形(审计 snippet 已交,待清)。
+
+## U6 · Wave5 阶段 3 第二批:archive/recall 收编 + S16 写命令派生(2026-07-10)
+
+分支 `claude/factor-aggregate-phase3b`(基于合并后 main b17de9c;阶段 2 + 阶段 3
+第一批经 PR #5 合入)。
+
+**产物面收编完成**(施工图 §3.2 的 stage/unstage/archive/recall 中,有真实
+消费者的三个):
+- `repo.archive`:check.to_lib 的全部搬运(src→alpha_src + @module 重指 +
+  dump/pnl 搬库 + 按来源分流池副本 + pnl 单文件三分支)收编 Repository,
+  **身份兜底断言随迁**(第一道闸不动,仍在 run_one 入口);to_lib 变薄调用。
+- `repo.recall`:restage 的搬运半边(存在性/占用守卫 + move + 重指)收编;
+  文件数校验、产物两面回收、CAS transition、discard 仍是 restage 政策。
+- `repo.unstage`:cancel/clear/rm 三处 staging rmtree 收编(返回 bool,幂等)。
+- 有意不建:`stage`(submit 的 dropbox→staging copy 含覆盖警告 UX,留 service)、
+  `iter_*/orphans/meta`(doctor 未立项,不预建空壳 —— W3 幽灵教训)。
+
+**S16 完成(SSOT 表 ⚠ 行清零)**:`sudo.py::WRITE_COMMANDS` 手抄集合删除,
+写命令在注册处 `mark_write(parser)` 声明(cli/common),`maybe_elevate` 消费
+`args.is_write_command` —— 单一定义;`run` 曾因手抄名单缺席在 JFS 下 EACCES
+(full-review 1.2),此类漂移从机制上消灭。声明集测试钉住 10 命令。
+
+**测试**:json 组 +5(archive 搬运/分流、身份拒绝、recall 往返/守卫、unstage
+幂等、写命令声明集)。门禁:51 passed、7/7 契约 KEPT、pyright 0。
+
+**待 160**:金丝雀环路复跑(archive/recall 是 to_lib/restage 的等价收编,
+须按 VERIFY-AGGREGATE-P2P3 阶段 1/2/4 在本分支重验后方可合 main)。
+
+**对抗评审(第二批,4 agent)**:archive/recall/unstage 两个对等维度 **0 finding**
+(逐位对等成立);唯一确认 1 个 P3 —— S16 声明集测试手抄了 main.py 的 14 个注册
+函数,新命令不会自动进测试(又造一面镜子)。修:注册表提升为
+`ops/main.py::SUBPARSER_REGISTRARS` 模块级单一正主,main 与测试共同迭代它,
+测试只钉"哪 10 个是写命令"这一个真正的决策。门禁终态:51 passed、7/7 契约、
+pyright 0。

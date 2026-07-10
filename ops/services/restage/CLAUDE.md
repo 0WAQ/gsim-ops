@@ -12,7 +12,9 @@
 1. `_resolve_targets` — 按 name / user / status 筛选目标(批量走 `repo.find(author=..., status=...)` 单条三表 JOIN 下推,2026-07-09 退役 info.list + state.list 内存交集;author 显示自 `Factor.identity`)
 2. `_locate_source` — 按状态定位因子源目录
 3. 显示计划，apt-install 风格确认 (`-y` 跳过)
-4. `_restage_one` — move src → staging, rewrite XML module path, transition state → SUBMITTED,
+4. `_restage_one` — 搬运走 `repo.recall`(存在性/占用校验 + move + @module 重指,
+   2026-07-10 收编 Repository;文件数校验/产物回收/CAS transition 政策仍在本包),
+   transition state → SUBMITTED,
    **删除 factor_snapshot 行**(`repo.discard_snapshot`;2026-07-07:离库即旧快照失效;不删则 re-check 通过后
    archive 的 insert 撞 name UNIQUE 被吞,快照永远停在旧代码,full-review P0-1。
    删失败不阻断,archive 侧有 stale 自愈兜底)
@@ -37,7 +39,7 @@
   在重检窗口内继续消费,默认保留;`--purge` = 立即下架(`ArtifactScope.SERVING`);
   REJECTED 召回无服务价值,一律自动清。
 - 双保险:correlation checker 对 bcorr 结果**排除自名**(防删除失败残留再造自鬼影)。
-- 搬源是 `shutil.move`:召回后 staging 是 src **唯一副本**(cancel 的 entered_at 守卫由此而来)
+- 搬源是 move 不是 copy(`repo.recall` 内):召回后 staging 是 src **唯一副本**(cancel 的 entered_at 守卫由此而来)
 
 ## 并发安全
 
@@ -51,7 +53,7 @@ StateConflict 按跳过处理)。`run_*` 返回 `BatchResult`(done/skipped/faile
 
 ## 崩溃恢复
 
-先 move 再 transition — 崩在中间(src 已离开 alpha_src、state 未翻）留下 orphan。reconcile
+先 move(`repo.recall`)再 transition — 崩在中间(src 已离开 alpha_src、state 未翻）留下 orphan。reconcile
 已下线;此类残留不自动修复,必要时人工 `ops rm` / 后续 `ops doctor`。因子若已进 staging,
 下次 `ops check` 会照常扫到并重跑。
 

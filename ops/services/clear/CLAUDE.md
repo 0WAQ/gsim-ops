@@ -26,7 +26,7 @@ XML 异常 / py syntax error),staging 目录已就位但 state 没写入 → 孤
    - 批量 `clear`: 全部孤儿
    - 批量 `clear -u <user>`: `infer_author_from_dir` 推断 author 过滤(`ops/core/factormeta.py`,与 submit 的 parse_factor 同一函数;2026-07-09 自 submit/parser.py 迁入)
 3. apt 风格确认 (`-y` 跳过)
-4. `_clear_one`: `shutil.rmtree(staging_dir)`
+4. `_clear_one`: `repo.unstage(name)`(2026-07-10 收编 Repository,与 cancel/rm 共用)
 
 ## 不动的产物
 

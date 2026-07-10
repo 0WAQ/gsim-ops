@@ -215,7 +215,7 @@ AlphaXxx/
 | 因子领域类型 | `ops/core/factor.py::Factor`(identity/state/snapshot 三切面) | 2026-07-09 阶段 2;全库唯一叫"因子"的类型 |
 | 因子记录读写 + 产物清理 | `ops/infra/repository.py::FactorRepository` | find 单条三表 JOIN;register 原子双表写;purge_artifacts 按 ArtifactScope 两面 |
 | 三表 DDL(代码侧引导) | `ops/infra/schema.py::ensure_schemas`(FK 依赖序) | 生产 schema 正主是 scripts/postgres;store 构造零副作用 |
-| ⚠ 写命令集(sudo 提权名单) | `infra/sudo.py::WRITE_COMMANDS` 手抄 | 待从命令注册派生(S16) |
+| 写命令集(sudo 提权名单) | `ops/cli/common.py::mark_write` 注册声明(args.is_write_command) | 2026-07-10 S16 完成;WRITE_COMMANDS 手抄删除,`maybe_elevate` 只消费声明 |
 | ⚠ metric 表达式 | snapshot `_METRIC_EXPR` 与 list 内存镜像 | SQL 半边已收敛(snapshot_where 供 find 复用);list.py 内存兜底仍是镜像,待注册表(S8) |
 
 ## Known Technical Debt (Deferred)
