@@ -1209,3 +1209,11 @@ SSOT 表零 ⚠、7/7 契约 enforcing、Known Technical Debt 的 stub / metadat
 **侧发现挂账**:dry-run 全库扫描亮出 662 条 stale 快照告警
 (`snapshot_at != entered_at`,Factor 软校验首次全库过筛)—— 独立的一族对账
 问题(疑迁移期存量),记 doctor 候选,本批不处理。
+
+**MinIO 轮换缓办决定(2026-07-11,用户拍板)**:A 叉已判定(JFS 卷现役钥 ==
+泄漏钥 exte****-client,证据链见 ROTATE-MINIO-FEISHU-RESULT),但**轮换暂缓**:
+依据 = MinIO 在公司内网(0e 的"公网 200"系从 160 机房内测得,不构成公网可达
+证据)+ 仓库私有无外部读者,短期暴露面可控。runbook(阶段 2-4)已备好在
+ROTATE-MINIO-FEISHU.md,随时可按静默窗口执行。**触发条件:当前 bug/功能批
+做完后排期,或暴露面变化(仓库共享面扩大 / 网络策略变更)时立即升级为紧急。**
+Feishu 重置仍待用户后台操作。
