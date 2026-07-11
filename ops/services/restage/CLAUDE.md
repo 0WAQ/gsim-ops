@@ -39,7 +39,7 @@
   在重检窗口内继续消费,默认保留;`--purge` = 立即下架(`ArtifactScope.SERVING`);
   REJECTED 召回无服务价值,一律自动清。
 - 双保险:correlation checker 对 bcorr 结果**排除自名**(防删除失败残留再造自鬼影)。
-- 搬源是 move 不是 copy(`repo.recall` 内):召回后 staging 是 src **唯一副本**(cancel 的 entered_at 守卫由此而来);且 staging 是**本机 sidecar**(2026-07-11 校正)—— 在哪台 restage,后续 `ops check` 就必须在同一台跑
+- 搬源是 move 不是 copy(`repo.recall` 内):召回后 staging 是 src **唯一副本**(cancel 的 entered_at 守卫由此而来)。staging 2026-07-11 起共享(JFS 实目录)—— 召回后任意机器(通常是消费机 170)都可 check
 
 ## 并发安全
 

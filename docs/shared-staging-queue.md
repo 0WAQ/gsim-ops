@@ -39,8 +39,8 @@ divergence 整单拒绝;CHECKING 残留重扫自愈。
 
 ## 上线顺序(部署手册 docs/remediation/DEPLOY-SHARED-STAGING.md)
 
-0. 170 部署 ops(无窗口):JFS 已挂(06-24 接入),补 repo/uv/env/PG 凭证/
-   gsim 可达性验证。
+0. ~~170 部署 ops~~ **已由 ops setup 工程完成**(2026-07-11:挂载迁
+   /nvme125 + PG 凭证 + `setup --check` FAIL 0,见 MIGRATE-170-RESULT)。
 1. staging 共享化(分钟级窗口,禁 submit/check/restage):挂载点内的 staging
    软链是**单一 JFS 对象**(160/150 的 ls mtime 差 8h = 时区显示,同一 inode),
    删软链 + 建实目录一次全局生效;各机 sidecar 存量搬进共享目录。

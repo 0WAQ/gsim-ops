@@ -44,9 +44,8 @@ JFS 首次接入不归本命令(join.sh);数据对账(盘 ↔ PG)留给未来 op
   title, severity, check, fix|None)` 一项一行,新增检查 = 加一行(与 check
   流水线 PIPELINE 同款模式)。severity:FAIL = 存储部署错误(任何节点必须绿),
   WARN = 角色相关(worker 无 dropbox、纯投递机无 gsim 属正常)。
-  `STAGING_IS_SHARED` 常量:共享 staging 部署(DEPLOY-SHARED-STAGING)落地时
-  翻 True **与部署同批提交**,staging 的应然随之从"软链 → sidecar"变为
-  "JFS 实目录"。
+  `STAGING_IS_SHARED = True`(2026-07-11 共享 staging 部署同批翻转):staging
+  应然 = JFS 实目录;False 分支保留历史语义(测试双模式钉住,防误翻)。
 - `engine.py` —— `run_setup(config, apply=True, ctx=None)`:逐项 check →
   (apply 且可补建时)fix → 复检;单项崩溃不拖垮清单;返回 `CheckResult` 列表,
   **零展示**。
