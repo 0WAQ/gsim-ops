@@ -208,9 +208,12 @@ sidecar 存量搬运 /ext4/alphalib.local → /nvme125/alphalib.local(3 项)
 角色性 WARN,符合预期)。--check 复验同样 **FAIL 0 / WARN 1**,14 项中 12 ✔。
 mount 项:`/nvme125/alphalib (fuse.juicefs)` ✔。
 
-### 步骤 5:`ops list`
+### 步骤 5:`ops list` + 旧址清理
 
-(待补:清理指令中一并执行,预期 Total: 8252。)
+用户确认完成(2026-07-11,未贴原文,以用户确认为准):`ops list` 正常;
+/ext4 旧址(alphalib.local / jfs-cache / 空挂载点目录)与 /etc 两个
+.ops-migrate-bak 备份已清。/nvme125 四个既有 dataset 未动(红线)。
+**170 迁移全案关单。**
 
 ## 判读(判读方):迁移成功,声明式挂载点迁移端到端闭环
 

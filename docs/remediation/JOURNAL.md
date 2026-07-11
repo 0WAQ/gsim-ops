@@ -1272,5 +1272,6 @@ happy path 一步不差(备份/停/改写/搬 3 项/新挂载共享数据可见/
 uv tool 找 config 靠 cwd;残留 OPS_ALPHALIB_ROOT 静默压声明 → env 覆盖显性化
 (e20b4a5);sudo 自提权判据对迁移场景失效 → migrate 入口显式查 root
 (21347fa)。170 PG 密码补分发(同款 150/144)。/nvme125 已有四 dataset 未受
-影响;/ext4 旧址 + /etc 两个 .ops-migrate-bak 待清理指令。ops setup 工程
-(v1 + hosts 声明 + migrate-mount)随本批 PR 合 main。
+影响;/ext4 旧址 + /etc 备份已由用户清理(2026-07-11 确认),ops list 正常。
+ops setup 工程(v1 + hosts 声明 + migrate-mount)经 PR #8 合 main
+(merge 4a9477e)。**170 迁移全案关单**;160/150 待下窗口滚存 main。
