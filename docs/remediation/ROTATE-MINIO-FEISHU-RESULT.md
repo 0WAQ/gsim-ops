@@ -9,8 +9,15 @@ A/B 叉判定、MinIO 切钥窗口、旧钥吊销均**未做**,等判读。
 
 ## 结论速览
 
-- **A/B 叉:无法在本会话定论** —— 决定性证据(0b JFS 卷现役钥、0d MinIO 用户清单)被权限/工具挡死(详见下)。已收齐的**旁证倾向 B 叉**(泄漏钥形如独立用途 client),但**须你按下方证据拍板**,不由本会话代判。
-- **0e 公网暴露:`103.237.248.189:39000` 健康探针返回 `200`,公网可达** —— 记入阶段 5 处置项。
+- **A/B 叉:定为 A 叉(高危)** —— 2026-07-11 补齐 0b:用户在 160 以 root 跑
+  `META_PASSWORD=... juicefs config redis://mymaster,...:26380/0`,**JFS 卷现役
+  access-key 前 4 位 == `exte`,即泄漏钥 `exte****-client` 就是 JuiceFS 卷实际在用
+  的对象存储钥**。首轮旁证倾向 B 叉被此决定性证据推翻。
+- **⚠ 高危面**:泄漏钥 == JFS 卷钥,且 0e 已确认 endpoint 公网可达(200)——
+  因子库数据实体(145 alphalib-juicefs 对象)可经公网 + git 历史里的泄漏钥读写。
+  A 叉阶段 2-4(建最小权限专用新钥 → `juicefs config` 切钥 → 170→150→144→160
+  逐机 remount 验证 → 吊销旧钥)**须走静默窗口**,本会话未做,等排期。
+- **0e 公网暴露:`103.237.248.189:39000` 健康探针返回 `200`,公网可达** —— 阶段 5 处置。
 - **阶段 1 Feishu:重置须飞书后台(外部登录,本会话无法代做)。** 已定位现役消费方 2 处 + 额外发现 secret 明文散落(详见阶段 1)。
 
 ---
@@ -32,19 +39,25 @@ A/B 叉判定、MinIO 切钥窗口、旧钥吊销均**未做**,等判读。
 - **`AK_leak = exte****`**;完整值形如 `external-sync client`(命名带明确用途语义)。
 - endpoint 是**公网 IP** `103.237.248.189:39000`,bucket `external-sync`。
 
-### 0b JFS 卷现役钥 —— ⚠ 未取到(权限挡死)
+### 0b JFS 卷现役钥 —— ✅ 已取到(2026-07-11 补齐,决定叉别)
 
-手册给的 `juicefs config redis-sentinel://...` 在本机 juicefs `1.3.1` 报
+首轮:手册给的 `juicefs config redis-sentinel://...` 在本机 juicefs `1.3.1` 报
 `Invalid meta driver: redis-sentinel`(该版本不认此 scheme;现役 systemd unit
-用的是 `redis://mymaster,10.9.100.160,10.9.100.150,10.6.100.144:26380/0`)。
+用的是 `redis://mymaster,10.9.100.160,10.9.100.150,10.6.100.144:26380/0`);且改用
+实际 meta URL 需 meta redis 密码,密码在 `/etc/juicefs/alphalib-jfs.env`(root-only),
+本会话 sudo 无 TTY,首轮未取到。
 
-改用实际 meta URL 需 meta redis 密码,密码在 `/etc/juicefs/alphalib-jfs.env`
-(root-only,`Permission denied`)。本会话 **sudo 无 TTY 且非 NOPASSWD**
-(`sudo: a password is required`),故:
+补齐:用户在 160 以 root 跑(手册修正版 0b 流程):
 
-- **JFS 卷所用 access-key 未能读取。** 挂载点 `/tank/vault/alphalib/.config`
-  同样 `Permission denied`。
-- 这是 A/B 叉的**决定性证据之一,缺失**。
+```
+sudo grep META_PASSWORD /etc/juicefs/alphalib-jfs.env          # 取值,不进报告
+META_PASSWORD='****' juicefs config \
+  "redis://mymaster,10.9.100.160,10.9.100.150,10.6.100.144:26380/0" | grep -i AccessKey
+→ AccessKey: exte****(masked)
+```
+
+- **JFS 卷现役 access-key 前 4 位 == `exte`,即 == 泄漏钥 `exte****-client`。**
+- 这是 A/B 叉的**决定性证据之一**,判定 **A 叉**(泄漏钥即 JFS 卷所用钥)。
 
 ### 0c 各机 rclone.conf / env 里的 MinIO 钥
 
@@ -83,28 +96,33 @@ curl -sm 5 -o /dev/null -w "%{http_code}" http://103.237.248.189:39000/minio/hea
 
 **MinIO 39000 端口公网可达(健康探针 200)。** 记入阶段 5 处置。
 
-### A/B 叉判据汇总(等你拍板)
+### A/B 叉判据汇总(判定:A 叉)
 
-| 判据 | 手册要求 | 本会话结果 |
+| 判据 | 手册要求 | 结果 |
 |---|---|---|
-| `AK_leak` 前缀/语义 | 0a | `exte****`,语义 = external-sync **client**(独立业务命名) |
-| `AK_leak` == MinIO root 用户名? | 0d | **未知**(mc 未装,拿不到用户清单) |
-| `AK_leak` == JFS 卷 access-key? | 0b | **未知**(meta 密码 root-only,sudo 无 TTY) |
+| `AK_leak` 前缀/语义 | 0a | `exte****`,语义 = external-sync **client** |
+| `AK_leak` == JFS 卷 access-key? | 0b | **是**(卷钥前 4 位 == `exte`,2026-07-11 补齐) |
+| `AK_leak` == MinIO root 用户名? | 0d | 未取到(mc 未装);**已被 0b 定叉,此项不再是必需证据** |
 | 公网可达? | 0e | **是(200)** |
 
-- **倾向 B 叉的旁证**:泄漏钥命名 `external-sync client`、与 `delayed-signals-jdw`
-  并列为独立 rclone profile、endpoint/bucket 都是 sync 专用(sync 栈已退役)。
-  形态上更像「独立 sync 旧钥」而非 root/JFS 共享钥。
-- **但两条决定性证据(0b/0d)缺失**,红线要求不自行推断即动手。**最终 A/B 叉
-  判定请你在补齐 0b/0d 后拍板**。补齐方式二选一:
-  1. 你在 160 以能提权的身份跑 0b(`sudo`,读 `/etc/juicefs/alphalib-jfs.env`
-     的 meta 密码后 `juicefs config redis://mymaster,...:26380/0`),看卷
-     access-key 前 4 位是否 == `exte`;
-  2. 在 145(MinIO 服务端)装/找 `mc`,`mc admin user list` 看 `exte****-client`
-     是否只是普通用户(非 root),以及它挂的 policy 是否只覆盖 `external-sync`。
+**判定:A 叉。** 0b 决定性证据显示泄漏钥就是 JFS 卷现役对象存储钥——首轮基于命名
+形态的 B 叉旁证(`external-sync client`、与 `delayed-signals-jdw` 并列独立 profile)
+被推翻。走 A 叉全流程(阶段 2-4,含 JFS 逐机切钥),不是 B 叉的"删个废账号"。
 
-  - 若卷钥前缀 == `exte` 或 `exte****-client` 就是 root → **A 叉**(阶段 2-4 全做,含 JFS 逐机切钥);
-  - 若卷钥 ≠ 泄漏钥、且 `exte****-client` 仅普通用户仅 external-sync 用途 → **B 叉**(跳过阶段 3,阶段 4 只吊销该用户)。
+**⚠ 这是 A 叉最坏的一支**:泄漏钥 == 因子库数据实体所用钥 + endpoint 公网可达(200)。
+git 历史里的废文件删了但钥没吊销,任何人可经公网用它读写 145 上的 alphalib-juicefs
+对象(= 全库因子数据)。**旧钥须保活到新钥四机验证通过才吊销**(红线 1),故:
+
+**A 叉待做(静默窗口,本会话未做)**:
+1. **阶段 2** 建最小权限专用新钥(`mc admin user add` + 只授 alphalib-juicefs 的 policy),
+   新钥独立验证(list + probe 往返),此时生产零影响 —— **前提:145 上有 mc**(160 无,
+   见 0d);
+2. **阶段 3** `juicefs config --access-key NEW --secret-key NEW` 写卷配置,逐机
+   **170→150→144→160** remount + `.rotate_probe` 验证(避开 160 yifei L2 20:00 后);
+3. **阶段 4** 吊销旧钥 `exte****-client`(A 叉:若是独立用户直接删,若 == root 则轮换
+   root 密码),复验旧钥拒绝 + 四机 status + `ops list` Total;
+4. **阶段 5** 更新/删除各机 rclone `[39000]` profile、处置废 bucket `external-sync`、
+   **协调关闭 39000 公网入站**。
 
 ---
 
@@ -157,11 +175,11 @@ webhook 另议。）
 
 ## 未做 / 等确认(红线)
 
-- **阶段 0 的 A/B 叉判定**:0b/0d 两条决定性证据因权限(sudo 无 TTY)+ 工具(mc 未装)
-  缺失,判定留给你(补齐方式见上「A/B 叉判据汇总」)。
+- **阶段 0 的 A/B 叉判定**:✅ 已定 **A 叉**(2026-07-11 补齐 0b,卷钥前缀 == `exte`
+  == 泄漏钥;见「A/B 叉判据汇总」)。
 - **阶段 1 Feishu 重置 + 测试消息**:需飞书后台外部登录,未执行。
-- **阶段 2-5**(新钥 / JFS 切钥 / 旧钥吊销 / 收尾)**全部未做**;MinIO 切钥须静默窗口
-  + A/B 叉定论后再排期。
+- **阶段 2-5**(新钥 / JFS 切钥 / 旧钥吊销 / 收尾)**全部未做**;A 叉切钥须静默窗口
+  (避开 160 yifei L2 20:00 后、无 ops check 在跑)+ 145 上备好 mc,再排期。
 - **0e 公网暴露(200)** 待阶段 5 与网络管理协调关闭 39000 公网入站。
 
 
