@@ -6,7 +6,7 @@
 
 `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var → `./config.yaml` → project root `config.yaml`.
 
-Supports `${var_name}` variable substitution from the `vars:` block in YAML, overridable by environment variables with `OPS_` prefix (e.g. `OPS_GSIM_HOME` → `gsim_home`).
+Supports `${var_name}` variable substitution from the `vars:` block in YAML. 变量优先级(2026-07-11 hosts 声明,ops setup 配套):**OPS_* 环境变量 > `hosts:[本机 hostname]` > vars 基础值** —— 每机挂载点差异进 hosts 块按 hostname 精确匹配,同一份 config 四机零环境变量可用;命中情况回填 `config.hostname` / `config.host_declared` 供 `ops setup` 报告。
 
 Key attributes: all `path.*` fields as `Path`, `compliance`/`correlation`/`checkpoint` dicts, `library_id`。
 
@@ -73,7 +73,9 @@ transition/append_check 原先抛裸 KeyError,存量 `except KeyError` 继续有
 `tests/test_pg_pool_cleanup.py`(假池,无需 PG:去重 / ensure_schema 一次 / pid 过滤 /
 fork 重置)。~~DDL 彻底滚出 store `__init__`~~(2026-07-09 阶段 2 完成,见下方
 Schema 节);另收编 `ts_in`/`ts_out`(ISO string ↔ TIMESTAMPTZ 边界转换,原
-store/snapshot 两个 pg_store 各自镜像)。**剩余**:`max_size` 参数化。
+store/snapshot 两个 pg_store 各自镜像)。**剩余**:`max_size` 参数化。另有 `probe(conninfo, statements=, timeout=5)`
+(2026-07-11):诊断用有界直连,不走池注册表(ops setup 的 PG/锁检查用 ——
+池的重连重试会让"不可达"挂起半分钟,诊断必须秒级失败)。
 
 ## Schema (`schema.py`)
 

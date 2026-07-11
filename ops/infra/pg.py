@@ -112,6 +112,17 @@ os.register_at_fork(after_in_child=_reset_after_fork)
 # pg_store 的同名私有函数收敛至此 —— 第三个消费者 repository 出现后不再镜像)
 # ---------------------------------------------------------------------------
 
+def probe(conninfo: str, *, statements: tuple[str, ...] = (),
+          timeout: int = 5) -> None:
+    """诊断用有界直连探测(ops setup 等):不走 get_pool —— 进程级池注册表
+    不该被探测污染,且池的重连重试会让"PG 不可达"挂起半分钟以上,诊断命令
+    必须秒级失败。连接/语句失败抛原异常,由调用方转成报告。"""
+    import psycopg
+    with psycopg.connect(conninfo, connect_timeout=timeout) as conn:
+        for stmt in statements:
+            conn.execute(stmt)  # type: ignore[arg-type]  # 调用方给的是白名单字面语句
+
+
 def ts_in(v: str | None) -> str | None:
     """FactorRecord/Snapshot 的 ISO string(naive local,如 2026-07-04T01:45:33)
     -> TIMESTAMPTZ 可正确落库的值。string 不带时区,是本地墙钟;打上本地 tz,

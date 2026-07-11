@@ -1207,3 +1207,71 @@ pnl_automated/pnl_manual 是挂载点下实目录 → **共享**(用户确认;bc
 行一直是对的(文档漂移源头是 CLAUDE.md 侧)。**新挂账**:PG 状态不记因子躺在
 哪台机器的 staging(doctor 候选);此事实是"多机 submit/check 自动化"功能
 (讨论中)的设计前提。
+
+## U9 · ops setup:声明式管理本机 alphalib 部署(2026-07-11)
+
+分支 `claude/ops-setup`。用户需求原话:"管理 alphalib 的部署非常麻烦",要
+uv 式体验 —— 声明在配置,一条命令本机就绪,ops 开箱即用。计划经 plan mode
+批准(体检 + 引导都要;JFS 挂载不纳入;多机都可用)。
+
+**hosts 声明**(config.yaml 新块 + `Config._resolve_vars` 合并层):按本机
+hostname 精确匹配覆盖 vars 同名项,优先级 OPS_* env > hosts > vars;四机
+(160/150/144/170)挂载点差异进声明,零环境变量可用。命中情况回填
+config.hostname / host_declared。
+
+**`ops setup`**:缺省幂等补建(sidecar 目录 / staging+dump 软链 / 池目录 /
+兼容软链 / 权限组 groupadd / 顶层权限对齐照 02-layout.sh 模型),`--check`
+只读体检(✔/✘/⚠ 清单,FAIL→退出码 1;--check 经 _CheckAction 撤销写声明,
+不为看清单 sudo)。**补建铁律:只创建缺失,绝不改动已存在的东西**(软链指错 /
+gid 被占只报告)。14 项注册表(`services/setup/checks.py`,部署应然形态的
+SSOT;`STAGING_IS_SHARED` 常量与共享 staging 部署同批翻转)。FAIL = 存储部署
+错误(任何节点必绿),WARN = 角色相关(worker 无 dropbox / 纯投递机无 gsim)。
+
+**分层**:引擎零展示(services 返回 CheckResult),渲染在 cli(展示层上收
+示范件);cli 经 common.load_config 接缝拿 Config(C2);PG 探测下沉
+`infra/pg.probe`(5s 有界直连,C8;池注册表不被探测污染 + 不可达秒级失败,
+本容器实测原先池路径挂起 30s+)。S16 写命令集 +setup(11 个)。
+
+**边界**:JFS 挂载/systemd/redis 密码归 join.sh;PG 密码文件只检查不分发;
+数据对账留给未来 ops doctor("doctor" 名字有意不占用)。
+
+测试 +9(引擎 5:应然全绿/补建幂等/--check 零写/指错软链不动/host-declared
+三态;Config 合并层 2;GROUPS 清空防容器 groupadd 副作用)。门禁:7/7 契约、
+ruff、pyright 0、fast suite 60 passed;本容器冒烟 `setup --check` 全表渲染 +
+exit 1(无 JFS 环境的预期红)。**待 160 验证:`ops setup --check` 应全绿 ——
+"声明与生产一致"的实证。**
+
+## U10 · ops setup --migrate-mount + 170 挂载点迁移声明(2026-07-11)
+
+分支 `claude/ops-setup` 续。用户方向纠正:部署变更(170 /ext4/alphalib →
+/nvme125/alphalib,独立 nvme 盘,cache/sidecar 同盘)要由命令支持,不写人肉
+手册 —— 声明式管理的完整含义是"现实收敛到声明"。**流程变更:环境事实由
+执行者采集(DISCOVER-170-ENV),不猜。**采集四个决定性事实:unit ExecStart
+硬编码(改 env 不够,必须重渲染)、待搬存量可忽略(16K+4K)、170 sudo 无
+NOPASSWD 须本机 TTY、/nvme125 已有 4 个 dataset(用户拍板:本批不动,只建
+新落点)。
+
+实现:`services/setup/jfs.py`(env parse/render 保注释未知键、unit 模板正主
+迁 ops + golden test 用 170 现役 unit 原文钉住、migrate_mount 编排 —— 前置
+守卫零改动拒绝 / 备份 / stop / 改 env 三键 / 重渲染 unit / 搬 sidecar /
+start + 挂载验证 / 兼容软链原子重指 / 旧址报告不删 / 失败恢复备份重启旧配置);
+mount 检查项增强(JFS 挂在别处 → detail 给 migrate 指引);CLI
+`--migrate-mount`(与 --check 互斥,交互确认 -y 跳过);config hosts
+`server-170 → /nvme125/alphalib`。测试 +7(unit golden / env 往返 / 探测 /
+happy path 命令序列 / writeback 脏拒绝 / 目标盘缺失拒绝 / start 失败回滚 /
+已在位 noop / mount 指引)。04-systemd.sh 加头注指向模板新正主。
+
+门禁:7/7 契约、ruff、pyright 0、fast suite 69 passed。**待 170 本机 TTY
+执行 + 报告**;绿后清旧址、拓扑文档收官、v1+migrate 一起 PR 合 main。
+
+**U10 执行收官(2026-07-11)**:170 迁移全绿 —— `sudo ops setup --migrate-mount`
+happy path 一步不差(备份/停/改写/搬 3 项/新挂载共享数据可见/兼容软链重指/
+旧址报告不删),`ops setup` 补建 1 项(顶层权限)后 **FAIL 0 / WARN 1**
+(dropbox,worker 角色性),--check 复验一致。**声明式挂载点迁移端到端闭环:
+改 config 一行 → 三条命令 → 体检全绿。**实战回填三坑(均已修入分支):
+uv tool 找 config 靠 cwd;残留 OPS_ALPHALIB_ROOT 静默压声明 → env 覆盖显性化
+(e20b4a5);sudo 自提权判据对迁移场景失效 → migrate 入口显式查 root
+(21347fa)。170 PG 密码补分发(同款 150/144)。/nvme125 已有四 dataset 未受
+影响;/ext4 旧址 + /etc 备份已由用户清理(2026-07-11 确认),ops list 正常。
+ops setup 工程(v1 + hosts 声明 + migrate-mount)经 PR #8 合 main
+(merge 4a9477e)。**170 迁移全案关单**;160/150 待下窗口滚存 main。

@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | server-160 | 10.9.100.160 | 北京托管机房 (IDC) | JFS master, ZFS pool `/tank/vault/`, redis-jfs:6380 master + sentinel:26380; **NFS owner** (`/datasvc/data/`, 导出给 150/145); **yifei L2 feature 生产节点** (每日 20:00 后) |
 | server-150 | 10.9.100.150 | 北京托管机房 (IDC) | JFS client + **NFS 客户端** (透明读 160 的 `/datasvc/data/`) + redis-jfs:6380 replica + sentinel:26380 |
 | server-145 | 10.9.100.145 | 北京托管机房 (IDC) | JFS client + **NFS 客户端** (`/datasvc/data/` 实际挂 160 NFS, 老说"数据节点不在 JFS 集群" 已校正, 实际两套都在); **JFS 卷对象存储落盘机**(alphalib 数据块实际存这台, 2026-07-09 确认 —— MinIO 密钥轮换挂账的实体在此); 无 ops 部署、无人在此写因子 |
-| server-170 | 10.9.100.170 | 北京托管机房 (IDC) | JFS client (`/ext4/alphalib`, cache 100G); sentinel 客户端 (本机不跑 redis/sentinel); 与 yifei clickhouse 同盘 `/ext4` (2026-06-24 接入) |
+| server-170 | 10.9.100.170 | 北京托管机房 (IDC) | JFS client (`/nvme125/alphalib`, 独立 12T nvme ZFS pool, cache 100G;2026-07-11 由 `ops setup --migrate-mount` 自 `/ext4` 迁入,**与 yifei clickhouse 脱盘**); sentinel 客户端 (本机不跑 redis/sentinel);计划中的 check 消费机 |
 | intel-workstation-144 | 10.6.100.144 | 本地办公网 | JFS client (`/storage/vault/`, 跨段 LAN→IDC) + sentinel:26380 (纯投票); **本地 NFS owner** 导出给 10.6.100.145/146; **冷副本**, 只有 cc_2024 / cc_2025, 不在生产同步链路 |
 | local-145 | 10.6.100.145 | 本地办公网 | 本地 NFS 客户端 (挂 144) — 注意跟北京 10.9.100.145 同号但不同机 |
 | local-146 | 10.6.100.146 | 本地办公网 | 本地 NFS 客户端 (挂 144) |
@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **数据同步**: rawdata 在 147 抓取, 每日增量 CSV → 北京 160, 各地独立 build_cc (**不是 cc bytes 镜像**, 是 rawdata 同步 + 各地各跑)。本地 144 是冷副本, 早期 CSV 一次性推过去自建 cc_2024/cc_2025, 不在生产同步链路内。详见 memory [[reference-server-topology]]。
 
-**JFS / Sentinel 拓扑**(2026-06-05 上线): JuiceFS 挂载点共享 alphalib 卷,挂载点 per-host 可不同(160/150 `/tank/vault/alphalib`,144 `/storage/vault/alphalib`,170 `/ext4/alphalib`); metadata 走 `redis-sentinel://160:26380,150:26380,144:26380/mymaster/0`。Redis Sentinel 实测 failover 9.12 s。新 client 用 `scripts/juicefs-poc/join.sh` 接入(挂载点/cache per-host,sidecar 必须是 `<挂载点>.local`)。详见 `scripts/juicefs-poc/README.md` + `.claude/plans.md` Phase B-8/C。
+**JFS / Sentinel 拓扑**(2026-06-05 上线): JuiceFS 挂载点共享 alphalib 卷,挂载点 per-host 可不同(160/150 `/tank/vault/alphalib`,144 `/storage/vault/alphalib`,170 `/nvme125/alphalib`;正主是 config.yaml hosts 块,`ops setup --check` 可验); metadata 走 `redis-sentinel://160:26380,150:26380,144:26380/mymaster/0`。Redis Sentinel 实测 failover 9.12 s。新 client 用 `scripts/juicefs-poc/join.sh` 接入(挂载点/cache per-host,sidecar 必须是 `<挂载点>.local`)。详见 `scripts/juicefs-poc/README.md` + `.claude/plans.md` Phase B-8/C。
 
 **JFS vs NFS 分工**: JFS 只服务 alphalib (因子库多机多写场景, 2026-06 新增); cc / dm / L2 feature 走老 NFS (单 owner 多读, 各地 owner 各管各的, 早期方案保留)。两套存储分场景共存。
 
@@ -64,6 +64,9 @@ uv run ops cancel -u wbai -y         # 批量,跳过确认
 uv run ops clear AlphaXxx            # 清 staging 孤儿(state 无 record 的目录)
 uv run ops clear                     # 扫全部孤儿
 uv run ops clear -u lhw -y           # 按 author 推断过滤,跳过确认
+uv run ops setup                     # 拉平本机 alphalib 部署(幂等补建缺失目录/软链/权限组)
+uv run ops setup --check             # 只读体检:✔/✘/⚠ 清单 + 退出码(FAIL→1)
+uv run ops setup --migrate-mount     # 声明变更收敛:JFS 挂载点迁到 hosts 声明位置(TTY + 确认)
 uv run ops combo run <dir> --start 20250102 --end 20251231          # combo 端到端代测 (predict+backtest)
 uv run ops combo run <dir> --start 20241210 --end 20241231 --predict-start 20241201 --stats simple  # 留 warmup, 单 stats
 ```
@@ -105,6 +108,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
+| `setup` | 声明式管理本机 alphalib 部署:hosts 块按 hostname 匹配挂载点,缺省幂等补建(目录/软链/权限组),`--check` 只读体检。JFS 挂载本身归 join.sh | `ops/cli/setup.py` + `ops/services/setup/` |
 
 Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwrite`), `recheck`(改名 `restage`), `health`(2026-07-07 Wave 2 退役: --fix 写的是没人读的僵尸表;对账职能归未来 ops doctor), `sync`(2026-07-07 Wave 1 退役: S3 模型已被 JFS 取代且回退配置早已不可用), `refresh`(2026-07-06 删除 —— metrics/datasources/bcorr 改为入库时不可变快照,不再支持重算;需最新表现须重跑 backtest)。
 

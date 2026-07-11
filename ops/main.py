@@ -14,6 +14,7 @@ from ops.cli.pack import add_pack_subparser
 from ops.cli.restage import add_restage_subparser
 from ops.cli.rm import add_rm_subparser
 from ops.cli.run import add_run_subparser
+from ops.cli.setup import add_setup_subparser
 from ops.cli.status import add_status_subparser
 from ops.cli.submit import add_submit_subparser
 from ops.infra.sudo import maybe_elevate
@@ -37,6 +38,7 @@ SUBPARSER_REGISTRARS = (
     add_cancel_subparser,
     add_clear_subparser,
     add_combo_subparser,
+    add_setup_subparser,
 )
 
 
