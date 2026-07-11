@@ -1171,3 +1171,15 @@ checkpoint 返回值本就被流水线丢弃。
 (终态等价)、created_at 格式统一(读侧 naive local ISO 与 repo.find 对齐,
 写侧缺省走 now_iso;全 repo 无消费方解析旧带 tz 格式,评审 A/C 双路核实)。
 PG 组用例与金丝雀环路留给执行者环节兜底。
+
+**160 验证收官 + 合 main(2026-07-11,VERIFY-AGGREGATE-SMALLS-RESULT)**:执行者
+一轮全绿 —— 静态门禁三绿(空壳删除断言实际抛 ImportError 而非手册预期的
+ModuleNotFoundError,执行者正确判定同根因等价:`from pkg import name` 写法本就
+抛 ImportError,是手册设想的 import 写法之误,非偏离);fast suite 108 passed
+(基线 106 + 新增 2,两个点名新用例单独复跑 PASSED);e2e 6 passed;只读冒烟
+Total=8252 持平、`=>` 与 `--sort-by delay` 报错原文命中、**bcorr 过滤三方交叉
+一致(ops list json 8097 = PG `abs(max_bcorr)>0.3` count 8097)**;金丝雀 7 stage
+全通(checkpoint/compliance 走 dumpscan 的生产实证)、created_at SELECT
+`02:16:47+00` = 本地 `10:16:47` CST 同一时刻 fresh=t、rm 三表零行、Total 回基线。
+PR #7 合 main(merge `3119496`)。侧记:160 仓库根有未跟踪 `pgreadonlysetup.sql`
+(含 ops_reader 密码),已提醒挪出仓库目录防误提交。**待办:三机滚存对齐 rev。**
