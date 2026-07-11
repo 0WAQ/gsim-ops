@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# ⚠ unit 模板正主已迁 ops/services/setup/jfs.py::render_unit(2026-07-11,
+#   migrate-mount 用;golden test 钉两边一致)。本脚本保留 bootstrap 用途;
+#   改模板须两处同改。
 # 渲染 juicefs-<name>.service 让 JuiceFS 开机自动挂载。
 #
 # - 依赖 redis-server.service (Requires + After): redis 没起来不挂,避免 EIO
