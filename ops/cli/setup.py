@@ -76,6 +76,7 @@ def run_setup_cli(args):
            None: "vars 基础值(config 无 hosts 块)"}[declared]
     mode = "check(只读)" if args.check else "setup(幂等补建)"
     console.print(f"host: [bold]{hostname}[/]  路径来源: {src}  模式: {mode}")
+    _warn_env_overrides(config, console)
 
     results = run_setup(config, apply=not args.check)
 
@@ -98,9 +99,17 @@ def run_setup_cli(args):
         sys.exit(1)
 
 
+def _warn_env_overrides(config, console):
+    overrides = getattr(config, "env_overrides", None)
+    if overrides:
+        console.print(f"[yellow]⚠ 环境变量覆盖生效: {', '.join(overrides)} —— "
+                      "路径以 env 为准(压过 hosts 声明);若非有意,unset 后重跑[/]")
+
+
 def _run_migrate(args, config, console):
     from ops.services.setup.jfs import MigrateError, actual_jfs_mount, migrate_mount
 
+    _warn_env_overrides(config, console)
     target = config.alpha_src.parent
     try:
         mounts = Path("/proc/mounts").read_text()

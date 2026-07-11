@@ -53,6 +53,7 @@ class Config:
         # ops setup 的 host-declared 检查项消费)
         self.hostname: str = ""
         self.host_declared: bool | None = None
+        self.env_overrides: list[str] = []
 
         # checker
         self.compliance: dict[str, Any] = config["checker"]["compliance"]
@@ -165,8 +166,9 @@ class Config:
         return " ".join(parts)
 
     @staticmethod
-    def _resolve_vars(raw: dict[str, Any],
-                      hostname: str | None = None) -> tuple[dict[str, Any], bool | None]:
+    def _resolve_vars(
+            raw: dict[str, Any], hostname: str | None = None,
+    ) -> tuple[dict[str, Any], bool | None, list[str]]:
         """Resolve ${var_name} references in config values.
 
         变量优先级(2026-07-11 hosts 声明,ops setup 配套):
@@ -174,8 +176,11 @@ class Config:
         hosts 块按 hostname 精确匹配,覆盖 vars 同名项 —— 每台机器的挂载点
         差异进配置,同一份 config.yaml 四机零环境变量可用。
 
-        返回 (resolved_raw, host_matched):host_matched 为 None(无 hosts 块)/
-        False(有块未命中)/ True(命中),供 `ops setup` 报告路径来源。
+        返回 (resolved_raw, host_matched, env_overrides):host_matched 为
+        None(无 hosts 块)/ False(有块未命中)/ True(命中);env_overrides
+        是生效的 OPS_* 覆盖键列表 —— 供 `ops setup` 显性提示(2026-07-11
+        实证的坑:170 残留旧 OPS_ALPHALIB_ROOT 静默压掉 hosts 声明,
+        迁移目标解析错;env 优先是刻意的逃生口,但必须可见)。
         """
         vars_block = raw.pop("vars", {})
         hosts_block = raw.pop("hosts", None)
@@ -188,14 +193,17 @@ class Config:
                 vars_block.update(overrides)
                 host_matched = True
 
+        env_overrides: list[str] = []
         if not vars_block:
-            return raw, host_matched
+            return raw, host_matched, env_overrides
 
         # Environment variables override: OPS_GSIM_HOME -> gsim_home
         for key in vars_block:
             env_key = f"OPS_{key.upper()}"
             env_val = os.environ.get(env_key)
             if env_val:
+                if str(vars_block[key]) != env_val:
+                    env_overrides.append(env_key)
                 vars_block[key] = env_val
 
         pattern = re.compile(r"\$\{(\w+)\}")
@@ -209,15 +217,16 @@ class Config:
                 return [replace(v) for v in val]
             return val
 
-        return replace(raw), host_matched  # type: ignore
+        return replace(raw), host_matched, env_overrides  # type: ignore
 
     @staticmethod
     def load(config_path: Path) -> "Config":
         with config_path.open("r", encoding="utf-8") as f:
             raw = yaml.safe_load(f.read())
         hostname = socket.gethostname()
-        raw, host_matched = Config._resolve_vars(raw, hostname)
+        raw, host_matched, env_overrides = Config._resolve_vars(raw, hostname)
         config = Config(raw)
         config.hostname = hostname
         config.host_declared = host_matched
+        config.env_overrides = env_overrides
         return config

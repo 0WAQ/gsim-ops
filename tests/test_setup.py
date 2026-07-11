@@ -167,26 +167,34 @@ def _raw():
 def test_resolve_vars_hosts_precedence(monkeypatch):
     monkeypatch.delenv("OPS_ALPHALIB_ROOT", raising=False)
 
-    raw, matched = Config._resolve_vars(_raw(), "server-170")
-    assert matched is True
+    raw, matched, env_ovr = Config._resolve_vars(_raw(), "server-170")
+    assert matched is True and env_ovr == []
     assert raw["path"]["alpha_src"] == "/ext4/alphalib/alpha_src"
 
-    raw, matched = Config._resolve_vars(_raw(), "unknown-host")
+    raw, matched, _ = Config._resolve_vars(_raw(), "unknown-host")
     assert matched is False
     assert raw["path"]["alpha_src"] == "/base/alphalib/alpha_src"
 
     no_hosts = _raw()
     no_hosts.pop("hosts")
-    raw, matched = Config._resolve_vars(no_hosts, "server-170")
+    raw, matched, _ = Config._resolve_vars(no_hosts, "server-170")
     assert matched is None
     assert raw["path"]["alpha_src"] == "/base/alphalib/alpha_src"
 
 
-def test_resolve_vars_env_beats_hosts(monkeypatch):
+def test_resolve_vars_env_beats_hosts_and_is_reported(monkeypatch):
+    """env 优先是刻意逃生口,但必须可见(170 残留旧 OPS_ALPHALIB_ROOT
+    静默压掉 hosts 声明、迁移目标解析错 —— 2026-07-11 实证)。"""
     monkeypatch.setenv("OPS_ALPHALIB_ROOT", "/env/alphalib")
-    raw, matched = Config._resolve_vars(_raw(), "server-170")
+    raw, matched, env_ovr = Config._resolve_vars(_raw(), "server-170")
     assert matched is True                          # 命中照记
     assert raw["path"]["alpha_src"] == "/env/alphalib/alpha_src"   # 但 env 赢
+    assert env_ovr == ["OPS_ALPHALIB_ROOT"]         # 且被显性上报
+
+    # env 值与声明相同 → 不算覆盖,不告警
+    monkeypatch.setenv("OPS_ALPHALIB_ROOT", "/ext4/alphalib")
+    _, _, env_ovr = Config._resolve_vars(_raw(), "server-170")
+    assert env_ovr == []
 
 
 # ---------------------------------------------------------------------------
