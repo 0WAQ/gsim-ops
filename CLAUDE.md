@@ -77,8 +77,10 @@ write commands (submit/restage/cancel/approve/clear/rm state transitions + artif
 handling), and state PG storage. `tests/e2e/` runs the real pipeline end-to-end
 (real gsim + cc data) with fake factors that deterministically blow up at each stage —
 marked `slow`+`e2e`, run via `uv run pytest -m e2e` (~85s). `uv sync --group dev &&
-uv run pytest -m "not slow"` for the fast suite. PG tests need an isolated `ops_test` db
-(auto-skip if unreachable); see `tests/README.md`. Python 3.10+ required
+uv run pytest -m "not slow"` for the fast suite. PG tests need an `ops_test` db
+(auto-skip if unreachable;per-session schema 隔离,并行安全;本地可用
+`docker-compose.test.yml` 起,CI 里 postgres service 常跑 —— I2,2026-07-11);
+see `tests/README.md`. Python 3.10+ required
 (see `.python-version`). Package manager is **uv** (not pip).
 
 ```bash

@@ -1,0 +1,21 @@
+# 本地测试 PG(I2,2026-07-11):让全量 pytest(含 pg 组)不依赖 160 可达。
+#
+#   docker compose -f docker-compose.test.yml up -d
+#   export OPS_TEST_PG_HOST=127.0.0.1 OPS_TEST_PG_PORT=15433 OPS_TEST_PG_PASSWORD=ops_test
+#   uv run pytest -m "not slow"
+#   docker compose -f docker-compose.test.yml down
+#
+# 端口刻意用 15433:160 上 15432 是生产 PG 实例,绝不与之混淆/冲突。
+# 数据落 tmpfs —— 测试库无需持久化,重启即全新(per-session schema 本来
+# 也会自清,tmpfs 只是双保险 + 提速)。
+services:
+  pg-test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ops
+      POSTGRES_PASSWORD: ops_test
+      POSTGRES_DB: ops_test
+    ports:
+      - "127.0.0.1:15433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data

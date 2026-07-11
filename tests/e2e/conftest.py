@@ -2,11 +2,16 @@
 
 与上层 conftest 的区别:test_config 把 nio_data_path/脚本也 stub 成 tmp(不跑 gsim);
 E2E 相反 —— 保留真实 gsim run_cp.py / simsummary / bcorr + 真实 /datasvc/data/cc_2025,
-只隔离可写落点(alpha_src/dump/pnl/staging/dropbox → tmp)+ PG(ops_test + 唯一 library_id)。
+只隔离可写落点(alpha_src/dump/pnl/staging/dropbox → tmp)。
 
-gsim / cc 数据不可达时,e2e_config fixture pytest.skip 整个 E2E 组。
+PG 隔离直接复用上层 conftest 的 per-session schema fixture(pg_schema /
+pg_conninfo / library_id —— pytest fixture 按目录级联,e2e 组天然可见;
+I2,2026-07-11):三表建在随机 schema 内、测试间 wipe、session 结束 DROP
+CASCADE,ops_test 不再残留 e2e 测试行。
+
+gsim / cc 数据 / PG 任一不可达时,skip 整个 E2E 组。
 """
-import uuid
+import os
 from pathlib import Path
 
 import pytest
@@ -31,34 +36,22 @@ def _read_pg_password() -> str | None:
 
 @pytest.fixture(scope="session")
 def gsim_available() -> bool:
-    """真实 gsim + cc 数据 + PG 都在才跑 E2E,否则 skip 整组。"""
-    import psycopg
+    """真实 gsim + cc 数据都在才跑 E2E,否则 skip 整组(PG 可达性与三表引导
+    归上层 pg_schema/pg_conninfo fixture)。"""
     if not _GSIM_RUN.exists():
         pytest.skip(f"gsim 不可用 ({_GSIM_RUN}),跳过 E2E")
     if not _CC_DATA.exists():
         pytest.skip(f"cc 数据不可用 ({_CC_DATA}),跳过 E2E")
-    pw = _read_pg_password()
-    conninfo = f"host=10.9.100.160 port=15432 dbname=ops_test user=ops password={pw}"
-    try:
-        conn = psycopg.connect(conninfo, connect_timeout=5)
-        conn.close()
-    except Exception as e:  # noqa: BLE001
-        pytest.skip(f"ops_test PG 不可达,跳过 E2E: {e}")
-    # DDL 已滚出 store __init__(2026-07-09 阶段 2):独跑 -m e2e(不经 fast 组
-    # pg_conninfo fixture)时须自行按 FK 依赖序引导三表,否则全新 ops_test 上
-    # 第一笔 repo.record 就 UndefinedTable(对抗评审确认)。幂等,session 一次。
-    from ops.infra.schema import ensure_schemas
-    ensure_schemas(conninfo)
     return True
 
 
 @pytest.fixture
-def e2e_env(tmp_path, gsim_available, monkeypatch):
+def e2e_env(tmp_path, gsim_available, pg_schema, pg_conninfo, library_id, monkeypatch):
     """造一份指向真实 gsim/cc + 隔离落点的 config,返回 (config_path, Config, library_id)。
 
-    隔离:测试前后各清一次 ops_test 三表(复用单测 conftest 的 wipe_test_db,
-    只对 current_database()=ops_test 生效;原按 library_id 删行自三表去
-    library_id 起是 no-op)。文件随 tmp_path 自动清。
+    隔离:PG 走本 session 的随机 schema(conninfo options=search_path +
+    lock_namespace,同单测 test_config);测试前后 wipe 由 library_id fixture
+    承担。文件随 tmp_path 自动清。
     check 报告目录也被重定向到 tmp,避免污染 repo 的 docs/reports/check/。
     """
 
@@ -69,7 +62,7 @@ def e2e_env(tmp_path, gsim_available, monkeypatch):
     _reports.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(_report_mod, "_report_dir", lambda: _reports)
 
-    lib = f"e2e_{uuid.uuid4().hex[:10]}"
+    lib = library_id
     base = yaml.safe_load((get_project_root() / "config.yaml").read_text())
     root = tmp_path / "lib"
 
@@ -92,10 +85,16 @@ def e2e_env(tmp_path, gsim_available, monkeypatch):
     base.setdefault("sync", {})["library_id"] = lib
     base["sync"].pop("remote", None)
 
-    pw = _read_pg_password()
-    pg = {"host": "10.9.100.160", "port": 15432, "dbname": "ops_test",
-          "user": "ops", "password": pw}
-    base["state"] = {"backend": "postgres", "postgres": dict(pg)}
+    pw = os.environ.get("OPS_TEST_PG_PASSWORD") or _read_pg_password()
+    pg = {"host": os.environ.get("OPS_TEST_PG_HOST", "10.9.100.160"),
+          "port": int(os.environ.get("OPS_TEST_PG_PORT", "15432")),
+          "dbname": "ops_test",
+          "user": os.environ.get("OPS_TEST_PG_USER", "ops"),
+          "options": f"-csearch_path={pg_schema}"}
+    if pw:
+        pg["password"] = pw
+    base["state"] = {"backend": "postgres", "postgres": dict(pg),
+                     "lock_namespace": pg_schema}
 
     cfg_path = tmp_path / "config.e2e.yaml"
     cfg_path.write_text(yaml.safe_dump(base, allow_unicode=True))
@@ -107,27 +106,9 @@ def e2e_env(tmp_path, gsim_available, monkeypatch):
               Path(str(root / "pnl_prod")), Path(str(root / "pnl_pool"))):
         d.mkdir(parents=True, exist_ok=True)
 
-    def _wipe():
-        # 与 tests/conftest.wipe_test_db 同款(pytest 非包模式下跨 conftest
-        # import 不可靠,故内联):删 factor_info,FK 级联 state/snapshot;
-        # 只在 ops_test 上生效。
-        import psycopg
-        try:
-            conn = psycopg.connect(
-                f"host=10.9.100.160 port=15432 dbname=ops_test user=ops password={pw}",
-                autocommit=True, connect_timeout=5)
-            if conn.execute("SELECT current_database()").fetchone()[0] == "ops_test":
-                try:
-                    conn.execute("DELETE FROM factor_info")
-                except psycopg.errors.UndefinedTable:
-                    pass
-            conn.close()
-        except Exception:  # noqa: BLE001
-            pass
-
-    _wipe()
+    # 测试前后 wipe 由 library_id fixture 承担(上层 conftest,作用于本
+    # session schema);原内联 _wipe(全库 DELETE)随 per-schema 隔离退役。
     yield cfg_path, config, lib
-    _wipe()
 
 
 @pytest.fixture

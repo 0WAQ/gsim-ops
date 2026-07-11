@@ -191,7 +191,7 @@ skip,e2e 排除。
 |---|---|---|
 | ~~**Wave 1 回退决断**~~ | **已执行(见下方 Wave 1 章节,F1-F6)**:删除路线 | ⚠ 密钥轮换仍未完成(git 历史),见 F1 |
 | ~~**Wave 2 僵尸拆除**~~ | **已执行(见下方 Wave 2 章节,V1-V4)** | ~~生产验证~~(PV1-PV6 已完成)⚠ 手动跑 migrate_drop_derived.sql + JSON 消费方适配 |
-| **I2 测试基建** | per-schema 隔离 + info 种子行 + 契约测试补齐(含 R1 的行为测试) | 需要可达的 ops_test PG |
+| ~~**I2 测试基建**~~ | **已执行(2026-07-11,见文末 I2 章节)**:per-schema 隔离 + info 种子行 + R1 行为测试 + 本地/CI PG | ~~需要可达的 ops_test PG~~(docker-compose.test.yml / CI service 解除) |
 | 死 config 键清理 | recycle/thres/stats/max_workers/authors/notification/users 等 | 触碰 Config 必填键集,与 G(Config 治理)一起做 |
 | bcorr.cpp 归属 | ops 仓里的 C++ 源与 gsim 部署二进制的关系 | 需要作者确认 |
 
@@ -1304,3 +1304,40 @@ watch 后议)。
 **doctor backlog +1(跨机 dump sidecar 回收)**:rm/purge 只作用本机 dump
 软链侧,消费机 sidecar 的 dump 实体清不到(本次 170 手工清)—— 共享 staging
 架构下的新对账面:PG 不记 dump 实体在哪台机,需 doctor 跨机盘 ↔ PG 对账。
+
+## I2 · 测试基建正式件:per-schema 隔离 + 本地/CI 全量 PG 测试(2026-07-11)
+
+分支 `claude/i2-test-isolation`。消灭两块盲区:本地/CI 无 PG 时 pg 组整体
+skip 的假绿(三表拆分后 direct-store 组更是从未跑过),和"多机/多进程跑
+测试须人肉串行"的隔离纪律(PV 验证期实测踩过:两个 pytest 互踩 26 failed)。
+
+**改动**:
+- **per-session schema 隔离**(tests/conftest.py):每个 pytest session 在
+  ops_test 里 `CREATE SCHEMA t_<hex>`,conninfo 带
+  `options=-csearch_path=<schema>`(只列 schema,不含 public —— 漏建表响亮
+  失败),三表建在 schema 内,session 结束 `DROP SCHEMA CASCADE`;测试之间
+  沿用 wipe(schema 内生效;current_database()=='ops_test' 双保险保留,
+  建/删 schema 同样有此守卫)。e2e conftest 接上同一套 fixture(目录级联),
+  原内联全库 _wipe 与 ops_test 残留测试行问题一并消灭。
+- **锁命名空间注入口**(ops/infra/lock.py + config.py):advisory lock 是
+  **库级**作用域,schema 隔离挡不住 —— `state.lock_namespace` 注入本 session
+  schema 名,并行 pytest 各锁各的。**仅测试**:生产锁键固定 'ops:factor_lock'
+  不变(S18 教训:锁键随 config 漂移 = 跨机互斥无声失效;两处代码注释 +
+  infra/CLAUDE.md 钉死"生产不可设置")。conninfo 侧配套
+  `state.postgres.options` 透传(同样仅测试)。
+- **direct-store 组救活**(test_state_store_pg.py,8 用例):三表拆分以来
+  整组 skip → 常跑;put 前 `seed_info` fixture 种 factor_info 父行(FK 镜像
+  生产前置:register 是原子双表写,不存在无父行的 state)。
+- **R1 欠账关单**:`test_restage_discards_snapshot`(restage 离库 →
+  factor_snapshot 行删除,re-archive 不撞 UNIQUE)。
+- **本地/CI PG**:`docker-compose.test.yml`(postgres:16,端口刻意 15433
+  避开生产 15432,tmpfs 数据);ci.yml 加 postgres service + OPS_TEST_PG_*
+  env + **"PG 可达"独立断言步**(service 挂了是红,不是 skip 假绿 ——
+  这正是 I2 的初衷)。
+
+**验证**(本机 PG 16 实测):pg 组 56 passed **0 skipped**;全量 fast suite
+133 passed;**两个 pytest 进程并行同跑 pg 组各 56 passed**,跑后
+ops_test 零 t_* schema 残留、零表残留;锁命名空间三断言(跨命名空间不互斥 /
+缺省独立 / 同命名空间 FactorLocked)。**"测试须串行"纪律自此作废**
+(VERIFY-* 历史手册里的串行红线是当时事实,不回改)。业务代码改动仅
+lock.py 命名空间参数 + config.py 两个仅测试键,生产行为零变化。

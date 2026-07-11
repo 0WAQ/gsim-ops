@@ -122,6 +122,13 @@ class Config:
         state_pg_cfg: dict[str, Any] = state_cfg.get("postgres") or {}
         self.state_postgres_conninfo: str | None = self._build_pg_conninfo(state_pg_cfg)
 
+        # 锁命名空间注入口(I2,2026-07-11)—— **仅测试用**。生产一律走 lock.py
+        # 的固定缺省 'ops:factor_lock':S18 的教训就是锁键随 config 漂移会让跨机
+        # 互斥无声失效,生产 config 绝不能设置本键。测试夹具把它设成本 session
+        # 的 PG schema 名,使并行 pytest 进程的 advisory lock 互不干扰
+        # (advisory lock 是库级作用域,schema 隔离挡不住它)。
+        self.lock_namespace: str | None = state_cfg.get("lock_namespace")
+
         # (derived 层配置随僵尸层删除, 2026-07-07 Wave 2, JOURNAL V2:
         #  metrics/datasources/bcorr 在 factor_snapshot,index 缓存不复存在。)
 
@@ -163,6 +170,12 @@ class Config:
         ]
         if pwd:
             parts.append(f"password={pwd}")
+        # options 透传(I2,2026-07-11):libpq 命令行选项,如
+        # `-csearch_path=t_xxx`(测试的 per-session schema 隔离用)。
+        # 值不能含空格(conninfo 不做引号转义);生产 config 不设置本键。
+        opts = pg_cfg.get("options")
+        if opts:
+            parts.append(f"options={opts}")
         return " ".join(parts)
 
     @staticmethod
