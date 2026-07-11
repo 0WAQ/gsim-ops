@@ -95,14 +95,16 @@ def _check_host_declared(ctx: Ctx) -> tuple[bool, str]:
 # ------------------------------------------------------------------ 存储布局
 
 def _check_mount(ctx: Ctx) -> tuple[bool, str]:
-    if not ctx.root.is_dir():
-        return False, f"{ctx.root} 不存在(JFS 未挂载?先跑 scripts/juicefs-poc/join.sh)"
+    from .jfs import actual_jfs_mount
     mounts = ctx.mounts or _read_mounts()
-    for line in mounts.splitlines():
-        parts = line.split()
-        if len(parts) >= 3 and parts[1] == str(ctx.root) and "juicefs" in parts[2]:
-            return True, f"{ctx.root} (fuse.juicefs)"
-    return False, f"{ctx.root} 存在但 /proc/mounts 里不是 juicefs 挂载点"
+    found = actual_jfs_mount(mounts)
+    if found is not None and found[0] == ctx.root:
+        return True, f"{ctx.root} (fuse.juicefs)"
+    if found is not None:
+        # 声明与实挂不一致 —— 部署变更场景(2026-07-11,170 /ext4→/nvme125)
+        return False, (f"JFS 卷 '{found[1]}' 挂在 {found[0]},声明是 {ctx.root};"
+                       "跑 `ops setup --migrate-mount` 迁移")
+    return False, "本机无 JuiceFS 挂载(首次接入先跑 scripts/juicefs-poc/join.sh)"
 
 
 def _shared_dirs(ctx: Ctx) -> list[Path]:

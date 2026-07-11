@@ -187,3 +187,209 @@ def test_resolve_vars_env_beats_hosts(monkeypatch):
     raw, matched = Config._resolve_vars(_raw(), "server-170")
     assert matched is True                          # 命中照记
     assert raw["path"]["alpha_src"] == "/env/alphalib/alpha_src"   # 但 env 赢
+
+
+# ---------------------------------------------------------------------------
+# jfs.py:挂载点迁移(migrate-mount,2026-07-11;控制流全注入,无需 root)
+# ---------------------------------------------------------------------------
+
+import subprocess
+
+from ops.services.setup.jfs import (
+    MigrateError,
+    MigrateIO,
+    actual_jfs_mount,
+    migrate_mount,
+    parse_env,
+    render_env,
+    render_unit,
+    writeback_drained,
+)
+
+# 170 现役 unit 原文(DISCOVER-170-ENV-RESULT GROUP 2)—— 模板的 golden 锚。
+_GOLDEN_UNIT = """[Unit]
+Description=JuiceFS mount /ext4/alphalib
+After=network-online.target
+Wants=network-online.target
+
+
+[Service]
+Type=forking
+EnvironmentFile=/etc/juicefs/alphalib.env
+ExecStartPre=/bin/mkdir -p /ext4/alphalib
+ExecStart=/usr/local/bin/juicefs mount \\
+  --cache-dir=/ext4/jfs-cache \\
+  --cache-size=102400 \\
+  --writeback \\
+  --background \\
+  redis://mymaster,10.9.100.160,10.9.100.150,10.6.100.144:26380/0 /ext4/alphalib
+# 三级 fallback: 标准 umount → fusermount lazy → umount -l
+# 防有进程持有 mount 时卡 deactivating。前两步失败也继续 (- 前缀 + bash || 链)。
+ExecStop=/bin/bash -c '/usr/local/bin/juicefs umount /ext4/alphalib 2>/dev/null || /bin/fusermount -uz /ext4/alphalib 2>/dev/null || /bin/umount -l /ext4/alphalib 2>/dev/null || true'
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+_ENV_TEXT = """# Per-host JuiceFS path override. Written by join.sh.
+JFS_MOUNT=/ext4/alphalib
+JFS_CACHE_DIR=/ext4/jfs-cache
+JFS_LOCAL_DIR=/ext4/alphalib.local
+JFS_META_URL=redis://mymaster,10.9.100.160,10.9.100.150,10.6.100.144:26380/0
+JFS_REDIS_LOCAL=0
+JFS_CACHE_SIZE_MB=102400
+"""
+
+
+def test_render_unit_matches_production_golden():
+    """模板正主迁 ops 的正确性锚:老参数渲染 == 170 现役 unit 原文。"""
+    got = render_unit("alphalib", Path("/ext4/alphalib"), Path("/ext4/jfs-cache"),
+                      "102400",
+                      "redis://mymaster,10.9.100.160,10.9.100.150,10.6.100.144:26380/0")
+    assert got == _GOLDEN_UNIT
+
+
+def test_env_parse_render_roundtrip():
+    env = parse_env(_ENV_TEXT)
+    assert env["JFS_MOUNT"] == "/ext4/alphalib" and len(env) == 6
+    out = render_env({**env, "JFS_MOUNT": "/nvme125/alphalib", "NEW_KEY": "x"}, _ENV_TEXT)
+    assert "JFS_MOUNT=/nvme125/alphalib" in out
+    assert out.startswith("# Per-host")                    # 注释保留
+    assert "JFS_META_URL=redis://mymaster" in out          # 其余键原样
+    assert out.rstrip().endswith("NEW_KEY=x")              # 新键追加
+
+
+def test_probe_helpers():
+    mounts = "JuiceFS:alphalib /ext4/alphalib fuse.juicefs rw 0 0\nnvme125 /nvme125 zfs rw 0 0\n"
+    assert actual_jfs_mount(mounts) == (Path("/ext4/alphalib"), "alphalib")
+    assert actual_jfs_mount("nvme125 /nvme125 zfs rw 0 0\n") is None
+    assert writeback_drained("juicefs_staging_blocks 0\n")
+    assert not writeback_drained("juicefs_staging_blocks 7\n")
+    assert not writeback_drained("")                       # 读不到指标按未排干(保守)
+
+
+class _FakeSys:
+    """systemctl 替身 + 挂载状态机:start 成功后目标点'出现'在 mounts 里。"""
+
+    def __init__(self, tmp: Path, target: Path, fail_first_start=False):
+        self.tmp, self.target = tmp, target
+        self.calls: list[list[str]] = []
+        self.mounted = tmp / "ext4" / "alphalib"           # 初始挂载点
+        self.fail_first_start = fail_first_start
+        self._start_seen = 0
+
+    def run(self, cmd, **kw):
+        self.calls.append(list(cmd))
+        if cmd[:2] == ["systemctl", "stop"]:
+            self.mounted = None
+        if cmd[:2] == ["systemctl", "start"]:
+            self._start_seen += 1
+            if self.fail_first_start and self._start_seen == 1:
+                return subprocess.CompletedProcess(cmd, 1, "", "boom")
+            # 读回 env 决定挂到哪(回滚时 env 已恢复旧值)
+            env = parse_env((self.tmp / "juicefs-poc.env").read_text())
+            self.mounted = Path(env["JFS_MOUNT"])
+            src = self.mounted / "alpha_src"
+            src.mkdir(parents=True, exist_ok=True)
+            (src / "AlphaX").mkdir(exist_ok=True)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    def read_mounts(self):
+        if self.mounted is None:
+            return ""
+        return f"JuiceFS:alphalib {self.mounted} fuse.juicefs rw 0 0\n"
+
+
+def _migrate_fixture(tmp_path, fail_first_start=False):
+    old_root = tmp_path / "ext4" / "alphalib"
+    (old_root).mkdir(parents=True)
+    (old_root / ".stats").write_text("juicefs_staging_blocks 0\n")
+    old_local = tmp_path / "ext4" / "alphalib.local"
+    (old_local / "staging").mkdir(parents=True)
+    (old_local / "alpha_dump").mkdir()
+
+    env_path = tmp_path / "juicefs-poc.env"
+    env_path.write_text(_ENV_TEXT
+                        .replace("/ext4", str(tmp_path / "ext4")))
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    (unit_dir / "juicefs-alphalib.service").write_text(_GOLDEN_UNIT)
+
+    target_disk = tmp_path / "nvme125"
+    target_disk.mkdir()
+    cfg = FakeConfig(tmp_path)
+    cfg.alpha_src = target_disk / "alphalib" / "alpha_src"   # 声明 = nvme125/alphalib
+
+    fake = _FakeSys(tmp_path, target_disk / "alphalib", fail_first_start)
+    io = MigrateIO(run=fake.run, env_path=env_path, unit_dir=unit_dir,
+                   legacy_link=tmp_path / "mnt" / "alphalib",
+                   read_mounts=fake.read_mounts, sleep=lambda s: None)
+    return cfg, io, fake, env_path, unit_dir, old_local
+
+
+def test_migrate_happy_path(tmp_path):
+    cfg, io, fake, env_path, unit_dir, old_local = _migrate_fixture(tmp_path)
+    log = migrate_mount(cfg, io)
+
+    assert [c[:2] for c in fake.calls] == [
+        ["systemctl", "stop"], ["systemctl", "daemon-reload"], ["systemctl", "start"]]
+    env = parse_env(env_path.read_text())
+    target = str(tmp_path / "nvme125" / "alphalib")
+    assert env["JFS_MOUNT"] == target
+    assert env["JFS_CACHE_DIR"] == str(tmp_path / "nvme125" / "jfs-cache")  # 同盘沿旧名
+    assert env["JFS_META_URL"].startswith("redis://mymaster")               # 未动
+    unit = (unit_dir / "juicefs-alphalib.service").read_text()
+    assert f"ExecStartPre=/bin/mkdir -p {target}" in unit
+    assert (Path(target + ".local") / "staging").is_dir()                   # sidecar 搬到位
+    assert not (old_local / "staging").exists()
+    assert io.legacy_link.is_symlink() and str(io.legacy_link.resolve()) == target
+    assert env_path.with_name(env_path.name + ".ops-migrate-bak").exists()  # 备份在
+    assert any("报告不删" not in x and "旧址保留" in x for x in log)
+
+
+def test_migrate_refuses_when_writeback_dirty(tmp_path):
+    cfg, io, fake, env_path, *_ = _migrate_fixture(tmp_path)
+    (tmp_path / "ext4" / "alphalib" / ".stats").write_text("juicefs_staging_blocks 3\n")
+    before = env_path.read_text()
+    with pytest.raises(MigrateError, match="writeback"):
+        migrate_mount(cfg, io)
+    assert fake.calls == [] and env_path.read_text() == before   # 零改动
+
+
+def test_migrate_refuses_when_target_disk_missing(tmp_path):
+    cfg, io, fake, *_ = _migrate_fixture(tmp_path)
+    import shutil as _sh
+    _sh.rmtree(tmp_path / "nvme125")
+    with pytest.raises(MigrateError, match="不存在"):
+        migrate_mount(cfg, io)
+    assert fake.calls == []
+
+
+def test_migrate_start_failure_rolls_back(tmp_path):
+    cfg, io, fake, env_path, unit_dir, _ = _migrate_fixture(tmp_path, fail_first_start=True)
+    with pytest.raises(MigrateError, match="回滚"):
+        migrate_mount(cfg, io)
+    env = parse_env(env_path.read_text())
+    assert env["JFS_MOUNT"] == str(tmp_path / "ext4" / "alphalib")   # env 已恢复
+    assert (unit_dir / "juicefs-alphalib.service").read_text() == _GOLDEN_UNIT
+    assert [c[:2] for c in fake.calls][-1] == ["systemctl", "start"]  # 回滚重启了旧配置
+
+
+def test_migrate_noop_when_already_at_target(tmp_path):
+    cfg, io, fake, *_ = _migrate_fixture(tmp_path)
+    cfg.alpha_src = tmp_path / "ext4" / "alphalib" / "alpha_src"      # 声明 == 实挂
+    log = migrate_mount(cfg, io)
+    assert any("无需迁移" in x for x in log) and fake.calls == []
+
+
+def test_mount_check_hints_migrate(tmp_path):
+    """声明未挂 + JFS 在别处 → mount 项 detail 给 migrate 指引。"""
+    ctx = make_ctx(tmp_path)
+    ctx.mounts = f"JuiceFS:alphalib {tmp_path}/elsewhere fuse.juicefs rw 0 0\n"
+    r = by_id(run_setup(ctx.config, apply=False, ctx=ctx))
+    assert r["mount"].status == "fail"
+    assert "--migrate-mount" in r["mount"].detail

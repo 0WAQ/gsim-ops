@@ -25,8 +25,8 @@ vars:
 hosts:
   server-160: { alphalib_root: /tank/vault/alphalib }
   server-150: { alphalib_root: /tank/vault/alphalib }
-  intel-workstation-144: { alphalib_root: /storage/vault/alphalib }  # hostname 部署时校准
-  server-170: { alphalib_root: /ext4/alphalib }                      # hostname 部署时校准
+  intel-workstation-144: { alphalib_root: /storage/vault/alphalib }
+  server-170: { alphalib_root: /nvme125/alphalib }   # 2026-07-11 迁移声明(/ext4 → 独立 nvme 盘)
 
 # 路径配置
 path:

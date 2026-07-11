@@ -66,6 +66,7 @@ uv run ops clear                     # 扫全部孤儿
 uv run ops clear -u lhw -y           # 按 author 推断过滤,跳过确认
 uv run ops setup                     # 拉平本机 alphalib 部署(幂等补建缺失目录/软链/权限组)
 uv run ops setup --check             # 只读体检:✔/✘/⚠ 清单 + 退出码(FAIL→1)
+uv run ops setup --migrate-mount     # 声明变更收敛:JFS 挂载点迁到 hosts 声明位置(TTY + 确认)
 uv run ops combo run <dir> --start 20250102 --end 20251231          # combo 端到端代测 (predict+backtest)
 uv run ops combo run <dir> --start 20241210 --end 20241231 --predict-start 20241201 --stats simple  # 留 warmup, 单 stats
 ```

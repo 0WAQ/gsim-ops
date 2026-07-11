@@ -10,10 +10,24 @@
 - `ops setup --check` = **只读体检**:✔/✘/⚠ 清单;`--check` 经 cli 的
   `_CheckAction` 同时撤销写声明(不为看清单 sudo)。退出码:有 FAIL → 1。
 
-**补建铁律:只创建缺失,绝不改动已存在的东西**(软链指错 / gid 被占只报告)。
-唯一例外:顶层目录权限对齐(chown/chmod,照抄 scripts/juicefs-poc/02-layout.sh
-模型,只动顶层不递归)。JFS 挂载本身不归本命令(join.sh);数据对账(盘 ↔ PG)
-留给未来 ops doctor。
+**补建铁律:缺省 setup 只创建缺失,绝不改动已存在的东西**(软链指错 / gid
+被占只报告;顶层权限对齐除外,照 02-layout.sh 模型只动顶层)。**声明变更的
+收敛动作全部藏在显式 flag 后**:
+
+- `ops setup --migrate-mount`(2026-07-11,170 /ext4→/nvme125 立项):把本机
+  JFS 挂载点迁到 hosts 声明位置。编排在 `jfs.py::migrate_mount`(注入式
+  MigrateIO,控制流测试无需 root):前置守卫(目标盘在位 / writeback 排干
+  `.stats` staging_blocks=0 / env+unit 在位,违反即拒零改动)→ 备份 env+unit
+  → systemctl stop → 改写 `/etc/juicefs-poc.env` 三键(MOUNT/CACHE_DIR/
+  LOCAL_DIR,cache 同盘沿旧名,其余键原样)→ **重渲染 unit**(采集实证
+  ExecStart 硬编码,改 env 不够;模板正主 `jfs.py::render_unit`,golden test
+  用 170 现役 unit 原文钉住)→ daemon-reload → 搬 sidecar 存量 → start →
+  验证新挂载 + alpha_src 非空 → 兼容软链原子重指(migrate 语义允许改已存在
+  软链)。**旧址(旧挂载点目录/旧 cache/搬空 sidecar)报告不删**;任一步失败
+  恢复备份 + 重启旧配置。CLI 有交互确认(`-y` 跳过),须在目标机 TTY 跑
+  (sudo 自提权要密码)。
+
+JFS 首次接入不归本命令(join.sh);数据对账(盘 ↔ PG)留给未来 ops doctor。
 
 ## 结构
 
