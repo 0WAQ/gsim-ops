@@ -165,20 +165,22 @@ Located at `/usr/local/gsim/`. The core backtesting engine that ops interacts wi
 └── alpha_feature/  # Aggregated alpha_dump     — alpha_feature/<name>.{v}.npy  单文件
 ```
 
-**软链约定**(2026-07-08 确认 dump;2026-07-11 实测校正补 staging):
+**软链约定**(2026-07-08 确认 dump;2026-07-11 staging 共享化后更新):
 - `/mnt/storage/alphalib` 是**软链**,指向本机实际 alphalib 路径(各机挂载点不同:
-  160/150 `/tank/vault/`、144 `/storage/vault/`、170 `/ext4/`)—— 老脚本/固定路径
-  文档经它仍可用,不是旧数据副本。
-- `alphalib/alpha_dump` **和 `alphalib/staging` 都是软链**,实体是
-  `<挂载点>.local/alpha_dump|staging`(本地盘 sidecar,每机一份,**不进 JFS
-  不共享**);config.yaml 按 `${alphalib_root}/xxx` 引用,经软链落到本地盘。
-  **⇒ 五条数据路径里真共享的只有 alpha_src / alpha_pnl / alpha_feature**;
-  staging 本机意味着**在哪台机器 submit(或 restage),就必须在同一台机器
-  check** —— PG 状态里不记因子躺在哪台机的 staging(挂账,见 doctor 候选)。
-- bcorr 分流池 `pnl_automated/` / `pnl_manual/` 是挂载点下**实目录(非软链)
-  → JFS 共享**(2026-07-11 用户确认;设计上也必须如此 —— 对比池须全局一致)。
-  `pnl_alphalib` 是 `alpha_pnl` 的别名(同一目录);`pnl_prod_path` 在
-  gsim_home 下,本机。
+  160/150 `/tank/vault/`、144 `/storage/vault/`、170 `/nvme125/`)—— 老脚本/固定
+  路径文档经它仍可用,不是旧数据副本。
+- `alphalib/alpha_dump` 是**软链**,实体是 `<挂载点>.local/alpha_dump`(本地盘
+  sidecar,每机一份,不进 JFS 不共享)—— dump 大文件有意留本机。
+- **`alphalib/staging` 自 2026-07-11 起是 JFS 实目录(共享)**——共享 staging +
+  队列消费部署(docs/shared-staging-queue.md):任意机器 submit 入队,170
+  (消费机)check,任意机器看结果;"在哪台 submit 就必须在哪台 check"的绑定
+  与"PG 不记因子在哪台 staging"的挂账一并消灭。历史形态(sidecar 软链)见
+  JOURNAL 2026-07-11 校正条目。
+- bcorr 分流池 `pnl_automated/` / `pnl_manual/` 是挂载点下**实目录 → JFS 共享**
+  (对比池须全局一致)。`pnl_alphalib` 是 `alpha_pnl` 的别名(同一目录);
+  `pnl_prod_path` 在 gsim_home 下,本机。
+  **⇒ 五条数据路径里唯一本机的是 alpha_dump**,其余(src/pnl/feature/staging)
+  + 分流池全部共享。
 
 **⚠ alpha_pnl/<name> 是单文件,不是目录**。删除用 `Path.unlink()`,不要用 `shutil.rmtree()`(`Errno 20: Not a directory`)。alpha_feature 同理是单文件。只有 alpha_src / alpha_dump 是目录。
 
@@ -252,7 +254,7 @@ metric 表达式已收敛,S8);新发现的多真相源加 ⚠ 行并在
 - 2026-06-05 Redis Sentinel HA (3-node sentinel, 9.12s failover)
 - 2026-06-05 JFS 上线 + 默认 config 切 JFS (`config.yaml` = JFS, `config.prod-legacy.yaml` 回退)
 - 2026-07-04 Phase G: 派生层 (index/metrics/datasources/bcorr) 迁 Postgres (server-160 docker, host 15432), per-machine JSON 缓存退役; 读写数据流重构 (DerivedRecord 取代 FactorInfo god-object); **state (因子生命周期) 也迁 Postgres, PG 成唯一真相源** (state + derived 同库)。branch `feat/derived-postgres`, 部署 `scripts/postgres/`。**注意: 承载旧 state 的 Redis 同时是 JFS metadata 后端, 不可停 (停进程=挂因子库); ops 只是不再用它存 state。**
-- 2026-07-04 `factor_lock` 迁跨机 PG advisory lock (branch 同上): 原 per-machine fcntl 挡不住跨机对同一因子的并发变更 (state 共享 PG + src/pnl 产物共享 JFS;~~staging 共享 JFS~~ 2026-07-11 实测校正:staging 是本机 sidecar 软链,"三机扫同一 staging" 的原立项表述不成立,但 restage/rm/approve 与别机 check 仍会跨机撞同一因子的共享 state/产物,锁的必要性不变)。postgres 后端走 `pg_try_advisory_lock` (专用连接, session 级, 连接断开自动释放, 无死锁残留); json dev/test 后端 fcntl(2026-07-07 起 postgres 缺 conninfo 硬错误、锁键去 library_id 维,见 JOURNAL F4/F5)。签名 `factor_lock(name, config)`。见 `ops/infra/lock.py` + memory [[project_factor_lock_cross_machine]]。
+- 2026-07-04 `factor_lock` 迁跨机 PG advisory lock (branch 同上): 原 per-machine fcntl 挡不住跨机对同一因子的并发变更 (state 共享 PG + src/pnl 产物共享 JFS;staging 2026-07-11 起也共享 —— 多机扫同一 staging、多 worker 并发领任务,跨机锁正是防重复消费的机制)。postgres 后端走 `pg_try_advisory_lock` (专用连接, session 级, 连接断开自动释放, 无死锁残留); json dev/test 后端 fcntl(2026-07-07 起 postgres 缺 conninfo 硬错误、锁键去 library_id 维,见 JOURNAL F4/F5)。签名 `factor_lock(name, config)`。见 `ops/infra/lock.py` + memory [[project_factor_lock_cross_machine]]。
 - 2026-07-04 CLI 子命令重审 (branch 同上): submit 吸收 resubmit (`--overwrite` 覆盖已入库因子, 默认跳过); recheck 改名 restage (名副其实, 只召回 staging 不跑 check); rm 改彻底硬删 + 移除 DELETED 状态/deleted_at 列 (因子要么存在要么删除, 删除不是状态); approve 正名为"数据覆盖多样性人工豁免"。见 memory [[project_cli_command_redesign]]。
 - 2026-07-06 Postgres 双表 → 三表重构 (branch 同上): `factor_derived` + 旧 `factor_state` (含 author/submitted_by) 拆成 `factor_info` (身份) + `factor_state` (纯状态) + `factor_snapshot` (入库时快照)，全部去掉 `library_id`。**metrics/datasources/bcorr 语义从"可刷新最新表现"变为"入库时不可变快照"** (`snapshot_at = entered_at`)；`ops refresh` 命令删除。新增 `ops/infra/info/` + `ops/infra/snapshot/` store 抽象 + `ops/infra/query.py` 联合读。生产库 `ops` 迁移已执行 (migrate_to_snapshot.sql + backfill_discovery_method.py): factor_info 7594 / factor_state 7594 / factor_snapshot 7485; discovery_method automated 7259 / manual 226 / NULL 109 (未入库); 迁移中清理 108 脏因子 + 2 空壳 + 补 20 hwang 孤儿 state。旧 `derived/` 层代码当时保留 (LibraryScanner 仍用其做 index 缓存)(注: derived 层已于 2026-07-07 Wave 2 删除)。
 

@@ -46,7 +46,9 @@ class FakeConfig:
 
 
 def make_ctx(tmp: Path, *, full: bool = True) -> Ctx:
-    """构造应然布局。full=False 留下缺失面(池目录 / dump 软链)。"""
+    """构造应然布局(staging 形态跟随 checks.STAGING_IS_SHARED,与生产同步)。
+    full=False 留下缺失面(池目录 / dump 软链)。"""
+    from ops.services.setup import checks as _checks
     cfg = FakeConfig(tmp)
     root = cfg.alpha_src.parent
     sidecar = root.with_name(root.name + ".local")
@@ -54,8 +56,12 @@ def make_ctx(tmp: Path, *, full: bool = True) -> Ctx:
     root.mkdir(parents=True)
     for d in (cfg.alpha_src, cfg.alpha_pnl, cfg.alpha_feature):
         d.mkdir()
-    (sidecar / "staging").mkdir(parents=True)
-    cfg.staging.symlink_to(Path("..") / sidecar.name / "staging")
+    if _checks.STAGING_IS_SHARED:
+        cfg.staging.mkdir()                       # JFS 实目录(共享)
+        (sidecar).mkdir(parents=True)
+    else:
+        (sidecar / "staging").mkdir(parents=True)
+        cfg.staging.symlink_to(Path("..") / sidecar.name / "staging")
 
     if full:
         for d in (cfg.pnl_automated, cfg.pnl_manual):
@@ -137,6 +143,27 @@ def test_wrong_symlink_reported_not_touched(tmp_path):
     r = by_id(results)
     assert r["dump"].status == "fail" and not r["dump"].fixed
     assert cfg.alpha_dump.resolve() == wrong.resolve()   # apply 没动它
+
+
+def test_staging_expectation_both_modes(tmp_path, monkeypatch):
+    """STAGING_IS_SHARED 两个取值下的应然都被钉住(开关与部署同批翻转,
+    2026-07-11 共享化后生产为 True;False 分支保护历史语义防误翻)。"""
+    from ops.services.setup import checks as _checks
+
+    # shared=True:实目录 ok,软链 fail
+    ctx = make_ctx(tmp_path)
+    monkeypatch.setattr(_checks, "STAGING_IS_SHARED", True)
+    cfg = ctx.config
+    if cfg.staging.is_symlink():
+        cfg.staging.unlink()
+        cfg.staging.mkdir()
+    r = by_id(run_setup(cfg, apply=False, ctx=ctx))
+    assert r["staging"].status == "ok", r["staging"].detail
+
+    # shared=False:同一布局(实目录)应 fail(要求软链)
+    monkeypatch.setattr(_checks, "STAGING_IS_SHARED", False)
+    r = by_id(run_setup(cfg, apply=False, ctx=ctx))
+    assert r["staging"].status == "fail"
 
 
 def test_host_declared_states(tmp_path):
