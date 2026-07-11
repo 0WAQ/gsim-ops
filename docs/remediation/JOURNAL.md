@@ -1193,3 +1193,19 @@ PR #7 合 main(merge `3119496`)。侧记:160 仓库根有未跟踪 `pgreadonlyse
 SSOT 表零 ⚠、7/7 契约 enforcing、Known Technical Debt 的 stub / metadata-I/O
 两项清零。挂账优先级不变:①MinIO/Feishu 密钥轮换(最紧急)②bcorr 池存量
 鬼影清理 ③中件三项(展示层上收 / ops doctor / I2 测试基建)。
+
+## U8 · bcorr 池存量鬼影清理收官(2026-07-11)
+
+分支 `claude/ops-rotate-and-reconcile`。工具 `scripts/reconcile_bcorr_pools.py`
+(池副本 ↔ PG 状态对账,判定表见脚本 docstring;未来 ops doctor 池对账种子)。
+两阶段执行:dry-run 622 条 ghost(pnl_automated 593 + pnl_manual 29,判因单一
+= rejected 离库副本未回收,全部是 PV7 池回收政策 2026-07-08 上线前的存量;
+已知实例 AlphaWbaiReversal 在列)→ 判读 + 用户确认语义("pnl 分流不应含未
+通过因子")→ apply 622/622 删除零失败。复验:ghost 0、池副本 OK 7433 前后
+不变(零误删)、Total 8252 不变。**alpha_pnl 主 pnl(rejected 保留供分析的
+那份)一个未动** —— 本次只清对比池成员文件。wrong-pool 0;missing 8(approve
+豁免合法)只报告,归 doctor。
+
+**侧发现挂账**:dry-run 全库扫描亮出 662 条 stale 快照告警
+(`snapshot_at != entered_at`,Factor 软校验首次全库过筛)—— 独立的一族对账
+问题(疑迁移期存量),记 doctor 候选,本批不处理。
