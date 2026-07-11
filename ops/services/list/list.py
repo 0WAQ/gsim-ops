@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ops.core.factor import Factor, FactorSnapshot
+from ops.core.metrics import SNAPSHOT_METRICS, metric_value
 from ops.core.state import FactorStatus
 from ops.infra.config import Config
 from ops.infra.repository import FactorRepository
@@ -140,23 +141,14 @@ def print_json(rows: list[Factor]):
 
 
 _FILTER_PATTERN = re.compile(r"^(\w+)([><=!]+)(.+)$")
-# 可排序/过滤的 metric 键（从 snapshot 读取）。dump_days 已移除 —— 它是实时物理状态
-# (不在 snapshot)，过滤/排序无对应快照列，故不再作为 filter/sort 键。
-_SORTABLE_KEYS = {"ret", "shrp", "mdd", "tvr", "fitness", "bcorr"}
+# 可排序/过滤的 metric 键 —— 从注册表派生(SSOT S8,core/metrics.py),
+# 取值语义(bcorr=abs)也在注册表,本文件不再自带镜像。
+_SORTABLE_KEYS = frozenset(SNAPSHOT_METRICS)
 FILTER_KEYS = {"tables", "field"} | _SORTABLE_KEYS
 # 合法比较符白名单:typo(=>、=<、>< 等)能通过正则但下推白名单和内存 if 链都
 # 没有分支 —— 旧行为是**静默吞掉该条件**且新旧路径因子集还不一致(对抗评审),
 # 一律在解析期响亮拒绝。
 _VALID_OPS = {">", ">=", "<", "<=", "=", "!="}
-
-
-def _metric_get(snap: FactorSnapshot | None, key: str) -> float | None:
-    """从 snapshot 获取 metric 值（用于过滤/排序）。"""
-    if not snap:
-        return None
-    if key == "bcorr":
-        return abs(snap.max_bcorr) if snap.max_bcorr is not None else None
-    return getattr(snap, key, None)
 
 
 def parse_filters(filter_str: str) -> list[tuple[str, str, str]] | None:
@@ -203,15 +195,15 @@ def apply_filters(rows: list[Factor], filters: list[tuple[str, str, str]]) -> li
         elif key in _SORTABLE_KEYS:
             threshold = float(value)
             if op == ">":
-                result = [x for x in result if (v := _metric_get(x.snapshot, key)) is not None and v > threshold]
+                result = [x for x in result if (v := metric_value(x.snapshot, key)) is not None and v > threshold]
             elif op == ">=":
-                result = [x for x in result if (v := _metric_get(x.snapshot, key)) is not None and v >= threshold]
+                result = [x for x in result if (v := metric_value(x.snapshot, key)) is not None and v >= threshold]
             elif op == "<":
-                result = [x for x in result if (v := _metric_get(x.snapshot, key)) is not None and v < threshold]
+                result = [x for x in result if (v := metric_value(x.snapshot, key)) is not None and v < threshold]
             elif op == "<=":
-                result = [x for x in result if (v := _metric_get(x.snapshot, key)) is not None and v <= threshold]
+                result = [x for x in result if (v := metric_value(x.snapshot, key)) is not None and v <= threshold]
             elif op == "=":
-                result = [x for x in result if (v := _metric_get(x.snapshot, key)) is not None and v == threshold]
+                result = [x for x in result if (v := metric_value(x.snapshot, key)) is not None and v == threshold]
     return result
 
 
@@ -282,7 +274,7 @@ def run_list(args):
         rows = apply_filters(rows, filters)
 
     if args.sort_by and args.sort_by in _SORTABLE_KEYS:
-        rows.sort(key=lambda x: _metric_get(x.snapshot, args.sort_by) or 0, reverse=True)
+        rows.sort(key=lambda x: metric_value(x.snapshot, args.sort_by) or 0, reverse=True)
 
     if args.n is not None:
         rows = rows[:args.n]

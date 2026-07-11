@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -49,36 +48,5 @@ class AlphaMetadata:
             if old and old.startswith("/datasvc/data/cc/"):
                 item["@niodatapath"] = nio_data_path + "/" + old[len("/datasvc/data/cc/"):]
 
-    def get_v2npy_files(self) -> list[Path]:
-        npy_files: list[Path] = []
-        try:
-            for year in sorted(self.alpha_dir.glob("*")):
-                if not year.is_dir() or not re.match(r"^\d{4}$", year.name):
-                    continue
-
-                for month in sorted(year.glob("*")):
-                    if not month.is_dir() or not re.match(r"^\d{2}$", month.name):
-                        continue
-                    for npy_file in sorted(month.glob("*v2.npy")):
-                        npy_files.append(npy_file)
-        except Exception:
-            ...
-        return npy_files
-
-    def get_last_v1npy_file(self) -> Path | None:
-        try:
-            last_year_dir = sorted(self.alpha_dir.glob('*'), reverse=True)[0]
-            last_month_dir = sorted(last_year_dir.glob("*"), reverse=True)[0]
-            last_v1npy_file = sorted(last_month_dir.glob("*v1.npy"), reverse=True)[0]
-            return last_v1npy_file
-        except Exception:
-            return None
-
-    def get_last_v2npy_file(self) -> Path | None:
-        try:
-            last_year_dir = sorted(self.alpha_dir.glob('*'), reverse=True)[0]
-            last_month_dir = sorted(last_year_dir.glob("*"), reverse=True)[0]
-            last_v2npy_file = sorted(last_month_dir.glob("*v2.npy"), reverse=True)[0]
-            return last_v2npy_file
-        except Exception:
-            return None
+    # alpha_dump 工作区扫描(get_v2npy_files / get_last_v*npy_file)2026-07-11
+    # 迁出至 services/check/checker/dumpscan.py:领域类型不带盘面 I/O。

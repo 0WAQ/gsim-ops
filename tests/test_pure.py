@@ -101,6 +101,67 @@ def test_glob_to_like_pushdown_is_prefilter_only():
     assert clauses == [] and params == []                      # 整体不产出 tables 子句
 
 
+def test_metric_registry_is_single_source():
+    """S8:metric 事实族(键集 + 取值语义)唯一定义在 core/metrics.SNAPSHOT_METRICS,
+    SQL 下推表达式 / 内存取值 / CLI choices 三个消费方全部派生。钉死两件事:
+    键集决策本身,和 bcorr 的 abs 语义在 SQL/内存两半逐位一致。"""
+    from ops.cli.common import METRIC_SORT_KEYS
+    from ops.core.factor import FactorSnapshot
+    from ops.core.metrics import SNAPSHOT_METRICS, metric_value
+    from ops.infra.snapshot.pg_store import _prefixed_metric_expr, metric_order_expr
+
+    # 键集决策(新增/删除 metric 键须有意为之)
+    assert set(SNAPSHOT_METRICS) == {"ret", "shrp", "mdd", "tvr", "fitness", "bcorr"}
+    assert tuple(METRIC_SORT_KEYS) == tuple(SNAPSHOT_METRICS)   # CLI choices 同源
+
+    # SQL 半边:每个注册键都能产出下推表达式,bcorr 是 abs(带前缀改写正确)
+    for key in SNAPSHOT_METRICS:
+        assert _prefixed_metric_expr(key, "n.") is not None
+    assert _prefixed_metric_expr("bcorr", "n.") == "abs(n.max_bcorr)"
+    assert _prefixed_metric_expr("ret", "") == "ret"
+    assert metric_order_expr("delay") is None                   # 白名单外拒绝
+
+    # 内存半边:同一注册表取值,bcorr 取绝对值,与 SQL abs() 语义一致
+    snap = FactorSnapshot(name="X", ret=12.5, max_bcorr=-0.42)
+    assert metric_value(snap, "ret") == 12.5
+    assert metric_value(snap, "bcorr") == pytest.approx(0.42)
+    assert metric_value(snap, "shrp") is None                   # 值缺失
+    assert metric_value(snap, "delay") is None                  # 未注册键
+    assert metric_value(None, "ret") is None                    # 无快照
+
+
+def test_dumpscan_layout_and_order(tmp_path):
+    """dumpscan(2026-07-11 自 AlphaMetadata 迁出,core 去 I/O):
+    YYYY/MM 布局按时序、非日期目录忽略、目录不存在返回空/None。
+    last_v2npy_file 只看最新月份,该月无 v2 → None(**不回退更早月份**:
+    checkpoint 比对的是本次运行刚写出的 dump,回退会卷进陈旧残留 ——
+    None → CheckSkip 是正确路由,评审确认保持原语义)。"""
+    from ops.services.check.checker.dumpscan import last_v2npy_file, v2npy_files
+
+    missing = tmp_path / "nope"
+    assert v2npy_files(missing) == [] and last_v2npy_file(missing) is None
+
+    d = tmp_path / "AlphaX"
+    for rel in ["2024/12/20241230.v2.npy", "2025/01/20250102.v2.npy",
+                "2025/01/20250103.v2.npy"]:
+        f = d / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.touch()
+    (d / "logs").mkdir()                       # 非年份目录忽略
+    (d / "2025" / "tmp").mkdir()               # 非月份目录忽略
+
+    files = v2npy_files(d)
+    assert [f.name for f in files] == [
+        "20241230.v2.npy", "20250102.v2.npy", "20250103.v2.npy"]
+    assert last_v2npy_file(d).name == "20250103.v2.npy"
+
+    # 最新月份(2025/02)只有 v1 → None,不回退 2025/01
+    v1only = d / "2025" / "02" / "20250201.v1.npy"
+    v1only.parent.mkdir(parents=True)
+    v1only.touch()
+    assert last_v2npy_file(d) is None
+
+
 def test_write_command_declarations_match_registry():
     """S16:写命令集由注册处 mark_write 声明派生(sudo 提权据此),不再手抄。
     经 ops.main.SUBPARSER_REGISTRARS(注册表单一正主)注册全部子命令 ——

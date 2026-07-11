@@ -7,14 +7,20 @@ choices。2026-07-09 阶段 3 全部收敛到本模块,C2 转 enforcing —— p
 """
 from pathlib import Path
 
+from ops.core.metrics import SNAPSHOT_METRICS
 from ops.core.state import FactorStatus
 from ops.infra.config import get_default_config_path
 
-__all__ = ["FactorStatus", "STATUS_CHOICES", "add_config_arg", "mark_write"]
+__all__ = ["FactorStatus", "METRIC_SORT_KEYS", "STATUS_CHOICES",
+           "add_config_arg", "mark_write"]
 
 # argparse choices 用(list/pack/status 的 --status;restage 取枚举子集,
 # 经本模块 re-export 的 FactorStatus,不直接碰 core)
 STATUS_CHOICES = tuple(s.value for s in FactorStatus)
+
+# list --sort-by 的 choices —— 从 metric 注册表派生(SSOT S8,core/metrics.py)。
+# 原先 cli/list.py 手抄一份键列表,是注册表外的第三份拷贝。
+METRIC_SORT_KEYS = tuple(SNAPSHOT_METRICS)
 
 
 def add_config_arg(parser) -> None:

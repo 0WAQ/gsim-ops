@@ -88,6 +88,7 @@ forbidden_modules = ["ops.infra", "ops.core"]
 ignore_imports = [
     "ops.cli.common -> ops.infra.config",
     "ops.cli.common -> ops.core.state",
+    "ops.cli.common -> ops.core.metrics",
 ]
 
 [[tool.importlinter.contracts]]

@@ -199,8 +199,9 @@ AlphaXxx/
 ## SSOT 表(事实族 → 正主)
 
 改代码/review 第一问:**"你在问正主吗?"** 每个事实族只有一个权威来源,其余都是
-投影或缓存(full-review §8.2;⚠ 行是已知的多真相源,收敛计划见
-`docs/factor-aggregate-plan.md`)。
+投影或缓存(full-review §8.2)。2026-07-11 起表中已无已知多真相源(原 ⚠ 行
+metric 表达式已收敛,S8);新发现的多真相源加 ⚠ 行并在
+`docs/factor-aggregate-plan.md` 记收敛计划。
 
 | 事实族 | 正主(SSOT) | 备注 |
 |---|---|---|
@@ -216,12 +217,12 @@ AlphaXxx/
 | 因子记录读写 + 产物清理 | `ops/infra/repository.py::FactorRepository` | find 单条三表 JOIN;register 原子双表写;purge_artifacts 按 ArtifactScope 两面 |
 | 三表 DDL(代码侧引导) | `ops/infra/schema.py::ensure_schemas`(FK 依赖序) | 生产 schema 正主是 scripts/postgres;store 构造零副作用 |
 | 写命令集(sudo 提权名单) | `ops/cli/common.py::mark_write` 注册声明(args.is_write_command) | 2026-07-10 S16 完成;WRITE_COMMANDS 手抄删除,`maybe_elevate` 只消费声明 |
-| ⚠ metric 表达式 | snapshot `_METRIC_EXPR` 与 list 内存镜像 | SQL 半边已收敛(snapshot_where 供 find 复用);list.py 内存兜底仍是镜像,待注册表(S8) |
+| metric 键集 + 取值语义(bcorr=abs) | `ops/core/metrics.py::SNAPSHOT_METRICS` 注册表 | 2026-07-11 S8 收敛:SQL 下推表达式 / list 内存取值(`metric_value`)/ CLI `--sort-by` choices 三方全部派生;新增可排序 metric = 注册表加一行 |
 
 ## Known Technical Debt (Deferred)
 
-- **Stub files**: `core/alpha/results/base.py`, `results/checkpoint.py`(空壳 Enum/class)
-- **`core/alpha/metadata.py` has I/O**: `get_v2npy_files()` / `get_last_v*npy_file()` 扫 alpha_dump 目录 — extract to services/infra
+- ~~Stub files~~ **已清理**(2026-07-11 小件收官批:`results/checkpoint.py` 删除、Status/Results 空壳及三份子类删除;`results/base.py` 仅剩 `Result` 标记基类 + CompResult/CorrResult 两个真实结果)
+- ~~`core/alpha/metadata.py` has I/O~~ **已迁出**(2026-07-11:alpha_dump 扫描两函数(v2npy_files/last_v2npy_file)迁 `ops/services/check/checker/dumpscan.py`,死代码 `get_last_v1npy_file`/`_get_v1md5` 删除;AlphaMetadata 构造仍读盘解析 XML,属工作台语义)
 - ~~`ops sync` legacy fallback~~ **已退役删除**(2026-07-07 Wave 1,连同 `infra/s3.py`、boto3/tqdm、`config.prod-legacy.yaml`)
 - **Postgres 三表结构 (2026-07-06, branch `feat/derived-postgres`)**: 因子数据落三张 PG 表(server-160 docker, host 15432),全部去掉 `library_id`(永远单库),`id SERIAL` 主键 + `name UNIQUE`:
   - `factor_info` — 身份信息 (author / discovery_method / created_at)。抽象层 `ops/infra/info/`。
