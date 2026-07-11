@@ -42,6 +42,10 @@ LOCK_DIR = Path.home() / ".cache" / "ops" / "locks"
 
 # advisory lock 的固定 classid 命名空间(server 端 hashtext('ops:factor_lock'))。
 # 所有 ops 进程共享同一命名空间 —— 锁键只由因子名决定。
+# **生产不可注入**(S18 教训:锁键随 config 漂移 = 跨机互斥无声失效)。唯一的
+# 合法覆盖方是测试:config.lock_namespace(state.lock_namespace)注入本 pytest
+# session 的 PG schema 名 —— advisory lock 是库级作用域,per-session schema
+# 隔离挡不住它,并行测试进程必须各锁各的命名空间(I2,2026-07-11)。
 _LOCK_NAMESPACE = "ops:factor_lock"
 
 
@@ -69,7 +73,7 @@ def _fcntl_lock(name: str):
 
 
 @contextmanager
-def _pg_advisory_lock(name: str, conninfo: str):
+def _pg_advisory_lock(name: str, conninfo: str, namespace: str = _LOCK_NAMESPACE):
     """Cross-machine PG session-level advisory lock.
 
     Uses a dedicated connection (NOT the state pool) held for the whole critical
@@ -84,7 +88,7 @@ def _pg_advisory_lock(name: str, conninfo: str):
     try:
         row = conn.execute(
             "SELECT pg_try_advisory_lock(hashtext(%s), hashtext(%s))",
-            (_LOCK_NAMESPACE, name),
+            (namespace, name),
         ).fetchone()
         if not (row and row[0]):
             raise FactorLocked(name)
@@ -99,7 +103,7 @@ def _pg_advisory_lock(name: str, conninfo: str):
             try:
                 conn.execute(
                     "SELECT pg_advisory_unlock(hashtext(%s), hashtext(%s))",
-                    (_LOCK_NAMESPACE, name),
+                    (namespace, name),
                 )
             except Exception as e:
                 logger.warning("advisory unlock failed for {}: {}", name, e)
@@ -122,7 +126,9 @@ def factor_lock(name: str, config):
                 "跨机 factor_lock 无法建立,拒绝静默降级为单机锁 "
                 "(检查 config.state.postgres.* 与密码文件)"
             )
-        with _pg_advisory_lock(name, conninfo):
+        # 命名空间缺省固定;config.lock_namespace 是仅测试的注入口(见常量注释)
+        namespace = getattr(config, "lock_namespace", None) or _LOCK_NAMESPACE
+        with _pg_advisory_lock(name, conninfo, namespace):
             yield
     elif backend == "json":
         with _fcntl_lock(name):

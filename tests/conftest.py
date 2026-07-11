@@ -1,11 +1,18 @@
 """Shared pytest fixtures for the ops test suite.
 
-隔离原则:
-- PG 走独立库 `ops_test` (同 160 docker 实例),每个测试用独立 library_id 分区,
-  测后按 library_id 删三表行 —— 绝不碰生产 `ops` 库。
+隔离原则(I2,2026-07-11 重建):
+- PG 走独立库 `ops_test`,**每个 pytest session 一个随机 schema**
+  (`t_<hex>`,conninfo 带 `options=-csearch_path=…`,三表建在 schema 内,
+  session 结束 DROP SCHEMA CASCADE)—— 并行的 pytest 进程各有各的 schema,
+  互不干扰;绝不碰生产 `ops` 库。测试之间沿用 wipe(schema 内删 factor_info
+  级联)。
+- **advisory lock 是库级作用域,schema 隔离挡不住它** —— 测试 config 注入
+  `state.lock_namespace = <schema 名>`(lock.py 的仅测试注入口),并行 session
+  各锁各的命名空间。
 - 文件走 tmp_path,五条数据路径 + staging/recycle/checkpoint/pnl 全部相对它。
 
-pg fixture 在库不可达时 pytest.skip 整组,CI / 无 PG 环境不红。
+pg fixture 在库不可达时 pytest.skip 整组,无 PG 环境不红;本地/CI 起测试 PG
+见 tests/README.md(docker-compose.test.yml / ci.yml postgres service)。
 """
 import os
 import uuid
@@ -46,21 +53,50 @@ def _test_conninfo(dbname: str = "ops_test") -> str:
 
 
 @pytest.fixture(scope="session")
-def pg_conninfo() -> str:
-    """测试库 conninfo;不可达则 skip 整个 pg 组。
+def pg_schema() -> str:
+    """per-session 随机 PG schema(I2 隔离核心):建 `t_<hex>` → yield 名字 →
+    session 结束 DROP SCHEMA CASCADE。不可达则 skip 整个 pg 组。
 
-    可达时按 FK 依赖序 (info → state → snapshot) 引导三表:空库上
-    factor_state 的内联 FK 引用 factor_info,若 state store 先连,
-    CREATE TABLE 直接 UndefinedTable。
+    双保险:建/删 schema 前都确认 current_database() == 'ops_test',
+    防 OPS_TEST_PG_* 误指生产库。
     """
     import psycopg
 
-    conninfo = _test_conninfo()
+    base = _test_conninfo()
+    schema = f"t_{uuid.uuid4().hex[:12]}"
     try:
-        conn = psycopg.connect(conninfo, connect_timeout=5)
-        conn.close()
+        conn = psycopg.connect(base, autocommit=True, connect_timeout=5)
     except Exception as e:  # noqa: BLE001 — 任何连接失败都 skip
         pytest.skip(f"ops_test PG 不可达,跳过 pg 测试: {e}")
+    try:
+        db = conn.execute("SELECT current_database()").fetchone()[0]
+        if db != "ops_test":
+            pytest.skip(f"测试库不是 ops_test(是 {db}),拒绝建 schema")
+        conn.execute(f'CREATE SCHEMA "{schema}"')
+    finally:
+        conn.close()
+
+    yield schema
+
+    try:
+        conn = psycopg.connect(base, autocommit=True, connect_timeout=5)
+        if conn.execute("SELECT current_database()").fetchone()[0] == "ops_test":
+            conn.execute(f'DROP SCHEMA "{schema}" CASCADE')
+        conn.close()
+    except Exception:  # noqa: BLE001 — teardown 尽力而为(残留 schema 无害,可手工清)
+        pass
+
+
+@pytest.fixture(scope="session")
+def pg_conninfo(pg_schema: str) -> str:
+    """测试库 conninfo,search_path 钉在本 session 的 schema(只列 schema 本身,
+    不含 public —— 漏建的表直接 UndefinedTable 响亮失败,不会静默落到 public)。
+
+    按 FK 依赖序 (info → state → snapshot) 在 schema 内引导三表:空库上
+    factor_state 的内联 FK 引用 factor_info,若 state store 先连,
+    CREATE TABLE 直接 UndefinedTable。
+    """
+    conninfo = f"{_test_conninfo()} options=-csearch_path={pg_schema}"
 
     # DDL 已滚出 store __init__(2026-07-09 阶段 2):显式按 FK 依赖序引导三表
     from ops.infra.schema import ensure_schemas
@@ -69,8 +105,9 @@ def pg_conninfo() -> str:
 
 
 def wipe_test_db(conninfo: str) -> None:
-    """清空 ops_test 三表(删 factor_info,FK 级联 state/snapshot)。
+    """清空三表(删 factor_info,FK 级联 state/snapshot)。
 
+    conninfo 带 search_path 时作用于本 session 的 schema(测试间隔离);
     只对 current_database() == 'ops_test' 生效 —— 双保险,防 OPS_TEST_PG_*
     误指生产库时把生产清了。
     """
@@ -91,12 +128,11 @@ def wipe_test_db(conninfo: str) -> None:
 
 @pytest.fixture
 def library_id(pg_conninfo) -> str:
-    """每个测试一个唯一 library_id(现仅用于 cache 路径命名)+ 表级隔离。
+    """每个测试一个唯一 library_id(现仅用于 cache 路径命名)+ 测试间表级隔离。
 
-    2026-07-08 过渡方案:三表已无 library_id 列,原"按 library_id 删行"的
-    teardown 自三表拆分起是 no-op(UndefinedColumn 被吞),残留跨 run 污染
-    (生产验证第一轮 26 failed 的一类根因)。改为**测试前后各清一次全库**
-    (ops_test 专用测试库,串行跑安全;并行隔离 per-schema 归 I2)。
+    测试前后各清一次三表 —— conninfo 带本 session 的 search_path,只清自己
+    schema 里的行;跨进程隔离由 per-session schema 承担(I2,2026-07-11),
+    并行跑 pytest 不再互相踩。
     """
     lib = f"test_{uuid.uuid4().hex[:12]}"
     wipe_test_db(pg_conninfo)
@@ -109,13 +145,36 @@ def library_id(pg_conninfo) -> str:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def state_store(pg_conninfo):
-    # 2026-07-07 诚实化:三表拆分删掉了 library_id 分区,本 fixture 原签名
-    # PostgresStateStore(conninfo, library_id=...) 直接 TypeError —— 即 PG 组
-    # 自重构以来从未真正跑过。隔离模型需重建为 per-test schema(CREATE SCHEMA
-    # t_<uuid> + search_path)且 put 前需 factor_info 父行(FK),须对着真 PG
-    # 迭代,见 full-review 第二部分 I2。在此之前显式 skip,不再假装可用。
-    pytest.skip("PG store fixtures 待重建 (per-schema 隔离 + FK 种子行, full-review I2)")
+def state_store(pg_conninfo, library_id):
+    """PostgresStateStore 直连(I2 重建,2026-07-11)。
+
+    library_id 依赖只为测试前后 wipe;写 factor_state 前必须有 factor_info
+    父行(FK)—— 用 seed_info fixture 先种,镜像生产前置
+    (register 是 info+state 原子双表写,生产不存在无父行的 state)。
+    """
+    from ops.infra.store.pg_store import PostgresStateStore
+
+    return PostgresStateStore(pg_conninfo)
+
+
+@pytest.fixture
+def seed_info(pg_conninfo):
+    """种 factor_info 父行(direct-store 测试用;FK 要求 state 写入前父行先在)。
+
+    返回 callable(*names)。service 级测试请用 seed_factor(走 Config)。
+    """
+    from ops.infra.info import FactorInfo
+    from ops.infra.info.pg_store import PostgresInfoStore
+
+    info_store = PostgresInfoStore(pg_conninfo)
+
+    def _seed(*names: str):
+        for n in names:
+            info_store.upsert(FactorInfo(name=n, author="wbai",
+                                         discovery_method="manual",
+                                         created_at="2026-07-05T00:00:00"))
+
+    return _seed
 
 
 # derived_store fixture 已随 derived 层删除 (2026-07-07 Wave 2, JOURNAL V2)
@@ -171,10 +230,11 @@ def _mkdirs(config) -> None:
 
 
 @pytest.fixture
-def test_config(tmp_path: Path, pg_conninfo, library_id):
+def test_config(tmp_path: Path, pg_schema, pg_conninfo, library_id):
     """基于真实 config.yaml 造一份隔离 config:
     - 所有数据路径重定位到 tmp_path
-    - state backend=postgres 指向 ops_test + 本测试 library_id
+    - state backend=postgres 指向 ops_test + 本 session schema(search_path)
+    - lock_namespace = schema 名(advisory lock 库级作用域,并行 session 各锁各的)
 
     返回 (config_path, Config 实例)。
     """
@@ -183,17 +243,19 @@ def test_config(tmp_path: Path, pg_conninfo, library_id):
     base = yaml.safe_load((get_project_root() / "config.yaml").read_text())
     _isolated_paths(base, tmp_path, library_id)
 
-    # state 指向 ops_test
-    pw = _read_pg_password()
+    # state 指向 ops_test 的本 session schema
+    pw = os.environ.get("OPS_TEST_PG_PASSWORD") or _read_pg_password()
     pg_block = {
         "host": os.environ.get("OPS_TEST_PG_HOST", "10.9.100.160"),
         "port": int(os.environ.get("OPS_TEST_PG_PORT", "15432")),
         "dbname": "ops_test",
         "user": os.environ.get("OPS_TEST_PG_USER", "ops"),
+        "options": f"-csearch_path={pg_schema}",
     }
     if pw:
         pg_block["password"] = pw
-    base["state"] = {"backend": "postgres", "postgres": dict(pg_block)}
+    base["state"] = {"backend": "postgres", "postgres": dict(pg_block),
+                     "lock_namespace": pg_schema}
 
     cfg_path = tmp_path / "config.test.yaml"
     cfg_path.write_text(yaml.safe_dump(base, allow_unicode=True))

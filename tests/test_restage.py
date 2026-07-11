@@ -140,3 +140,28 @@ def test_restage_batch_respects_author(test_config, seed_factor):
     assert (config.alpha_src / "AlphaMheX").exists()
     assert not (config.staging / "AlphaMheX").exists()
 
+
+
+def test_restage_discards_snapshot(test_config, seed_factor):
+    """R1 欠账关单(JOURNAL,I2 后补):restage 离库即旧快照失效 ——
+    factor_snapshot 行被删,re-check 归档 insert 不撞 name UNIQUE,
+    快照不会停在旧代码的入库表现上。"""
+    from ops.core.factor import FactorSnapshot
+    from ops.infra.repository import FactorRepository
+    from ops.services.restage.restage import run_restage
+
+    cfg_path, config = test_config
+    _seed_src(config, "AlphaWbaiSnapDrop")
+    seed_factor("AlphaWbaiSnapDrop", FactorStatus.ACTIVE,
+                entered_at="2026-07-02T12:00:00")
+    repo = FactorRepository(config)
+    repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiSnapDrop", ret=30.0))
+    factor = repo.get("AlphaWbaiSnapDrop")
+    assert factor is not None and factor.snapshot is not None  # 前置:快照在
+
+    run_restage(_args(cfg_path, factor_name="AlphaWbaiSnapDrop"))
+
+    factor = repo.get("AlphaWbaiSnapDrop")
+    assert factor is not None
+    assert factor.state is not None and factor.state.status == FactorStatus.SUBMITTED
+    assert factor.snapshot is None  # 离库快照已 discard

@@ -1,7 +1,9 @@
 # 最简 CI(full-review 行动清单 #5):fast 测试套件必须绿才能合并。
 # 背景:三表重构后 fast suite 曾红 (10 failed) 三周无人察觉 —— 没有 CI,
-# 红测试落分支是无声的。PG 组 (marker: pg) 在 CI 里因 ops_test 不可达自动
-# skip;e2e (marker: slow) 默认排除。ruff/pyright(A1)与 import-linter
+# 红测试落分支是无声的。PG 组 (marker: pg) 自 I2(2026-07-11)起在 CI 里
+# **常跑**:postgres service 起 ops_test,per-session schema 隔离
+# (tests/conftest.py);"PG 可达"有独立断言步 —— service 挂了是红,不是
+# skip 假绿。e2e (marker: slow) 默认排除。ruff/pyright(A1)与 import-linter
 # (7/7 enforcing,ratchet 已退役)已进门禁。
 name: ci
 
@@ -14,6 +16,25 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ops
+          POSTGRES_PASSWORD: ops_test
+          POSTGRES_DB: ops_test
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd "pg_isready -U ops -d ops_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      OPS_TEST_PG_HOST: 127.0.0.1
+      OPS_TEST_PG_PORT: "15432"
+      OPS_TEST_PG_USER: ops
+      OPS_TEST_PG_PASSWORD: ops_test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -27,5 +48,12 @@ jobs:
         # 全部 7 份契约(C1/C2/C3/C5/C6/C7/C8)在 pyproject [tool.importlinter],
         # 红即挂。ratchet 基线阶段结束(2026-07-09 阶段 3:C2/C3 均清零)。
         run: uv run lint-imports
+      - name: Assert test PG reachable
+        # pg 组不可达时是 skip 不是 fail(本地无 PG 不红是特性)——CI 里必须
+        # 反过来:service 挂了要红,否则 pg 组 skip 又是假绿(I2 的初衷)。
+        run: >-
+          uv run python -c "import psycopg;
+          psycopg.connect('host=127.0.0.1 port=15432 dbname=ops_test
+          user=ops password=ops_test', connect_timeout=5).close()"
       - name: Fast test suite
         run: uv run pytest -m "not slow" -q
