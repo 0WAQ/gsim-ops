@@ -28,13 +28,19 @@ cd ~/gsim-ops
 git show 15b86de^:config.prod-legacy.yaml | sed -n 117,121p
 
 # 0b. JFS 卷现役钥(160;secret 会打码显示)
-juicefs config redis-sentinel://10.9.100.160:26380,10.9.100.150:26380,10.6.100.144:26380/mymaster/0 | head -30
+# ⚠ juicefs 1.3.1 不认 redis-sentinel:// scheme(阶段 0 首轮实测);用现役
+# systemd unit 同款 URL,meta 密码在 /etc/juicefs/alphalib-jfs.env(root-only):
+sudo grep META_PASSWORD /etc/juicefs/alphalib-jfs.env   # 取值,不进报告
+META_PASSWORD='<上一步取值>' juicefs config \
+  "redis://mymaster,10.9.100.160,10.9.100.150,10.6.100.144:26380/0" | head -30
 
 # 0c. 各机 rclone.conf / env 里现存的 MinIO 钥(160/150/144/147 各查一遍)
 grep -n "access_key_id" ~/.config/rclone/rclone.conf 2>/dev/null | sed -E 's/=.{4}/= xxxx/'
 sudo grep -rn "MINIO_ROOT_USER\|MINIO_ACCESS" /etc/default /etc/systemd/system 2>/dev/null | head
 
 # 0d. MinIO 服务端(145)的用户清单(mc alias 用现役 root 钥,按本机习惯配置)
+# ⚠ 160 上无 mc(阶段 0 首轮实测)——到 145(服务端)上找/装 mc,或
+#   从 MinIO 官方下载静态二进制放 ~/bin;admin 操作必须用 root 钥。
 mc alias set m145 http://10.9.100.145:39000 <当前root用户> <当前root密码>   # 命令本身不进报告
 mc admin user list m145
 mc ls m145                        # bucket 清单:预期 alphalib-juicefs + external-sync(+其它?记录)
@@ -88,7 +94,9 @@ echo probe | mc pipe m145new/alphalib-juicefs/__rotate_probe && mc rm m145new/al
 
 ```bash
 # 3a. 写入卷配置(metadata;此刻旧钥仍有效,运行中的挂载不受影响)
-juicefs config redis-sentinel://10.9.100.160:26380,10.9.100.150:26380,10.6.100.144:26380/mymaster/0 \
+# URL / META_PASSWORD 同 0b(redis://mymaster,... 形式,不是 redis-sentinel://)
+META_PASSWORD='<0b 同款>' juicefs config \
+  "redis://mymaster,10.9.100.160,10.9.100.150,10.6.100.144:26380/0" \
   --access-key NEW_AK --secret-key NEW_SK
 ```
 
