@@ -1,3 +1,3 @@
-from .info import run_info
+from .info import InfoData, collect_info
 
-__all__ = ["run_info"]
+__all__ = ["InfoData", "collect_info"]

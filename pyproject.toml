@@ -125,3 +125,14 @@ type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["ops.cli", "ops.services", "ops.core", "ops.utils"]
 forbidden_modules = ["psycopg", "psycopg_pool", "redis", "boto3"]
+
+[[tool.importlinter.contracts]]
+# 2026-07-11 展示层上收:结果渲染(rich Table/Tree/JSON)一律在 cli
+# (list/status/info 本批迁出,setup 是原示范件);services 只许经
+# utils.printer / utils.live_table 做**过程叙事**(banner/info/warn 执行日志、
+# check 的 Live 进度),不得直引 rich 自建渲染。core 同禁(领域层更没理由)。
+name = "C9 result rendering lives in cli (services/core must not import rich)"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["ops.services", "ops.core"]
+forbidden_modules = ["rich"]

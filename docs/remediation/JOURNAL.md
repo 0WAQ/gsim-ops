@@ -1341,3 +1341,31 @@ ops_test 零 t_* schema 残留、零表残留;锁命名空间三断言(跨命名
 缺省独立 / 同命名空间 FactorLocked)。**"测试须串行"纪律自此作废**
 (VERIFY-* 历史手册里的串行红线是当时事实,不回改)。业务代码改动仅
 lock.py 命名空间参数 + config.py 两个仅测试键,生产行为零变化。
+
+## 展示层上收:结果渲染归 cli,C9 契约钉住(2026-07-11)
+
+分支 `claude/display-lift`。setup 立的"渲染在 cli,services 零展示"样板
+推广到存量:三个查询命令(list/status/info)的 rich Table/Tree/JSON 渲染全部
+迁 `ops/cli/{list,status,info}.py`,services 只返回数据:
+
+- **list**:`list_factors(args) -> list[Factor]`(解析/下推/内存兜底不变);
+  `--filter-by` 错误从"服务里打印 + 返回 None"改为抛 `FilterError`
+  (逐条纯文本信息),cli 呈现(exit 0 旧行为保持)。`parse_filters` 签名
+  变更同步 test_pure(多错误一次性收集断言)。
+- **status**:`query_one` / `query_many` 两个数据函数,详情/表格渲染迁 cli;
+  info 孤儿(有 identity 无 state)的"需对账"提示逻辑照旧,只是搬了家。
+- **info**:`collect_info(args) -> InfoData | None`(Factor 聚合 + FactorPaths
+  + ScannedFactor 物理现场 + dump 日期区间),Tree 渲染迁 cli。
+
+**划线**:结果渲染(给人看的最终产物)≠ 过程叙事(banner/info/warn 执行
+日志)。12 个写命令经 `utils.printer` 的叙事**留在 services**——那是长操作
+的进度语义,上收要给全部写命令穿事件管道,零用户价值;check 的 LiveDriver
+(多进程编排耦合)同理不动。这条线用**新契约 C9** 钉死:services/core 不得
+直引 rich(printer/live_table 是仅有的 sanctioned 叙事通道),import-linter
+8/8 enforcing。
+
+**验证**:门禁 8/8 契约全绿 + fast suite 134 passed(本地 PG);端到端冒烟
+(本地 PG 种因子,`python -m ops.main` 真跑):list 表格/JSON、filter 错误
+路径(两条错误信息 + exit 0)、status 详情/列表、info Tree(happy path +
+not-found)输出全部符合旧版语义。业务行为唯一变化:filter 错误信息整行红
+(原先只有标签部分红)。
