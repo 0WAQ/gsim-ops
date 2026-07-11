@@ -24,7 +24,26 @@ DISCOVER 已实测 170 **无 NOPASSWD**,SSH 无 TTY。→ **必须 170 本机键
 迁移编排前置守卫在此前 DISCOVER 已满足:writeback 已排干(`staging=0`)、目标父目录
 `/nvme125` 在位、env+unit 在位。所以本机 TTY 上直接跑 `--migrate-mount` 应能过守卫。
 
-## 阻断 B:170 缺 PG 密码(runbook 未预期)⚠
+## 阻断 B:170 缺 PG 密码 —— 已解决(2026-07-11,scp 分发同款 150/144)✅
+
+用户批准后,从 160 `scp scripts/postgres/.env` → 170 同路径,`chmod 600`、属主 wbai、
+不进 git(`git check-ignore` 命中)、内容不贴。分发后 170 `ls -la`:
+`-rw------- 1 wbai wbai 65 ...`(与 160 一致)。
+
+复验 `~/.local/bin/ops setup --check`(cd ~/gsim-ops):**PG 两项转绿**,FAIL 7 → 5:
+
+```
+ ✔   Postgres 连接 + 三表                连接 + 三表在位
+ ✔   跨机因子锁往返                      跨机 advisory lock 往返正常
+```
+
+剩余 5 FAIL 全部是**未迁移的下游**:mount 本身 + src/pnl/feature/staging/dump/bcorr
+(均因 `/nvme125/alphalib` 尚未挂载而"缺失",迁移 + `setup` 补建后转绿)。
+完整复验原文见文末"步骤 2b"。
+
+### 下方为分发前的原始记录(保留)
+
+## 阻断 B(原始):170 缺 PG 密码(runbook 未预期)⚠
 
 `setup --check` 里两项 PG 相关检查 FAIL:
 
@@ -107,10 +126,36 @@ FAIL: 7  WARN: 2  已补建: 0  (共 14 项)
 > 的 FAIL 均因 `/nvme125/alphalib` 尚未挂载(迁移后经 `setup` 补建即绿);
 > `/mnt/storage/alphalib` WARN 迁移收尾会重指;PG 两项见阻断 B。
 
-### 步骤 3-5:未执行
+### 步骤 2b:PG 密码分发后复验 `ops setup --check`(FAIL 7 → 5)
 
-- 步骤 3 `--migrate-mount`:需本机 TTY(阻断 A),未跑。
-- 步骤 4/5 `setup` 补建 / 复检 / `ops list`:未跑;且被阻断 B 挡住,须先分发 PG 密码。
+```
+host: server-170  路径来源: hosts 声明  模式: check(只读)
+
+     check                               detail
+ ──────────────────────────────────────────────────────────────────────────────
+ ✔   hosts 声明命中                      hosts.server-170 命中,路径按声明解析
+ ✘   alphalib JFS 挂载                   JFS 卷 'alphalib' 挂在 /ext4/alphalib,
+                                         声明是 /nvme125/alphalib;跑 --migrate-mount 迁移
+ ✘   共享目录 (src/pnl/feature)          alpha_src: 缺失; alpha_pnl: 缺失; alpha_feature: 缺失
+ ✘   bcorr 分流池 (automated/manual)     pnl_automated: 缺失; pnl_manual: 缺失
+ ✘   staging 形态                        staging 软链缺失(应指 /nvme125/alphalib.local/staging)
+ ✘   alpha_dump 软链 → sidecar           alpha_dump 软链缺失(应指 /nvme125/alphalib.local/alpha_dump)
+ ⚠   /mnt/storage/alphalib 兼容软链      /mnt/storage/alphalib 软链缺失
+ ✔   权限组 alpha-core/alpha-data        alpha-core/alpha-data 在位
+ ✔   顶层目录权限模型                    顶层 owner/组/setgid 符合模型
+ ✔   Postgres 连接 + 三表                连接 + 三表在位          ← 转绿
+ ✔   跨机因子锁往返                      跨机 advisory lock 往返正常  ← 转绿
+ ✔   nio_data_path 数据                  在位
+ ⚠   dropbox 投递目录(submit 节点需要)   dropbox_path: /mnt/storage/dropbox
+ ✔   gsim 工具链(check 节点需要)         在位
+
+FAIL: 5  WARN: 2  已补建: 0  (共 14 项)
+=== exit: 1 ===
+```
+
+> 阻断 B 清除。剩 5 FAIL 全是 mount 未迁移的下游,待步骤 3-5(170 本机 TTY)。
+
+### 步骤 3-5:未执行(留 170 本机 TTY)
 
 ---
 
