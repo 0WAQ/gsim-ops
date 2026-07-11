@@ -1,4 +1,4 @@
-# bcorr 池存量鬼影对账 — 阶段 1 dry-run 结果
+# bcorr 池存量鬼影对账 — 阶段 1 dry-run + 阶段 2 apply 结果
 
 **执行**: server-160, 2026-07-11, 分支 `claude/ops-rotate-and-reconcile`
 **rev**: `6a3be56 ops: MinIO/Feishu 密钥轮换手册 + bcorr 池鬼影对账工具`
@@ -670,3 +670,49 @@ ACTIVE 缺池副本(approve 豁免属合法,只报告): 8
   [missing] AlphaYbai_0702_BETCAGRStd
 dry-run 结束(未删除任何文件;删除加 --apply)
 ```
+
+---
+
+## 阶段 2 · apply(判读通过 + 用户确认后执行)
+
+**执行**: server-160, 2026-07-11, 用户在 160 终端以 root 跑
+`sudo $(command -v uv) run python scripts/reconcile_bcorr_pools.py --apply`
+(本会话 sudo 无 TTY / 非 NOPASSWD,提权由用户在终端完成;输出留
+`/tmp/bcorr-reconcile-apply.txt`)。
+**rev**: `04708a6`(手册修正版)。
+
+### apply 结果
+
+| 项 | 值 |
+|---|---|
+| PG 因子记录 | 8419 |
+| 池副本 OK | 7433 |
+| 判定 ghost | 622 |
+| **实删** | **622 / 622** |
+| 删除失败 | **0** |
+
+`apply 结束: 删除 622/622` —— 全删,零失败。
+
+### 复验三条(全绿)
+
+```
+# 复验1: 再 dry-run 一遍(预期 ghost: 0)
+PG 因子记录: 8419
+池副本 OK: 7433
+鬼影 ghost: 0
+dry-run 结束(未删除任何文件;删除加 --apply)
+
+# 复验2: ls 已知实例(预期 No such file)
+$ ls /tank/vault/alphalib/pnl_manual/AlphaWbaiReversal
+ls: cannot access '/tank/vault/alphalib/pnl_manual/AlphaWbaiReversal': No such file or directory
+
+# 复验3: ops list Total(预期不变 —— 池副本不影响因子集)
+Total: 8252 factors
+```
+
+- ghost 从 622 → **0**,池副本 OK 保持 7433(未误删在库副本);
+- 已知实例 `AlphaWbaiReversal` 已消失;
+- `Total: 8252` 与阶段 1 一致,因子集未受影响。
+
+**收官**:bcorr 池存量鬼影(622)已清,两阶段流程闭合。`wrong-pool`(0)/ `missing`
+(8,approve 合法豁免)按红线只报告未处置,归未来 ops doctor。
