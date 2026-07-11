@@ -45,7 +45,7 @@ StateConflict 按跳过处理)。`run_*` 返回 `BatchResult`(done/skipped/faile
 
 ## 跨机一致性
 
-staging 在 JFS 共享挂载点,任意一台 ops 节点 clear 一次,所有节点立即看到。
+staging 是本机 sidecar(2026-07-11 校正:挂载点下的 staging 是软链落本地盘,不共享)—— **clear 只作用于本机 staging**,哪台机器的孤儿就得在哪台清。
 
 ---
 

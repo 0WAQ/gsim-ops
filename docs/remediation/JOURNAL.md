@@ -1193,3 +1193,15 @@ PR #7 合 main(merge `3119496`)。侧记:160 仓库根有未跟踪 `pgreadonlyse
 SSOT 表零 ⚠、7/7 契约 enforcing、Known Technical Debt 的 stub / metadata-I/O
 两项清零。挂账优先级不变:①MinIO/Feishu 密钥轮换(最紧急)②bcorr 池存量
 鬼影清理 ③中件三项(展示层上收 / ops doctor / I2 测试基建)。
+
+**部署事实校正:staging 是本机 sidecar,不共享(2026-07-11,用户指出 + 160/150
+实测)**:`ls -la` 两机一致 —— `alphalib/staging -> ../alphalib.local/staging`
+(软链,zfs 本机盘),与 alpha_dump 同款部署(2026-07-08 只记了 dump,漏了
+staging)。**真共享的只有 alpha_src / alpha_pnl / alpha_feature**。推论:check
+绑定 submit/restage 所在机器(staging 是唯一副本且本机);"三机并发 check 同一
+因子"的跨机锁原立项表述不成立(锁必要性不变:跨机撞的是共享 state/产物)。
+已修:根 CLAUDE.md(软链约定 + 锁理由)、config.yaml 两处注释、clear/check/
+restage 层文档、memory factor_lock 带更正注。scripts/juicefs-poc/README.md 305
+行一直是对的(文档漂移源头是 CLAUDE.md 侧)。**新挂账**:PG 状态不记因子躺在
+哪台机器的 staging(doctor 候选);此事实是"多机 submit/check 自动化"功能
+(讨论中)的设计前提。

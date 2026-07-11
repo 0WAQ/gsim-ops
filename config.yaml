@@ -1,8 +1,10 @@
 # ops 生产默认配置 (2026-06-05 JFS 上线起; `ops <cmd>` 不带 -c 即用本文件)。
 #
-# 把 alphalib 五条数据路径(alpha_src / alpha_dump / alpha_pnl / alpha_feature /
-# staging)指向 JuiceFS 挂载点 /tank/vault/alphalib,其它路径(dropbox / gsim /
-# /datasvc)保持本地。state/snapshot/info 三表在 server-160 Postgres。
+# alphalib 五条数据路径按同一挂载点引用,但共享程度不同(2026-07-11 校正,
+# ls -la 实测):alpha_src / alpha_pnl / alpha_feature 真在 JuiceFS(三机共享);
+# alpha_dump / staging 是挂载点下的**软链**,实体落本机 <挂载点>.local sidecar
+# (每机一份,不共享 —— 在哪台 submit 就得在哪台 check)。其它路径(dropbox /
+# gsim / /datasvc)本地。state/snapshot/info 三表在 server-160 Postgres。
 # (原头部自称 "PoC 不要拿来跑生产" 是文档谎言,2026-07-07 修正。)
 
 users:
@@ -30,7 +32,7 @@ path:
   checkpoint_path: ${workspace}/dropbox/checkpoint
   nio_data_path: /datasvc/data/cc_2025
 
-  # 以下五条 + recycle 全部指向 JuiceFS
+  # 以下五条 + recycle 同挂载点引用;dump/staging 经软链落本机 sidecar(见头注)
   alpha_src: ${alphalib_root}/alpha_src
   alpha_dump: ${alphalib_root}/alpha_dump
   alpha_pnl: ${alphalib_root}/alpha_pnl
