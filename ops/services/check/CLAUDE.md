@@ -79,6 +79,12 @@ Uses `ProcessPoolExecutor` (max 20 workers) for parallel factor checking.
 worker 里 `FactorRepository` 按需现构造(`check.py::_repo()`,不挂 self):fork 子进程
 继承的父进程 PG 池是死的,`get_pool` 按 (pid, conninfo) 去重让子进程拿自己的池。
 
+`checker/dumpscan.py`(2026-07-11 自 core/alpha/metadata.py 迁入):check 工作区
+alpha_dump 的扫描函数 `v2npy_files` / `last_v2npy_file`(compliance / checkpoint 共用;
+YYYY/MM 布局按时序,目录缺失返回空,不再裸吞 OSError —— 真错误冒泡进 unexpected 臂)。
+同批清理 results 空壳(checkpoint.py 删除,CheckpointChecker.check 返回 None;
+Status/Results 空壳类删除,`Result` 仅剩标记基类 + CompResult/CorrResult)。
+
 Checkers inherit from `Checker` ABC in `checker/base.py`(`check()` 必须实现 + `clean()` 默认 no-op 钩子,流水线对每个 stage 通过后统一调用)。Failures raise `CheckFail`; skippable issues raise `CheckSkip` —— **不带 stage 参数**,流水线捕获时归因。
 
 `CheckerPipeline.__init__` 收一个可选 `checkers: dict[str, Checker] | None`(依赖注入):不传时按 PIPELINE 表 new 真的 gsim-backed checker(生产行为不变),测试注入 fake checker 在指定 stage 抛 `CheckFail`/`CheckSkip`/`Exception` 来验路由,不碰 gsim。路由/自愈/锁的单测见 `tests/test_check_routing_json.py`(json 后端,CI 常跑)+ `tests/test_check_routing.py`(PG,含 pass→archive)+ `tests/test_check_scan.py`。

@@ -7,6 +7,7 @@ from ops.core.alpha.results.compliance import CompResult
 from ops.infra.config import Config
 
 from .base import Checker, CheckFail, CheckSkip
+from .dumpscan import v2npy_files
 
 
 class Position:
@@ -94,11 +95,11 @@ class ComplianceChecker(Checker):
         return Position(avg_long_pct, avg_short_pct, long_count, short_count, violations)
 
     def check(self, factor: AlphaMetadata) -> CompResult:
-        npy_files = factor.get_v2npy_files()
+        npy_files = v2npy_files(factor.alpha_dir)
         if not npy_files:
             raise CheckSkip("未找到 v2 版本的 npy 文件")
 
-        # 只校验最近 check_window 个交易日 (get_v2npy_files 已按时序排序)。
+        # 只校验最近 check_window 个交易日 (v2npy_files 已按时序排序)。
         # 早期数据不全的暖机天落在窗口外,天然被排除;不足 window 天用全部。
         window_files = npy_files[-self.check_window:]
 

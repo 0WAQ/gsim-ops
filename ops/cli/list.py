@@ -1,6 +1,6 @@
 import argparse
 
-from ops.cli.common import STATUS_CHOICES, add_config_arg
+from ops.cli.common import METRIC_SORT_KEYS, STATUS_CHOICES, add_config_arg
 from ops.services.list import run_list
 from ops.utils.utils import LowerAction
 
@@ -58,13 +58,13 @@ Example:
         type=str,
         help="Filter conditions separated by commas (e.g., tables=ashareeodprices,ret>30,shrp>1.5)",
     )
-    # choices 与 list.py 的 _SORTABLE_KEYS 对齐:原先多一个 "delay",接受后
-    # 被服务层静默忽略(full-review 第三部分 S8)。delay 若要可排序,须同时
-    # 进 _SORTABLE_KEYS 与 snapshot _METRIC_EXPR。
+    # choices 从 metric 注册表派生(SSOT S8,core/metrics.SNAPSHOT_METRICS):
+    # 原先手抄键列表,曾多一个 "delay",接受后被服务层静默忽略。delay 若要
+    # 可排序,在注册表加一行(snapshot 表须有对应列)。
     parser.add_argument(
         "--sort-by",
         type=str,
-        choices=["ret", "shrp", "mdd", "tvr", "fitness", "bcorr"],
+        choices=list(METRIC_SORT_KEYS),
         help="Sort by field (descending)",
     )
     parser.add_argument(
