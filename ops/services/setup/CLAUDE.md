@@ -29,6 +29,15 @@
 
 JFS 首次接入不归本命令(join.sh);数据对账(盘 ↔ PG)留给未来 ops doctor。
 
+**170 迁移实战回填的三个坑(2026-07-11,均已修)**:
+1. uv tool 二进制找 config 靠 cwd —— `$HOME` 下裸跑报 FileNotFoundError,须
+   `cd <repo>` 或设 OPS_CONFIG;
+2. 残留旧机制的 OPS_ALPHALIB_ROOT 会静默压过 hosts 声明(env 优先是刻意逃生
+   口)→ setup 表头/迁移计划现在**显性打印 ⚠ env 覆盖提示**(同值不告警);
+3. sudo 自提权判据(alpha_src 存在且 root-owned)在迁移场景失效(声明位置迁移
+   前不存在)→ migrate 入口显式查 euid,非 root 直接指引 `sudo ops setup
+   --migrate-mount`。
+
 ## 结构
 
 - `checks.py` —— **项目注册表(部署应然形态的 SSOT)**:`SetupCheck(check_id,

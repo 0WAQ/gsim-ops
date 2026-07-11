@@ -174,3 +174,45 @@ FAIL: 5  WARN: 2  已补建: 0  (共 14 项)
    逐行输出回填本文件"步骤 3-5"节。
 3. **红线不变**:`/nvme125` 上已有 alpha_dump/alpha_pnl/checkpoint/datasvc 四目录不碰;
    `/ext4` 旧址(空挂载点 / 旧 cache / 搬空 sidecar)judged 后再清。任一步中止/回滚立即停。
+
+---
+
+## 步骤 3-5 · 迁移正片(2026-07-11,用户 170 本机 TTY 执行,输出由用户回传)
+
+途中踩两个坑,均当场修复入分支(判读方记录):
+- 首跑迁移计划显示 `/ext4 → /ext4`:交互 shell 残留旧机制 `OPS_ALPHALIB_ROOT`
+  静默压过 hosts 声明(SSH 非交互检查看不到它)。unset + 删 profile 行解决;
+  代码侧 env 覆盖显性化(e20b4a5)。
+- 二跑 `PermissionError /etc/...bak`:sudo 自提权判据(alpha_src 存在且
+  root-owned)对迁移场景失效(目标位置尚不存在)→ 普通用户直跑,崩在备份
+  第一笔写,**零改动**。`sudo` 前缀重跑解决;代码侧 migrate 入口显式查 root
+  (21347fa)。
+
+### 步骤 3:`sudo ops setup --migrate-mount` —— 全程无回滚
+
+```
+迁移计划: /ext4/alphalib → /nvme125/alphalib(卷 alphalib;cache → /nvme125/jfs-cache;sidecar → /nvme125/alphalib.local)
+备份: juicefs-poc.env.ops-migrate-bak / juicefs-alphalib.service.ops-migrate-bak
+已停 juicefs-alphalib(三级 umount fallback 由 unit ExecStop 负责)
+已改写 /etc/juicefs-poc.env + juicefs-alphalib.service
+sidecar 存量搬运 /ext4/alphalib.local → /nvme125/alphalib.local(3 项)
+已挂载 /nvme125/alphalib(fuse.juicefs)且共享数据可见
+/mnt/storage/alphalib → /nvme125/alphalib
+旧址保留待人工清理: /ext4/alphalib、/ext4/jfs-cache、/ext4/alphalib.local;备份验证后可删
+迁移完成
+```
+
+### 步骤 4:`ops setup`(自提权)→ `ops setup --check`
+
+补建 1 项(顶层权限)后:**FAIL 0 / WARN 1**(dropbox —— worker 机无投递职责,
+角色性 WARN,符合预期)。--check 复验同样 **FAIL 0 / WARN 1**,14 项中 12 ✔。
+mount 项:`/nvme125/alphalib (fuse.juicefs)` ✔。
+
+### 步骤 5:`ops list`
+
+(待补:清理指令中一并执行,预期 Total: 8252。)
+
+## 判读(判读方):迁移成功,声明式挂载点迁移端到端闭环
+
+改声明一行 → `--migrate-mount` → `setup` → `--check` FAIL 0。/nvme125 已有
+四 dataset 未受影响(红线);/ext4 旧址待清理指令。
