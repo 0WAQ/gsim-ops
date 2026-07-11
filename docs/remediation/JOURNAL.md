@@ -1201,7 +1201,9 @@ staging)。**真共享的只有 alpha_src / alpha_pnl / alpha_feature**。推论
 绑定 submit/restage 所在机器(staging 是唯一副本且本机);"三机并发 check 同一
 因子"的跨机锁原立项表述不成立(锁必要性不变:跨机撞的是共享 state/产物)。
 已修:根 CLAUDE.md(软链约定 + 锁理由)、config.yaml 两处注释、clear/check/
-restage 层文档、memory factor_lock 带更正注。scripts/juicefs-poc/README.md 305
+restage 层文档、memory factor_lock 带更正注。补充确认(同日):bcorr 分流池
+pnl_automated/pnl_manual 是挂载点下实目录 → **共享**(用户确认;bcorr 池
+全局一致的设计必然)。scripts/juicefs-poc/README.md 305
 行一直是对的(文档漂移源头是 CLAUDE.md 侧)。**新挂账**:PG 状态不记因子躺在
 哪台机器的 staging(doctor 候选);此事实是"多机 submit/check 自动化"功能
 (讨论中)的设计前提。

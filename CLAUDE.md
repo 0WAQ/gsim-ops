@@ -168,9 +168,13 @@ Located at `/usr/local/gsim/`. The core backtesting engine that ops interacts wi
 - `alphalib/alpha_dump` **和 `alphalib/staging` 都是软链**,实体是
   `<挂载点>.local/alpha_dump|staging`(本地盘 sidecar,每机一份,**不进 JFS
   不共享**);config.yaml 按 `${alphalib_root}/xxx` 引用,经软链落到本地盘。
-  **⇒ 真共享的只有 alpha_src / alpha_pnl / alpha_feature 三条**;staging 本机
-  意味着**在哪台机器 submit(或 restage),就必须在同一台机器 check** ——
-  PG 状态里不记因子躺在哪台机的 staging(挂账,见 doctor 候选)。
+  **⇒ 五条数据路径里真共享的只有 alpha_src / alpha_pnl / alpha_feature**;
+  staging 本机意味着**在哪台机器 submit(或 restage),就必须在同一台机器
+  check** —— PG 状态里不记因子躺在哪台机的 staging(挂账,见 doctor 候选)。
+- bcorr 分流池 `pnl_automated/` / `pnl_manual/` 是挂载点下**实目录(非软链)
+  → JFS 共享**(2026-07-11 用户确认;设计上也必须如此 —— 对比池须全局一致)。
+  `pnl_alphalib` 是 `alpha_pnl` 的别名(同一目录);`pnl_prod_path` 在
+  gsim_home 下,本机。
 
 **⚠ alpha_pnl/<name> 是单文件,不是目录**。删除用 `Path.unlink()`,不要用 `shutil.rmtree()`(`Errno 20: Not a directory`)。alpha_feature 同理是单文件。只有 alpha_src / alpha_dump 是目录。
 
