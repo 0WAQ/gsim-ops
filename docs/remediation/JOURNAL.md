@@ -1207,3 +1207,36 @@ pnl_automated/pnl_manual 是挂载点下实目录 → **共享**(用户确认;bc
 行一直是对的(文档漂移源头是 CLAUDE.md 侧)。**新挂账**:PG 状态不记因子躺在
 哪台机器的 staging(doctor 候选);此事实是"多机 submit/check 自动化"功能
 (讨论中)的设计前提。
+
+## U9 · ops setup:声明式管理本机 alphalib 部署(2026-07-11)
+
+分支 `claude/ops-setup`。用户需求原话:"管理 alphalib 的部署非常麻烦",要
+uv 式体验 —— 声明在配置,一条命令本机就绪,ops 开箱即用。计划经 plan mode
+批准(体检 + 引导都要;JFS 挂载不纳入;多机都可用)。
+
+**hosts 声明**(config.yaml 新块 + `Config._resolve_vars` 合并层):按本机
+hostname 精确匹配覆盖 vars 同名项,优先级 OPS_* env > hosts > vars;四机
+(160/150/144/170)挂载点差异进声明,零环境变量可用。命中情况回填
+config.hostname / host_declared。
+
+**`ops setup`**:缺省幂等补建(sidecar 目录 / staging+dump 软链 / 池目录 /
+兼容软链 / 权限组 groupadd / 顶层权限对齐照 02-layout.sh 模型),`--check`
+只读体检(✔/✘/⚠ 清单,FAIL→退出码 1;--check 经 _CheckAction 撤销写声明,
+不为看清单 sudo)。**补建铁律:只创建缺失,绝不改动已存在的东西**(软链指错 /
+gid 被占只报告)。14 项注册表(`services/setup/checks.py`,部署应然形态的
+SSOT;`STAGING_IS_SHARED` 常量与共享 staging 部署同批翻转)。FAIL = 存储部署
+错误(任何节点必绿),WARN = 角色相关(worker 无 dropbox / 纯投递机无 gsim)。
+
+**分层**:引擎零展示(services 返回 CheckResult),渲染在 cli(展示层上收
+示范件);cli 经 common.load_config 接缝拿 Config(C2);PG 探测下沉
+`infra/pg.probe`(5s 有界直连,C8;池注册表不被探测污染 + 不可达秒级失败,
+本容器实测原先池路径挂起 30s+)。S16 写命令集 +setup(11 个)。
+
+**边界**:JFS 挂载/systemd/redis 密码归 join.sh;PG 密码文件只检查不分发;
+数据对账留给未来 ops doctor("doctor" 名字有意不占用)。
+
+测试 +9(引擎 5:应然全绿/补建幂等/--check 零写/指错软链不动/host-declared
+三态;Config 合并层 2;GROUPS 清空防容器 groupadd 副作用)。门禁:7/7 契约、
+ruff、pyright 0、fast suite 60 passed;本容器冒烟 `setup --check` 全表渲染 +
+exit 1(无 JFS 环境的预期红)。**待 160 验证:`ops setup --check` 应全绿 ——
+"声明与生产一致"的实证。**

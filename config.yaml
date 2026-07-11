@@ -17,7 +17,16 @@ vars:
   gsim_home: /usr/local/gsim
   storage: /mnt/storage
   workspace: /home/wbai/alpha
-  alphalib_root: /tank/vault/alphalib   # JuiceFS 挂载点
+  alphalib_root: /tank/vault/alphalib   # JuiceFS 挂载点(hosts 未命中时的缺省)
+
+# 每台机器的差异声明(2026-07-11,ops setup 配套):按本机 hostname 精确匹配,
+# 覆盖 vars 同名项。优先级 OPS_* 环境变量 > hosts > vars。命中后同一份
+# config 四机零环境变量可用;`ops setup --check` 会报告命中情况。
+hosts:
+  server-160: { alphalib_root: /tank/vault/alphalib }
+  server-150: { alphalib_root: /tank/vault/alphalib }
+  intel-workstation-144: { alphalib_root: /storage/vault/alphalib }  # hostname 部署时校准
+  server-170: { alphalib_root: /ext4/alphalib }                      # hostname 部署时校准
 
 # 路径配置
 path:

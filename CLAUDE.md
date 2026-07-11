@@ -64,6 +64,8 @@ uv run ops cancel -u wbai -y         # 批量,跳过确认
 uv run ops clear AlphaXxx            # 清 staging 孤儿(state 无 record 的目录)
 uv run ops clear                     # 扫全部孤儿
 uv run ops clear -u lhw -y           # 按 author 推断过滤,跳过确认
+uv run ops setup                     # 拉平本机 alphalib 部署(幂等补建缺失目录/软链/权限组)
+uv run ops setup --check             # 只读体检:✔/✘/⚠ 清单 + 退出码(FAIL→1)
 uv run ops combo run <dir> --start 20250102 --end 20251231          # combo 端到端代测 (predict+backtest)
 uv run ops combo run <dir> --start 20241210 --end 20241231 --predict-start 20241201 --stats simple  # 留 warmup, 单 stats
 ```
@@ -105,6 +107,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
+| `setup` | 声明式管理本机 alphalib 部署:hosts 块按 hostname 匹配挂载点,缺省幂等补建(目录/软链/权限组),`--check` 只读体检。JFS 挂载本身归 join.sh | `ops/cli/setup.py` + `ops/services/setup/` |
 
 Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwrite`), `recheck`(改名 `restage`), `health`(2026-07-07 Wave 2 退役: --fix 写的是没人读的僵尸表;对账职能归未来 ops doctor), `sync`(2026-07-07 Wave 1 退役: S3 模型已被 JFS 取代且回退配置早已不可用), `refresh`(2026-07-06 删除 —— metrics/datasources/bcorr 改为入库时不可变快照,不再支持重算;需最新表现须重跑 backtest)。
 
