@@ -1290,3 +1290,17 @@ ops setup 工程(v1 + hosts 声明 + migrate-mount)经 PR #8 合 main
   restage/check 层文档)在分支上按共享后事实改写 —— **main 在窗口执行前保持
   旧事实,分支合并即翻转**(应然与部署同批纪律)。
 **待:窗口执行阶段 1-2 + 报告 → 判读 → 合 main → 三机滚存。**
+
+**U11 执行收官(2026-07-11)**:共享 staging 部署全绿 —— 阶段 1 切换(共享软链
+删除一次全局生效、setup 补建实目录 root:alpha-core 2750、**167 个存量 submitted
+三机零丢失零冲突搬入共享目录**、四机真因子探针 + fuseblk 一致);阶段 2 队列
+语义端到端闭环(160 submit → **170 首次跨机 check 7 stage 全过** → 任意机看
+active;dump 落消费机 sidecar 印证两面模型;160 异机 restage → 170 二次 check
+回环;rm 零残留、Total 8252)。执行者超手册项:真因子探针、存量 diff 校验;
+用户窗口内决策 167 backlog 全量搬迁。170 现已直连 GitHub(MIGRATE-170 时的
+出口限制已解)。**多机 submit / 170 集中消费自此生产可用**(消费节奏 cron/
+watch 后议)。
+
+**doctor backlog +1(跨机 dump sidecar 回收)**:rm/purge 只作用本机 dump
+软链侧,消费机 sidecar 的 dump 实体清不到(本次 170 手工清)—— 共享 staging
+架构下的新对账面:PG 不记 dump 实体在哪台机,需 doctor 跨机盘 ↔ PG 对账。
