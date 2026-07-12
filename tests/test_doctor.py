@@ -134,8 +134,20 @@ def test_info_orphan_routing():
     assert all(f.severity == FAIL and not f.fixable for f in findings)
     bare = next(f for f in findings if f.name == "AlphaBare")
     withsrc = next(f for f in findings if f.name == "AlphaWithSrc")
-    assert bare.action == "ops rm AlphaBare -y"        # 无产物 → 可贴命令
+    # 无产物 → 可贴命令;不带 -y(rm 自己的交互确认留作最后人闸)
+    assert bare.action == "ops rm AlphaBare"
     assert "人工判读" in withsrc.action                 # 有产物 → 人工
+
+
+def test_info_orphan_blind_area_never_suggests_rm():
+    """盘面区不可读时"看不见产物"≠"没有产物"—— 绝不生成删除转介
+    (对抗评审 2026-07-12:盲区下的 ops rm 转介会经人手级联删 alpha_src)。"""
+    inv = _inv(factors=[_factor("AlphaMaybe")])       # info 孤儿,盘面"看不见"
+    inv.areas["alpha_src"].error = "PermissionError: [Errno 13]"
+    findings = _scan("info-orphan", inv)
+    action = findings[0].action
+    assert "ops rm" not in action
+    assert "不可读" in action and "src" in action
 
 
 # ----------------------------------------------------------------- src-drift
@@ -159,6 +171,23 @@ def test_src_drift_kinds():
     assert all(not f.fixable for f in findings)   # v1 铁律:alpha_src 零删除
     assert next(f for f in findings if f.kind == "lib-missing").severity == FAIL
     assert next(f for f in findings if f.kind == "src-orphan").severity == WARN
+
+
+def test_src_drift_crossreferences_staging():
+    """recall 是 move:restage 崩在 transition 前,唯一副本在 staging ——
+    报 lib-missing-staged 指向 staging,勿指去 dropbox 反查(对抗评审)。
+    staging 区不可读时回退 lib-missing(不敢断言副本在)。"""
+    inv = _inv(
+        factors=[_factor("AlphaStuck", FactorStatus.ACTIVE)],
+        staging=[Entry("AlphaStuck", is_dir=True)],
+    )
+    findings = _scan("src-drift", inv)
+    assert _kinds(findings) == {("AlphaStuck", "lib-missing-staged")}
+    assert findings[0].severity == WARN and "staging" in findings[0].action
+
+    inv.areas["staging"].error = "PermissionError"
+    findings = _scan("src-drift", inv)
+    assert _kinds(findings) == {("AlphaStuck", "lib-missing")}   # 盲区回退
 
 
 # ------------------------------------------------------------- staging-drift
@@ -187,11 +216,13 @@ def test_staging_drift_kinds():
 def test_artifact_orphan_kinds():
     inv = _inv(
         factors=[_factor("AlphaKnown", FactorStatus.ACTIVE)],
-        alpha_pnl=["AlphaKnown", "AlphaGhostPnl"],
+        alpha_pnl=["AlphaKnown", "AlphaGhostPnl",
+                   Entry("AlphaDirPnl", is_dir=True)],
         alpha_feature=[
             "AlphaKnown.v2.npy",
             "AlphaGhostFeat.v1.npy",
             "weird.bin",
+            Entry("somedir", is_dir=True),
             Entry(".AlphaOld.v2.npy.tmp", is_dir=False, mtime=NOW - 2 * DAY),
             Entry(".AlphaFresh.v2.npy.tmp", is_dir=False, mtime=NOW - 3600),
         ],
@@ -202,6 +233,9 @@ def test_artifact_orphan_kinds():
     assert ("AlphaGhostFeat", "feature-orphan") in kinds
     assert ("weird.bin", "alien") in kinds
     assert ("AlphaOld", "pack-tmp") in kinds
+    # 目录形态不静默吞(布局 SSOT:pnl/feature 是单文件;对抗评审)
+    assert ("AlphaDirPnl", "alien") in kinds
+    assert ("somedir", "alien") in kinds
     # 新鲜 tmp(在跑的 pack)不报;正式 npy / pnl 孤儿 v1 一律不可修
     assert not any(f.name == "AlphaFresh" for f in findings)
     assert not any(f.fixable for f in findings if f.kind != "pack-tmp")
@@ -221,6 +255,21 @@ def test_dump_orphan_scan():
     findings = _scan("dump-orphan", inv)
     assert _kinds(findings) == {("AlphaGone", "orphan")}
     assert findings[0].fixable
+
+
+def test_dump_orphan_misconfig_tripwire():
+    """alpha_dump 指错一级 → 扫到的是 alphalib 根,条目撞库区名 → 整族弃权
+    零发现,绝不把 alpha_feature/双池判成 fixable 孤儿(对抗评审 major)。"""
+    import pytest as _pytest
+
+    from ops.services.doctor.findings import FamilySkip
+
+    inv = _inv(dump_local=[Entry("alpha_src", is_dir=True),
+                           Entry("alpha_feature", is_dir=True),
+                           Entry("pnl_automated", is_dir=True),
+                           Entry("AlphaReal", is_dir=True)])
+    with _pytest.raises(FamilySkip):
+        _scan("dump-orphan", inv)
 
 
 # ------------------------------------------------------- 注册表约束 + 记账

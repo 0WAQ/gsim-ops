@@ -1399,3 +1399,23 @@ CLI:缺省纯只读零 sudo(不 mark_write);--fix 经 _FixAction 声明写性,
 **测试**:test_doctor.py 11 用例(判定纯函数表驱动,零 I/O)+
 test_doctor_fix.py 10 用例(PG 组:邻居不碰断言/幂等双跑/TOCTOU 翻状态拒删/
 锁竞争跳过/ENOENT 记 vanished/info 孤儿从删除集剔除/confirm 拒绝零动作)。
+
+**doctor v1 对抗评审(2026-07-12,合入前)**:三镜头(误删/竞态/语义)×
+逐条对抗复核,6 确认 0 误报,全部当批修复:
+- ①(major)dump-orphan 路径闸对 config 错配自引用空转 —— alpha_dump 指错
+  一级时 allowed_roots 与扫描源同键派生、白名单必然包含,禁区名单又缺
+  feature/双池,root 可 rmtree 全库 feature + bcorr 池。修:guards 加**等值型
+  禁区**(目标绝不许是/包含任何 config 声明数据根)+ scan 加**错配绊线**
+  (dump 区出现库区名条目 → FamilySkip 整族弃权);
+- ②(major)backfill 是全库唯一无锁 register 方,击穿五道闸 TOCTOU 防线
+  (重验通过 → 删除的窗口里把因子登记 ACTIVE)。修:backfill 逐因子包
+  factor_lock(与其余写命令对齐,repository.register 的文档契约自此为真);
+- ③(major)info-orphan 在盘面区不可读时把"看不见"当"没有",转介
+  `ops rm -y`。修:盲区一律"人工判读(区不可读)"臂 + 转介去掉 -y
+  (rm 自身确认留作最后人闸);
+- ④(minor)json 模式下 input() 提示污染 stdout JSON → console.input(走
+  stderr);⑤(minor)pnl/feature 下目录形态被静默吞 → 报 alien(布局 SSOT:
+  单文件);⑥(minor)lib-missing 不交叉 staging —— crash 中断的 restage
+  (recall 是 move)副本就在 staging 却被指去 dropbox 反查 → 新 kind
+  lib-missing-staged(WARN,指向 staging)。
+测试 21 → 27 用例(绊线/等值闸/backfill 锁/盲区/staged/目录 alien 各钉一枚)。

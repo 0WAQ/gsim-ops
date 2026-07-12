@@ -77,16 +77,33 @@ def _execute_locked(finding: Finding, fixer: Fixer, config, repo) -> tuple[str, 
         repo.discard_snapshot(finding.name)
         return FIXED, ""
 
-    # 4. 路径闸:现场重拼 + realpath 包含(白名单)+ 禁区双保险
+    # 4. 路径闸:现场重拼 + realpath 包含(白名单)+ 双层禁区
     target = Path(fixer.resolve(finding, config))
     real = target.parent.resolve() / target.name   # leaf 不 resolve:软链目标本身要可判形态
     allowed = tuple(Path(r).resolve() for r in fixer.allowed_roots(config))
     if not allowed or not _within(real, allowed):
         return BLOCKED, f"目标 {real} 不在允许根 {tuple(map(str, allowed))} 内"
+    # 禁区 a(包含型):alpha_src/alpha_pnl/staging 整树绝不可入 —— 合法 fixer
+    # 的允许根不含它们,config 配错也拦。
     forbidden = tuple(p.resolve() for p in
                       (config.alpha_src, config.alpha_pnl, config.staging))
     if _within(real, forbidden):
         return BLOCKED, f"目标 {real} 落在禁区(alpha_src/alpha_pnl/staging)"
+    # 禁区 b(等值型,对抗评审 2026-07-12):目标绝不许**就是**(或包含)任何
+    # config 声明的数据根 —— 合法目标永远在允许根的下一级。包含型放不进
+    # feature/双池(pack-tmp/pool-ghost 的合法目标就在其下),等值型没有此
+    # 冲突,专拦"allowed_roots 与扫描源同一 config 键派生"时的错配自引用
+    # (如 alpha_dump 指错一级,白名单必然包含目标,唯此闸能拦)。
+    declared = []
+    for attr in ("alpha_src", "alpha_pnl", "staging", "alpha_feature",
+                 "alpha_dump", "pnl_automated", "pnl_manual", "dropbox_path",
+                 "pnl_alphalib", "pnl_prod_path"):
+        p = getattr(config, attr, None)
+        if p:
+            declared.append(Path(p).resolve())
+    if any(real == d or real in d.parents for d in declared):
+        return BLOCKED, (f"目标 {real} 是/包含某个 config 声明的数据根"
+                         "(疑似 config 错配,拒绝)")
 
     # 3. ACTIVE 绝缘(形状豁免:点开头 .tmp 残渣不是任何消费物)
     if (factor is not None and factor.state is not None

@@ -105,7 +105,10 @@ def run_doctor_cli(args):
         if args.yes:
             console.print("  [dim](-y 已跳过交互确认)[/]")
             return True
-        answer = input(f"确认修复 {result.family_id}? [y/N] ").strip().lower()
+        # console.input 而非裸 input():json 模式下提示走 stderr,不污染
+        # stdout 的 JSON 文档(对抗评审 2026-07-12)
+        answer = console.input(f"确认修复 {result.family_id}? [y/N] ",
+                               markup=False).strip().lower()
         return answer == "y"
 
     try:

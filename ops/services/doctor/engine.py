@@ -19,7 +19,7 @@ from ops.utils.log import logger
 
 from . import guards
 from .checks import FAMILIES, DoctorFamily
-from .findings import Area, Entry, FamilyResult, Inventory
+from .findings import Area, Entry, FamilyResult, FamilySkip, Inventory
 
 
 class DoctorUnavailable(RuntimeError):
@@ -101,6 +101,11 @@ def run_doctor(config, *, families: list[str] | None = None,
         try:
             fr.population = family.population(inv)
             fr.findings = family.scan(inv)
+        except FamilySkip as e:
+            # scan 主动弃权(如疑似 config 错配)—— 零发现零动作
+            fr.skip_reason = str(e)
+            results.append(fr)
+            continue
         except Exception as e:  # noqa: BLE001 — 单族崩溃不拖垮整份报告
             logger.warning("doctor family {} crashed: {}", family.family_id, e)
             fr.skip_reason = f"检查崩溃: {e}"

@@ -222,3 +222,73 @@ def test_fix_log_outcomes_are_accounted(test_config, seed_factor):
     assert r.fix_log[0][1] in (VANISHED, FIXED)   # 抢删后:重验或 unlink 见 ENOENT
     assert r.fixed == 0 or not ghost.exists()
     assert r.residual("fail") == 0                # 无论谁删的,漂移已消
+
+
+def test_misconfigured_dump_root_deletes_nothing(test_config, seed_factor):
+    """对抗评审 major:alpha_dump 指错到 alphalib 根 → 整族 skip 零动作,
+    alpha_feature/双池一根汗毛不掉(等值闸 + 绊线双防)。"""
+    _, config = test_config
+    (config.alpha_feature / "AlphaGood.v2.npy").write_text("x")
+    (config.pnl_manual / "AlphaGood").write_text("p")
+    config.alpha_dump = config.alpha_src.parent      # 模拟 config 少写一级
+
+    _, results = run_doctor(config, fix=("dump-orphan",), confirm=YES)
+
+    r = _result(results, "dump-orphan")
+    assert r.skip_reason and "疑似" in r.skip_reason
+    assert r.fixed == 0 and not r.findings
+    assert (config.alpha_feature / "AlphaGood.v2.npy").exists()
+    assert (config.pnl_manual / "AlphaGood").exists()
+    assert config.alpha_src.exists() and config.staging.exists()
+
+
+def test_guards_block_declared_root_targets(test_config, seed_factor):
+    """等值闸单点:哪怕判定/白名单都放行,目标是 config 声明的数据根本身
+    → BLOCKED(绊线拦不住的 sidecar 软链错指形态由此闸兜底)。"""
+    from ops.infra.repository import FactorRepository
+    from ops.services.doctor import guards
+    from ops.services.doctor.checks import Fixer
+    from ops.services.doctor.findings import BLOCKED, Finding, FixPlan
+
+    _, config = test_config
+    fixer = Fixer(
+        plan=FixPlan(action="rmtree", target="t", keeps="k"),
+        resolve=lambda finding, cfg: cfg.pnl_manual,          # 目标=声明根本身
+        recheck=lambda finding, factor: True,
+        allowed_roots=lambda cfg: (cfg.pnl_manual.parent,),   # 白名单故意放行
+    )
+    finding = Finding("pnl_manual", "dump-orphan", "orphan", "warn", "r",
+                      fixable=True)
+    outcome, err = guards.execute(finding, fixer, config,
+                                  FactorRepository(config))
+    assert outcome == BLOCKED and "数据根" in err
+    assert config.pnl_manual.exists()
+
+
+def test_backfill_holds_factor_lock(test_config, seed_factor):
+    """对抗评审 major:backfill 原是全库唯一无锁状态写入方(击穿 doctor
+    TOCTOU 防线)。现在:锁被持有 → 跳过不 register;锁放开 → 正常补录。"""
+    from types import SimpleNamespace
+
+    from ops.core.factormeta import FactorMeta
+    from ops.infra.lock import factor_lock
+    from ops.infra.repository import FactorRepository
+    from ops.services.backfill.backfill import run_backfill
+
+    cfg_path, config = test_config
+    d = config.alpha_src / "AlphaWbaiLegacy"
+    d.mkdir(parents=True)
+    FactorMeta(name="AlphaWbaiLegacy", author="wbai", birthday=20240101,
+               universe="all", category="misc", delay=1, backdays=30,
+               dump_alpha=True, has_intraday_curve=False).save(d / "meta.json")
+    args = SimpleNamespace(config_path=cfg_path, dry_run=False)
+    repo = FactorRepository(config)
+
+    with factor_lock("AlphaWbaiLegacy", config):
+        run_backfill(args)
+    assert repo.get("AlphaWbaiLegacy") is None       # 锁内:跳过,零写
+
+    run_backfill(args)
+    factor = repo.get("AlphaWbaiLegacy")             # 锁放开:正常补录 ACTIVE
+    assert factor is not None and factor.state is not None
+    assert factor.state.status == FactorStatus.ACTIVE

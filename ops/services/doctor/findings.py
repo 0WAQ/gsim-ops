@@ -12,6 +12,11 @@ from pathlib import Path
 
 FAIL, WARN = "fail", "warn"
 
+
+class FamilySkip(RuntimeError):
+    """scan 主动放弃整族(如疑似 config 错配)—— engine 记 skip_reason,
+    绝不产出任何 fixable finding。"""
+
 # fix 执行结局(guards.execute 返回;记账进 FamilyResult)
 FIXED, LOCKED, VANISHED, BLOCKED, ERROR = (
     "fixed", "locked", "vanished", "blocked", "error")

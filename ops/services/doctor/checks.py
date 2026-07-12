@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 from ops.core.state import FactorStatus
 
-from .findings import FAIL, WARN, Finding, FixPlan, Inventory
+from .findings import FAIL, WARN, FamilySkip, Finding, FixPlan, Inventory
 
 # pack 原子写残渣:.<name>.v2.npy.tmp(pack.py `.{target.name}.tmp`);
 # 超过该龄期仍在 = worker 崩溃遗留(在跑的 pack 不会留这么久),INCIDENT-144。
@@ -193,23 +193,24 @@ _SNAPSHOT_FIXER = Fixer(
 
 def _scan_info_orphan(inv: Inventory) -> list[Finding]:
     out: list[Finding] = []
-    src = inv.areas.get("alpha_src")
-    staging = inv.areas.get("staging")
-    pnl = inv.areas.get("alpha_pnl")
+    lookup = [("src", inv.areas.get("alpha_src")),
+              ("staging", inv.areas.get("staging")),
+              ("pnl", inv.areas.get("alpha_pnl"))]
+    # 盲区(对抗评审 2026-07-12):区不可读时"看不见产物"≠"没有产物",
+    # 绝不能在盲区下生成删除转介 —— rm 会连 alpha_src 一起级联删。
+    blind = [label for label, a in lookup if a is None or a.error]
     for name, x in sorted(inv.factors.items()):
         if x.state is not None:
             continue
-        spots = []
-        if src and not src.error and name in src.names:
-            spots.append("src")
-        if staging and not staging.error and name in staging.names:
-            spots.append("staging")
-        if pnl and not pnl.error and name in pnl.names:
-            spots.append("pnl")
+        spots = [label for label, a in lookup
+                 if a is not None and not a.error and name in a.names]
         if spots:
             action = f"人工判读(盘面有产物: {'/'.join(spots)})"
+        elif blind:
+            action = f"人工判读(盘面区不可读,无法确认无产物: {'/'.join(blind)})"
         else:
-            action = f"ops rm {name} -y"
+            # 不带 -y:ops rm 自己的交互确认(打印完整删除清单)留作最后人闸
+            action = f"ops rm {name}"
         # register 已事务化(info+state 单事务)—— 新增孤儿 = 写路径 bug 信号
         out.append(Finding(name, "info-orphan", "orphan", FAIL,
                            "factor_info 有行、factor_state 无行", action=action))
@@ -224,10 +225,23 @@ _IN_LIB = (FactorStatus.ACTIVE, FactorStatus.REJECTED)
 def _scan_src_drift(inv: Inventory) -> list[Finding]:
     out: list[Finding] = []
     src = inv.areas["alpha_src"]
+    staging = inv.areas.get("staging")
+    staging_names = (staging.names if staging is not None and not staging.error
+                     else set())
     dir_names = {e.name for e in src.entries if e.is_dir}
     for name, x in sorted(inv.factors.items()):
         # active + rejected 都归档进 alpha_src(check.on_reject 同样归档)
         if x.state is not None and x.state.status in _IN_LIB and name not in dir_names:
+            if name in staging_names:
+                # 交叉核对 staging(对抗评审 2026-07-12):recall 是 move 不是
+                # copy —— restage 崩在 move 后 transition 前,唯一副本就在
+                # staging,不是"源码丢失",别把人指去 dropbox 反查。
+                out.append(Finding(name, "src-drift", "lib-missing-staged", WARN,
+                                   f"PG {x.state.status.value} 但源码在 staging/"
+                                   f"{name}/(crash 中断的 restage / 搬运中)",
+                                   action="人工核对 staging 副本后由下次 ops check "
+                                          "捡起重跑(状态会被覆盖),勿走 dropbox 反查"))
+                continue
             out.append(Finding(name, "src-drift", "lib-missing", FAIL,
                                f"PG {x.state.status.value} 在库但 alpha_src/{name}/ 缺失"
                                "(源码唯一副本;记录是找回线索,绝不因此删 PG)",
@@ -283,7 +297,14 @@ def _scan_artifact_orphan(inv: Inventory) -> list[Finding]:
     pnl = inv.areas["alpha_pnl"]
     feature = inv.areas["alpha_feature"]
     for e in sorted(pnl.entries, key=lambda x: x.name):
-        if e.is_dir or e.name.startswith("."):
+        if e.is_dir:
+            # "pnl 是单文件"是布局 SSOT;目录形态是远古残留(archive 曾专门
+            # 兜过,Errno 20/R4)—— 报 alien 不静默吞(对抗评审 2026-07-12)
+            out.append(Finding(e.name, "artifact-orphan", "alien", WARN,
+                               "alpha_pnl 下目录形态,非单文件 pnl(远古残留,人工确认)",
+                               path=str(pnl.root / e.name)))
+            continue
+        if e.name.startswith("."):
             continue
         if e.name not in inv.factors:
             out.append(Finding(e.name, "artifact-orphan", "pnl-orphan", WARN,
@@ -292,6 +313,9 @@ def _scan_artifact_orphan(inv: Inventory) -> list[Finding]:
                                path=str(pnl.root / e.name)))
     for e in sorted(feature.entries, key=lambda x: x.name):
         if e.is_dir:
+            out.append(Finding(e.name, "artifact-orphan", "alien", WARN,
+                               "alpha_feature 下目录形态,非单文件 feature(人工确认)",
+                               path=str(feature.root / e.name)))
             continue
         if e.name.startswith(".") and e.name.endswith(".npy.tmp"):
             # pack 原子写残渣(.<name>.vN.npy.tmp)。在跑的 pack 不会留 24h。
@@ -355,6 +379,16 @@ _PACK_TMP_FIXER = Fixer(
 def _scan_dump_orphan(inv: Inventory) -> list[Finding]:
     out: list[Finding] = []
     dump = inv.areas["dump_local"]
+    # 错配绊线(对抗评审 2026-07-12):alpha_dump 指错一级(config 少写 /
+    # sidecar 软链错指)时,扫到的是 alphalib 根 —— 条目名会撞库区名
+    # (alpha_src/staging/…),它们全都"PG 无因子记录",若不拦会整批判成
+    # fixable 孤儿。区内出现任何库区名条目 = 疑似指错,整族弃权零发现。
+    reserved = {a.root.name for a in inv.areas.values()}
+    hit = sorted(e.name for e in dump.entries if e.name in reserved)
+    if hit:
+        raise FamilySkip(
+            f"疑似 alpha_dump 指错(区内出现 alphalib 区名条目: {', '.join(hit)})"
+            "—— 先跑 ops setup --check 核对部署,本族零发现零动作")
     for e in sorted(dump.entries, key=lambda x: x.name):
         if not e.is_dir or e.name.startswith("."):
             continue
