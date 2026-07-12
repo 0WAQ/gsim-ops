@@ -37,7 +37,7 @@ staging/AlphaXxx/  +  meta.json      (flat layout, ops-owned)
                  [same flow as new factor]
 ```
 
-**A factor record is never deleted from state (PG factor_state)** — it transitions through statuses but stays. REJECTED records keep `last_fail_stage` / `last_fail_reason` for auditing. (reconcile 已下线;不再有自动 drop orphan 逻辑。)
+**A factor record is never deleted from state (PG factor_state)** — it transitions through statuses but stays. 失败审计在 `factor_history`(op='check' 失败事件,v2b;读侧 `Factor.last_fail` 派生)。cancel/rm 硬删记录时也发射事件 —— **历史活过删除**(无 FK)。(reconcile 已下线;不再有自动 drop orphan 逻辑。)
 
 ## Persistence Layers
 

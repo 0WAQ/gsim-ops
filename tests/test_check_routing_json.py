@@ -48,8 +48,8 @@ def test_reject_early_stage(json_config, write_factor, fake_checkers):
     ret, rec = _run(cfg_path, config, "AlphaWbaiRejE", checkers)
     assert ret == "fail"
     assert rec.status == FactorStatus.REJECTED
-    # 归因是流水线盖的章(exception 不携带 stage)
-    assert rec.last_fail_stage == "checkbias"
+    # 归因是流水线盖的章(exception 不携带 stage);v2b: last_fail 是
+    # check_history/事件的派生,断言其源头
     assert rec.check_history[-1].failed_stage == "checkbias"
     assert (config.alpha_src / "AlphaWbaiRejE").exists()
     assert not (config.staging / "AlphaWbaiRejE").exists()
@@ -70,7 +70,7 @@ def test_reject_late_stage_keeps_pnl(json_config, write_factor, fake_checkers):
     ret, rec = _run(cfg_path, config, "AlphaWbaiRejL", checkers)
     assert ret == "fail"
     assert rec.status == FactorStatus.REJECTED
-    assert rec.last_fail_stage == "compliance"
+    assert rec.check_history[-1].failed_stage == "compliance"
     assert (config.alpha_pnl / "AlphaWbaiRejL").exists()
 
 

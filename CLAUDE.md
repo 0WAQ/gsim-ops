@@ -230,6 +230,7 @@ metric 表达式已收敛,S8);新发现的多真相源加 ⚠ 行并在
 | stage 身份 / 顺序 / 路由策略 | `services/check/stages.py` 的 `PIPELINE` | 新增 stage = 加一行 |
 | 时间戳格式 | `ops/utils/clock.py::now_iso` | |
 | 状态值 | `FactorStatus` 枚举 | 与 DB CHECK 约束同一提交改 |
+| 操作事件(谁在何时对因子做了什么) | PG `factor_history`(op 枚举 = `core/state.py::HISTORY_OPS`,与 chk_op 同一提交改) | "最近失败"是其派生(`Factor.last_fail`);唯一活过 rm 的痕迹 |
 | 依赖分层规则 | pyproject `[tool.importlinter]`(8/8 enforcing;cli 接缝豁免点 `ops/cli/common.py`) | 2026-07-09 进 CI;ratchet 已退役(阶段 3);C9 结果渲染归 cli(2026-07-11 展示层上收) |
 | 盘面布局(src/pnl/dump/feature/staging/池副本/meta.json) | `ops/core/paths.py::FactorPaths` | 2026-07-09 收编(40+ 处拼接清零) |
 | 因子领域类型 | `ops/core/factor.py::Factor`(identity/state/snapshot 三切面) | 2026-07-09 阶段 2;全库唯一叫"因子"的类型 |
@@ -245,7 +246,8 @@ metric 表达式已收敛,S8);新发现的多真相源加 ⚠ 行并在
 - ~~`ops sync` legacy fallback~~ **已退役删除**(2026-07-07 Wave 1,连同 `infra/s3.py`、boto3/tqdm、`config.prod-legacy.yaml`)
 - **Postgres 三表结构 (2026-07-06, branch `feat/derived-postgres`)**: 因子数据落三张 PG 表(server-160 docker, host 15432),全部去掉 `library_id`(永远单库),`id SERIAL` 主键 + `name UNIQUE`:
   - `factor_info` — 身份信息 (author / discovery_method / created_at)。抽象层 `ops/infra/info/`。
-  - `factor_state` — 生命周期状态 (status/version/时间戳/last_fail_*/check_history)。去掉了 author 和 submitted_by(移到 factor_info)。抽象层 `ops/infra/store/`。
+  - `factor_state` — 生命周期状态 (status/version/时间戳)。去掉了 author 和 submitted_by(移到 factor_info);v2b(2026-07-12)再去 rejected_at/last_fail_*/check_history —— 迁 `factor_history`。抽象层 `ops/infra/store/`。
+  - `factor_history` — **全操作审计事件表**(v2b):op ∈ submit/overwrite/check/approve/restage/cancel/rm/backfill/entered,一次操作一条记录,actor 可追溯,**无 FK 活过 ops rm**。发射走 FactorRepository/StateStore 同事务,漏记结构上不可能。
   - `factor_snapshot` — 入库时快照 (metrics + datasources + delay + bcorr + snapshot_at)。抽象层 `ops/infra/snapshot/`。(原 index 组的 has_pnl/dump_days 已删列 —— 可变物理事实与快照不可变冲突,需实时状态走 LibraryScanner 扫盘;delay 保留,入库时定死。)
   外键: `factor_state.name` / `factor_snapshot.name` 均 `REFERENCES factor_info(name) ON DELETE CASCADE`(删 info 级联删 state + snapshot)。联合读入口 `ops/infra/repository.py::FactorRepository.find`(单条三表 LEFT JOIN;2026-07-09 阶段 2 退役 query_factors/FactorRow,service 层经 Repository 读写,聚合类型见 `ops/core/factor.py`)。
   - **语义变更**: metrics/datasources/bcorr 从"可 `ops refresh` 重算的最新表现"变为"入库时不可变快照"(`snapshot_at = factor_state.entered_at`);`ops refresh` 命令已删除,需最新表现须重跑 backtest。

@@ -109,11 +109,15 @@ def test_approve_correlation_rejected(test_config, seed_factor):
     cfg_path, config = test_config
     seed_factor("AlphaWbaiApp", FactorStatus.REJECTED, last_fail_stage="correlation")
     run_approve(_args(cfg_path, factor_name="AlphaWbaiApp"))
-    rec = _store(config).get("AlphaWbaiApp")
+    store = _store(config)
+    rec = store.get("AlphaWbaiApp")
     assert rec.status == FactorStatus.ACTIVE
-    assert rec.last_fail_stage is None
-    # 留痕 approved
-    assert rec.check_history[-1].fail_reason == "approved"
+    # v2b 留痕:op='approve'(豁免决定)+ 'entered'(入库统一标记)入事件表;
+    # 旧失败事件保留(派生 last_fail 不清空,消费方与 status 联判)
+    ops = [e.op for e in store.history("AlphaWbaiApp")]
+    assert "approve" in ops and "entered" in ops
+    # check 时间线不再混入伪造的 approved 记录
+    assert all(c.fail_reason != "approved" for c in rec.check_history)
 
 
 def test_approve_non_correlation_rejected(test_config, seed_factor):

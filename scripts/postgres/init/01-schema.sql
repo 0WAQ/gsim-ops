@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS factor_info (
 CREATE INDEX IF NOT EXISTS idx_factor_info_author ON factor_info(author);
 CREATE INDEX IF NOT EXISTS idx_factor_info_discovery ON factor_info(discovery_method);
 
--- 2. factor_state — 生命周期 (镜像 ops/infra/store/pg_store.py:_SCHEMA)
+-- 2. factor_state — 生命周期 + factor_history 审计事件表
+--    (镜像 ops/infra/store/pg_store.py:_SCHEMA;v2b: rejected_at/last_fail_*/
+--    check_history 退役,事实迁 factor_history)
 CREATE TABLE IF NOT EXISTS factor_state (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
@@ -32,16 +34,27 @@ CREATE TABLE IF NOT EXISTS factor_state (
     version INT NOT NULL DEFAULT 1,
     submitted_at TIMESTAMPTZ,
     entered_at TIMESTAMPTZ,
-    rejected_at TIMESTAMPTZ,
-    last_fail_stage TEXT,
-    last_fail_reason TEXT,
-    check_history JSONB NOT NULL DEFAULT '[]',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     FOREIGN KEY (name) REFERENCES factor_info(name) ON DELETE CASCADE,
     CONSTRAINT chk_status CHECK (status IN ('submitted', 'checking', 'active', 'rejected')),
     CONSTRAINT chk_active_entered CHECK (status <> 'active' OR entered_at IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS ix_fs_status ON factor_state(status);
+-- factor_history: 全操作审计。刻意无 FK —— 历史活过 ops rm。
+CREATE TABLE IF NOT EXISTS factor_history (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name TEXT NOT NULL,
+    op TEXT NOT NULL,
+    at TIMESTAMPTZ NOT NULL,
+    actor TEXT,
+    started_at TIMESTAMPTZ,
+    passed BOOLEAN,
+    failed_stage TEXT,
+    fail_reason TEXT,
+    CONSTRAINT chk_op CHECK (op IN ('submit', 'overwrite', 'check', 'approve', 'restage', 'cancel', 'rm', 'backfill', 'entered')),
+    CONSTRAINT chk_fail_has_stage CHECK (passed IS DISTINCT FROM FALSE OR failed_stage IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS ix_fh_name_at ON factor_history(name, at DESC);
 
 -- 3. factor_snapshot — 入库时快照 (镜像 ops/infra/snapshot/pg_store.py:_SCHEMA)
 CREATE TABLE IF NOT EXISTS factor_snapshot (
@@ -54,8 +67,8 @@ CREATE TABLE IF NOT EXISTS factor_snapshot (
     tvr DOUBLE PRECISION,
     fitness DOUBLE PRECISION,
 
-    fields JSONB,
-    tables JSONB,
+    fields TEXT[],
+    tables TEXT[],
 
     delay INT,
 

@@ -249,6 +249,7 @@ class CheckerPipeline:
                 created_at=submitted_at,
             ),
             submitted_at=submitted_at,
+            op="submit",  # 补建 = 补记那次丢失的 submit(crash 自愈语义)
         )
 
     def run_one(self, factor: AlphaMetadata, i: int, q) -> str:
@@ -404,11 +405,10 @@ class CheckerPipeline:
                 check.passed = False
                 check.failed_stage = stage_name
                 check.fail_reason = str(e)
+                # 失败事实随 check 事件入 factor_history(state 的 rejected_at/
+                # last_fail_* 三列已删,v2b;读侧走 Factor.last_fail 派生)
                 repo.append_check(factor.name, check)
-                repo.transition(factor.name, FactorStatus.REJECTED,
-                                 rejected_at=now,
-                                 last_fail_stage=stage_name,
-                                 last_fail_reason=str(e))
+                repo.transition(factor.name, FactorStatus.REJECTED)
                 q.put(("done", factor.name, "fail",
                        f"→ rejected/{stage_name}: {str(e)[:60]}", "red"))
                 return "fail"

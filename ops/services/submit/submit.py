@@ -134,12 +134,14 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
                 created_at=submitted_at,
             ),
             submitted_at=submitted_at,
+            op="submit",
         )
         info(f"  ✔  {meta.name} → submitted (version=1)")
     else:
         # 已存在: 只更新 state (version += 1)，info 不变
         new_version = rec.version + 1
         repo.transition(meta.name, FactorStatus.SUBMITTED,
+                        op="overwrite",
                         submitted_at=submitted_at,
                         version=new_version)
         # 覆盖提交 = 旧入库快照失效(新代码 re-check 通过后 archive 写新快照)。

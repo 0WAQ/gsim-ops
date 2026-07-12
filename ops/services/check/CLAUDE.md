@@ -73,7 +73,7 @@ Fail: mark REJECTED (src 归档到 alpha_src)
 - checkbias / checkpoint / compliance / correlation / archive fail → REJECTED (factor quality issue, QR must fix code and re-submit)
 - 任何 stage 的 prepare 落盘失败 / 非 CheckFail 异常 → unexpected 臂,revert SUBMITTED + 完整日志
 
-失败因子的 src 归档到 `alpha_src/`(与 ACTIVE 同库,状态靠 state 的 `status`/`last_fail_stage`/`last_fail_reason` 区分,不靠目录位置)。compliance/correlation(`keep_artifacts_on_fail`)失败额外保留 pnl + dump(数据完整,有分析价值);checkbias/checkpoint 失败清掉 dump/feature(短期数据不完整)。staging 原物在归档后清除。**不再有 recycle 目录**(见 `on_reject`,原 `to_recycle`)。
+失败因子的 src 归档到 `alpha_src/`(与 ACTIVE 同库,状态靠 state 的 `status` + factor_history 的最近失败事件区分,不靠目录位置;v2b 起 REJECTED 转移不再写 rejected_at/last_fail_* —— 失败事实随 op='check' 事件入史,读侧走 `Factor.last_fail` 派生)。compliance/correlation(`keep_artifacts_on_fail`)失败额外保留 pnl + dump(数据完整,有分析价值);checkbias/checkpoint 失败清掉 dump/feature(短期数据不完整)。staging 原物在归档后清除。**不再有 recycle 目录**(见 `on_reject`,原 `to_recycle`)。
 
 Uses `ProcessPoolExecutor` (max 20 workers) for parallel factor checking.
 worker 里 `FactorRepository` 按需现构造(`check.py::_repo()`,不挂 self):fork 子进程

@@ -20,13 +20,13 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 
 | File | Purpose |
 |------|---------|
-| `core/state.py` | `FactorStatus` enum, `CheckRecord`, `FactorRecord`(纯状态机,2026-07-06 起不含 author / submitted_by;`correlation_rejected()` 语义谓词 + `CORRELATION` 常量,approve 的放行判据) |
-| `core/factor.py` | `Factor` 聚合 + `FactorIdentity` + `FactorSnapshot`(三切面领域类型,2026-07-09) |
+| `core/state.py` | `FactorStatus` enum, `CheckRecord`, `HistoryEvent` + `HISTORY_OPS`(factor_history 领域形态,v2b), `FactorRecord`(纯状态机,2026-07-06 起不含 author / submitted_by;v2b 起不含 rejected_at/last_fail_* —— 派生自事件表;`CORRELATION` 常量) |
+| `core/factor.py` | `Factor` 聚合 + `FactorIdentity` + `FactorSnapshot`(三切面领域类型,2026-07-09)+ `last_fail: HistoryEvent` 派生切面与 `correlation_rejected()` 谓词(v2b 自 FactorRecord 上移 —— 需要 state+history 两个切面) |
 | `core/factormeta.py` | `FactorMeta` dataclass + `META_VERSION` + load/save + `parse_factor`/`infer_author_from_dir` |
 | `infra/info/` | `InfoStore` ABC + `PostgresInfoStore`(factor_info 表;`FactorInfo` 是 core `FactorIdentity` 的别名) |
 | `infra/snapshot/` | `SnapshotStore` ABC + `PostgresSnapshotStore`(factor_snapshot 表;`FactorSnapshot` dataclass 正主在 core/factor.py) |
 | `infra/repository.py` | `FactorRepository` —— service 层读写因子的唯一门面(get/find/register/transition/attach_snapshot/delete/exists/lock + paths/purge_artifacts) |
-| `infra/store/pg_store.py` | Postgres state backend (真相源 since 2026-07-04), `SELECT FOR UPDATE` + check_history JSONB;2026-07-06 去 library_id / author,`id SERIAL` 主键 + `name UNIQUE`,外键引 factor_info |
+| `infra/store/pg_store.py` | Postgres state backend (真相源 since 2026-07-04), `SELECT FOR UPDATE`;v2b:check_history JSONB 退役,factor_history 全操作审计表(DDL + emit_on 在此;无 FK 活过 rm)+ last_fail/history 派生读 |
 | `infra/store/json_store.py` | JSON state backend(单机 dev/test;非生产回退), fcntl cross-process lock, atomic write |
 | `infra/lock.py` | Per-factor advisory lock (`factor_lock(name, config)` / `FactorLocked`);postgres 后端跨机 PG advisory lock(conninfo 缺失硬错误),json dev/test 后端 fcntl |
 

@@ -1514,3 +1514,44 @@ fields/tables JSONB→TEXT[](诚实类型:psycopg 原生 list + GIN array_ops,
 零意外 —— 备份 3.7M 落盘(pg_dump 17+ 的 `\unrestrict` 尾标经核实非截断)、
 violating_rows=0、空档确认后两 SQL 零报错、复验两列消失/约束出现/doctor
 exit=0/Total 8252 不变。2026-07-06 挂账的僵尸列至此清偿,README 台账 ✅。
+
+## schema v2b:factor_history 全操作审计表 + state 瘦身 + TEXT[](2026-07-12,代码批)
+
+分支 `claude/schema-v2b`(基于 schema-v2)。设计见 docs/schema-v2.md,用户已批。
+
+**factor_history**(用户提议的泛化):一次操作一条记录,op ∈ submit/overwrite/
+check/approve/restage/cancel/rm/backfill/entered(`HISTORY_OPS` ⇔ DB chk_op
+同提交改),actor 经 `utils/actor.py`(SUDO_USER 优先 —— 写命令 root 提权下
+拿真人)。**无 FK,历史活过 ops rm**(立项动机:rm/cancel 不再蒸发审计)。
+发射全部与业务写**同事务**(store.transition 的 op: 参数 / append_check /
+repo.register / repo.delete),漏记结构上不可能;置 ACTIVE **自动**发
+'entered'(check 归档/approve/backfill 三径合流的入库统一标记)。CHECKING/
+revert-SUBMITTED 瞬时态无事件(只记完成的操作)。
+
+**factor_state 瘦身**:rejected_at/last_fail_stage/last_fail_reason 删列 +
+check_history JSONB 退役 —— "最近失败"变派生(store.last_fail = 最新
+passed=FALSE 的 check 事件;find 侧 LATERAL 进 `Factor.last_fail` 切面;
+**"从未失败"从三个 NULL 变成事件表里没有失败行**)。check_history 保留为
+内存形态(PG get 从事件表组装;json dev/test 后端仍随记录存,last_fail
+内存扫描合成,语义一致)。`correlation_rejected()` 谓词 FactorRecord →
+Factor(需要 state+history 两切面);approve 不再伪造 passed=True 的
+CheckRecord 留痕(check 时间线纯净,op='approve' 有真名分)。
+`ops status <name>` 详情升级为**完整生命周期时间线**(cli 渲染 op/at/actor,
+json 后端回落 check_history)。
+
+**fields/tables JSONB → TEXT[]**:psycopg 原生 list(insert 去 Jsonb 包裹)、
+`@>` 吃 GIN(array_ops)、glob 经 unnest+LIKE —— 下推语义逐条等价。
+
+**迁移** `migrate_v2b_history.sql`(单事务非幂等,只跑一次):建表 →
+check_history 逐元素展开(WITH ORDINALITY 保序,行数不符 RAISE 回滚)→
+合成 submit/entered(actor='migration')→ state 删四列 → TEXT[] 改写
+(USING 不许子查询,走加列-改写-删旧-改名)+ GIN 重建。**本地沙盘全程实测**:
+旧 schema 造数 → 迁移 → 7 事件/6 列/TEXT[] 逐项核对 + 派生查询验证;
+负例(脏 check 元素)确认 RAISE 整体回滚零残留。⚠ 部署顺序:迁移先行,
+旧代码读删列即错 —— 全库禁写短窗口内完成迁移 + 四机滚存。
+
+**对抗自查要点**:conftest wipe 补 factor_history 截断(事件设计上活过删除,
+测试隔离必须显式清 —— 首跑即抓到跨用例泄漏);类体内 `list[HistoryEvent]`
+注解被同名方法遮蔽(引号修复);迁移与新代码窗口交错时 count-verify 响亮
+失败而非静默双记。测试 165 → 173(history 7 枚 + TEXT[] 下推 1 枚),
+e2e 断言同批适配(last_fail → check_history[-1] 派生源)。

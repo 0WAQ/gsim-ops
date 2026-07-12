@@ -105,7 +105,8 @@ def pg_conninfo(pg_schema: str) -> str:
 
 
 def wipe_test_db(conninfo: str) -> None:
-    """清空三表(删 factor_info,FK 级联 state/snapshot)。
+    """清空因子表(删 factor_info,FK 级联 state/snapshot;factor_history
+    无 FK 单独清 —— 事件设计上活过删除,测试隔离必须显式截断,v2b)。
 
     conninfo 带 search_path 时作用于本 session 的 schema(测试间隔离);
     只对 current_database() == 'ops_test' 生效 —— 双保险,防 OPS_TEST_PG_*
@@ -117,10 +118,11 @@ def wipe_test_db(conninfo: str) -> None:
         conn = psycopg.connect(conninfo, autocommit=True, connect_timeout=5)
         db = conn.execute("SELECT current_database()").fetchone()[0]
         if db == "ops_test":
-            try:
-                conn.execute("DELETE FROM factor_info")
-            except psycopg.errors.UndefinedTable:
-                pass  # 表还没被任何 store __init__ 建出来
+            for sql in ("DELETE FROM factor_info", "DELETE FROM factor_history"):
+                try:
+                    conn.execute(sql)
+                except psycopg.errors.UndefinedTable:
+                    pass  # 表还没被任何 store __init__ 建出来
         conn.close()
     except Exception:  # noqa: BLE001 — 清理尽力而为
         pass
@@ -299,7 +301,7 @@ def seed_factor(test_config):
     factor_info,且 factor_state.name 的外键要求 info 父行先在(直接 put →
     ForeignKeyViolation,生产验证第一轮 11 个失败的根因)。
     """
-    from ops.core.state import FactorRecord, FactorStatus
+    from ops.core.state import CheckRecord, FactorRecord, FactorStatus
     from ops.infra.info import FactorInfo, default_info_store
     from ops.infra.store import default_store
 
@@ -309,6 +311,10 @@ def seed_factor(test_config):
 
     def _seed(name: str, status, author: str = "wbai",
               discovery_method: str | None = "manual", **state_kw):
+        # v2b:last_fail_* 不再是 state 列 —— 种一条失败 check 事件等价表达
+        # ("最近失败"是 factor_history/check_history 的派生事实)
+        fail_stage = state_kw.pop("last_fail_stage", None)
+        fail_reason = state_kw.pop("last_fail_reason", "seeded fail")
         info_store.upsert(FactorInfo(name=name, author=author,
                                      discovery_method=discovery_method,
                                      created_at="2026-07-05T00:00:00"))
@@ -318,6 +324,12 @@ def seed_factor(test_config):
             # 入库时刻 —— 全部生产写路径都遵守,测试种子同样遵守
             state_kw.setdefault("entered_at", "2026-07-01T00:00:00")
         store.put(FactorRecord(name=name, status=status, **state_kw))
+        if fail_stage:
+            store.append_check(name, CheckRecord(
+                started_at="2026-07-05T00:00:00",
+                finished_at="2026-07-05T00:05:00",
+                passed=False, failed_stage=fail_stage,
+                fail_reason=fail_reason))
 
     return _seed
 

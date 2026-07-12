@@ -155,7 +155,7 @@ def test_reject_late_stage_keeps_pnl_dump(test_config, make_factor, fake_checker
 
     rec = _store(config).get("AlphaWbaiRejLate")
     assert rec.status == FactorStatus.REJECTED
-    assert rec.last_fail_stage == "compliance"
+    assert rec.check_history[-1].failed_stage == "compliance"  # v2b: 派生自事件
     assert (config.alpha_src / "AlphaWbaiRejLate").exists()
     assert not (config.staging / "AlphaWbaiRejLate").exists()
     # 保留 pnl
@@ -175,7 +175,7 @@ def test_reject_early_stage_wipes_dump(test_config, make_factor, fake_checkers):
 
     rec = _store(config).get("AlphaWbaiRejEarly")
     assert rec.status == FactorStatus.REJECTED
-    assert rec.last_fail_stage == "checkbias"
+    assert rec.check_history[-1].failed_stage == "checkbias"  # v2b: 派生自事件
     assert (config.alpha_src / "AlphaWbaiRejEarly").exists()
     # dump 被清
     assert not (config.alpha_dump / "AlphaWbaiRejEarly").exists()

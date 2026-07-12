@@ -190,7 +190,7 @@ def test_pg_find_factor_set_and_filters(test_config, seed_factor):
 
     rej = repo.find(status=FactorStatus.REJECTED)
     assert len(rej) == 1 and rej[0].last_fail_stage == "correlation"
-    assert rej[0].state is not None and rej[0].state.correlation_rejected()
+    assert rej[0].correlation_rejected()  # v2b: 谓词在 Factor 聚合(state+last_fail)
 
 
 def test_pg_attach_snapshot_stamps_entered_at(test_config, seed_factor):
@@ -216,6 +216,32 @@ def test_pg_attach_snapshot_stamps_entered_at(test_config, seed_factor):
     # find 侧拼出同一份快照
     found = repo.find(author="wbai", status=FactorStatus.ACTIVE)
     assert found[0].snapshot is not None and found[0].snapshot.ret == 99.0
+
+
+def test_pg_snapshot_text_array_roundtrip_and_pushdown(test_config, seed_factor):
+    """fields/tables TEXT[](v2b):list 直存直读 + GIN 包含 / glob LIKE 下推。"""
+    _, config = test_config
+    repo = FactorRepository(config)
+    seed_factor("AlphaWbaiArr", FactorStatus.ACTIVE,
+                entered_at="2026-07-02T12:00:00")
+    seed_factor("AlphaWbaiArr2", FactorStatus.ACTIVE,
+                entered_at="2026-07-02T12:00:00")
+    repo.attach_snapshot(FactorSnapshot(
+        name="AlphaWbaiArr",
+        fields=["ashareeodprices.s_dq_close", "Interval5m.close"],
+        tables=["ashareeodprices", "Interval5m"]))
+    repo.attach_snapshot(FactorSnapshot(
+        name="AlphaWbaiArr2", fields=["asharebalancesheet.accounts_payable"],
+        tables=["asharebalancesheet"]))
+
+    got = repo.get("AlphaWbaiArr")
+    assert got is not None and got.snapshot is not None
+    assert got.snapshot.fields == ["ashareeodprices.s_dq_close", "Interval5m.close"]
+
+    by_field = repo.find(field="Interval5m.close")
+    assert {f.name for f in by_field} == {"AlphaWbaiArr"}
+    by_glob = repo.find(table_glob="ashare*")
+    assert {f.name for f in by_glob} == {"AlphaWbaiArr", "AlphaWbaiArr2"}
 
 
 def test_pg_attach_snapshot_requires_entered_at(test_config, seed_factor):

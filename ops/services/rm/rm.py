@@ -76,8 +76,9 @@ def run_rm(args) -> None:
             for r in repo.purge_artifacts(name, ArtifactScope.CHECK):
                 info(f"  ✔ 已删除 {r}")
 
-            # factor_info (级联删除 state + snapshot)
-            if repo.delete(name):
+            # factor_info (级联删除 state + snapshot);rm 事件活过删除
+            # (factor_history 无 FK)—— 因子曾经存在、谁删的,自此可追溯
+            if repo.delete(name, op="rm"):
                 info("  ✔ 已删除 factor_info (级联删除 state + snapshot)")
     except FactorLocked:
         error(f"  ✘ {name} 被另一个进程占用,稍后再试")

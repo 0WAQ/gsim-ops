@@ -8,12 +8,12 @@ from rich.rule import Rule
 from rich.table import Table
 
 from ops.cli.common import STATUS_CHOICES, FactorStatus, add_config_arg
-from ops.services.status import query_many, query_one
+from ops.services.status import query_events, query_many, query_one
 from ops.utils.utils import LowerAction
 
 if TYPE_CHECKING:
     from ops.core.factor import Factor
-    from ops.core.state import FactorRecord
+    from ops.core.state import HistoryEvent
 
 # ---------------------------------------------------------------------------
 # 渲染(2026-07-11 展示层上收:自 services/status 迁入,services 零 rich)
@@ -41,20 +41,36 @@ def _outcome(c):
     return "[dim]SKIP[/]"
 
 
-def _print_detail(rec: "FactorRecord", author: str | None) -> None:
-    """打印单个因子的详细状态（author 从 factor_info 传入）。"""
+def _print_detail(factor: "Factor", events: "list[HistoryEvent]") -> None:
+    """打印单个因子的详细状态 + 生命周期时间线(factor_history,v2b)。"""
+    rec = factor.state
+    assert rec is not None  # 调用方已分流 info 孤儿
     _console.print(Rule(f"[bold cyan]因子状态 · {rec.name}[/]", style="cyan", characters="━"))
     style = _STATUS_STYLE.get(rec.status, "")
     _console.print(_kv("name",         rec.name))
-    _console.print(_kv("author",       author or "—"))
+    _console.print(_kv("author",       factor.identity.author or "—"))
     _console.print(_kv("status",       f"[{style}]{rec.status.value}[/]"))
     _console.print(_kv("submitted_at", rec.submitted_at or "—"))
     _console.print(_kv("entered_at",   rec.entered_at or "—"))
-    _console.print(_kv("rejected_at",  rec.rejected_at or "—"))
     _console.print(_kv("updated_at",   rec.updated_at))
-    if rec.last_fail_stage:
-        _console.print(_kv("last_fail", f"[red]{rec.last_fail_stage}[/] — {rec.last_fail_reason}"))
-    if rec.check_history:
+    if factor.last_fail_stage:
+        _console.print(_kv("last_fail", f"[red]{factor.last_fail_stage}[/] — {factor.last_fail_reason}"))
+    if events:
+        # 完整生命周期时间线(submit/check/entered/approve/restage/...)——
+        # v2b 立项动机之一:详情从"检测历史"升级为全操作时间线
+        _console.print(_kv("timeline", f"({len(events)})"))
+        for i, e in enumerate(events, 1):
+            if e.op == "check":
+                line = (f"    [dim][{i}][/] {e.at}  check {_outcome(e)}")
+                if e.failed_stage:
+                    line += f"  [red]({e.failed_stage}: {e.fail_reason})[/]"
+            else:
+                line = f"    [dim][{i}][/] {e.at}  [bold]{e.op}[/]"
+            if e.actor:
+                line += f"  [dim]by {e.actor}[/]"
+            _console.print(line)
+    elif rec.check_history:
+        # json dev/test 后端无事件表 —— 回落检测历史
         _console.print(_kv("check_history", f"({len(rec.check_history)})"))
         for i, c in enumerate(rec.check_history, 1):
             line = f"    [dim][{i}][/] {c.started_at} → {c.finished_at}  {_outcome(c)}"
@@ -79,8 +95,8 @@ def _print_list(factors: "list[Factor]") -> None:
             continue
         style = _STATUS_STYLE.get(rec.status, "")
         note = ""
-        if rec.status == FactorStatus.REJECTED and rec.last_fail_stage:
-            note = f"[red]{rec.last_fail_stage}[/]: {rec.last_fail_reason}"
+        if rec.status == FactorStatus.REJECTED and f.last_fail_stage:
+            note = f"[red]{f.last_fail_stage}[/]: {f.last_fail_reason}"
         table.add_row(
             rec.name,
             f"[{style}]{rec.status.value}[/]",
@@ -102,7 +118,7 @@ def run_status(args) -> None:
             _console.print(f"[red]⚠ {args.name} 有身份记录(factor_info)但无 state 行"
                            f" —— info 孤儿,需对账(ops rm 可清走)[/]")
             return
-        _print_detail(factor.state, factor.identity.author)
+        _print_detail(factor, query_events(args))
         return
 
     factors = query_many(args)

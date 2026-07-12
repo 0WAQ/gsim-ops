@@ -105,6 +105,7 @@ def run_backfill(args):
                             ),
                             status=FactorStatus.ACTIVE,
                             entered_at=now,
+                            op="backfill",  # + 自动 'entered'(status=ACTIVE)
                         )
                         state_added += 1
             except FactorLocked:
