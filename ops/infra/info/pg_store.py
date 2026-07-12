@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS factor_info (
     name TEXT NOT NULL UNIQUE,
     author TEXT,
     discovery_method TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_discovery CHECK (discovery_method IS NULL OR discovery_method IN ('automated', 'manual', 'backfill'))
 );
 CREATE INDEX IF NOT EXISTS idx_factor_info_author ON factor_info(author);
 CREATE INDEX IF NOT EXISTS idx_factor_info_discovery ON factor_info(discovery_method);
