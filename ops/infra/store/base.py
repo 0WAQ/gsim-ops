@@ -53,6 +53,12 @@ class StateStore(ABC):
         ...
 
     @abstractmethod
+    def checks(self, name: str) -> "list[CheckRecord]":
+        """check 全史(v2c:自 FactorRecord 剥离,按需查)。PG 后端从事件表
+        组装;json 后端读记录侧存的原始列表。"""
+        ...
+
+    @abstractmethod
     def last_fail(self, name: str) -> HistoryEvent | None:
         """最近一次 check 失败(op='check' AND passed=FALSE 的最新事件)。
         原 factor_state 三列 rejected_at/last_fail_* 的派生替身(v2b)。

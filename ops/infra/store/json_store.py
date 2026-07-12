@@ -53,13 +53,15 @@ class JsonStateStore(StateStore):
             finally:
                 fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
-    def _read_records(self) -> dict[str, FactorRecord]:
-        raw = self.path.read_text() or "{}"
-        data = json.loads(raw)
-        return {k: FactorRecord.from_dict(v) for k, v in data.items()}
+    def _read_raw(self) -> dict[str, dict]:
+        """原始 dict 形态。check_history 键由 store 管理(v2c:FactorRecord
+        已剥离该字段,from_dict 会丢弃它 —— 写回时必须从 raw 保留)。"""
+        return json.loads(self.path.read_text() or "{}")
 
-    def _atomic_write(self, records: dict[str, FactorRecord]) -> None:
-        payload = {k: v.to_dict() for k, v in records.items()}
+    def _read_records(self) -> dict[str, FactorRecord]:
+        return {k: FactorRecord.from_dict(v) for k, v in self._read_raw().items()}
+
+    def _atomic_write(self, payload: dict[str, dict]) -> None:
         fd, tmp = tempfile.mkstemp(
             dir=str(self.path.parent),
             prefix=f".{self.path.name}.",
@@ -85,9 +87,11 @@ class JsonStateStore(StateStore):
     def put(self, record: FactorRecord) -> None:
         with self._locked():
             record.updated_at = _now()
-            records = self._read_records()
-            records[record.name] = record
-            self._atomic_write(records)
+            raw = self._read_raw()
+            d = record.to_dict()
+            d["check_history"] = raw.get(record.name, {}).get("check_history", [])
+            raw[record.name] = d
+            self._atomic_write(raw)
 
     def list(self, status: FactorStatus | None = None) -> list[FactorRecord]:
         # author 过滤已删:FactorRecord 无 author 字段,原实现 r.author 直接
@@ -104,10 +108,10 @@ class JsonStateStore(StateStore):
                    **updates) -> FactorRecord:
         # op/actor 接受并忽略:dev/test 后端无事件表(schema v2b),审计走 PG
         with self._locked():
-            records = self._read_records()
-            rec = records.get(name)
-            if rec is None:
+            raw = self._read_raw()
+            if name not in raw:
                 raise FactorNotFound(f"factor not found: {name}")
+            rec = FactorRecord.from_dict(raw[name])
             if expect is not None and rec.status != expect:
                 raise StateConflict(
                     f"{name}: status={rec.status.value}, expect={expect.value}")
@@ -115,39 +119,42 @@ class JsonStateStore(StateStore):
             for k, v in updates.items():
                 setattr(rec, k, v)
             rec.updated_at = _now()
-            records[name] = rec
-            self._atomic_write(records)
+            d = rec.to_dict()
+            d["check_history"] = raw[name].get("check_history", [])
+            raw[name] = d
+            self._atomic_write(raw)
             return rec
 
     def append_check(self, name: str, check: CheckRecord,
                      actor: str | None = None) -> None:
         with self._locked():
-            records = self._read_records()
-            rec = records.get(name)
-            if rec is None:
+            raw = self._read_raw()
+            if name not in raw:
                 raise FactorNotFound(f"factor not found: {name}")
-            rec.check_history.append(check)
-            rec.updated_at = _now()
-            records[name] = rec
-            self._atomic_write(records)
+            raw[name].setdefault("check_history", []).append(check.to_dict())
+            raw[name]["updated_at"] = _now()
+            self._atomic_write(raw)
 
     def delete(self, name: str, op: str | None = None,
                actor: str | None = None) -> bool:
         with self._locked():
-            records = self._read_records()
-            if name not in records:
+            raw = self._read_raw()
+            if name not in raw:
                 return False
-            del records[name]
-            self._atomic_write(records)
+            del raw[name]
+            self._atomic_write(raw)
             return True
 
+    def checks(self, name: str) -> "list[CheckRecord]":
+        with self._locked():
+            raw = self._read_raw()
+        return [CheckRecord.from_dict(c)
+                for c in raw.get(name, {}).get("check_history", [])]
+
     def last_fail(self, name: str) -> HistoryEvent | None:
-        """从 check_history 内存扫描合成(dev/test 后端无事件表)——
+        """从存储的 check 列表扫描合成(dev/test 后端无事件表)——
         与 PG 派生语义一致:最新一条 passed=False 的 check。"""
-        rec = self.get(name)
-        if rec is None:
-            return None
-        for c in reversed(rec.check_history):
+        for c in reversed(self.checks(name)):
             if c.passed is False:
                 return HistoryEvent(
                     name=name, op="check",
@@ -158,4 +165,11 @@ class JsonStateStore(StateStore):
         return None
 
     def history(self, name: str) -> "list[HistoryEvent]":
-        return []  # 无事件表;cli 回落 check_history 渲染(注解引号防 list 方法遮蔽)
+        """合成 check 事件时间线(无事件表,生命周期 op 缺席)——
+        使 status 详情在 dev/test 后端也有时间线可渲染。"""
+        return [HistoryEvent(
+                    name=name, op="check",
+                    at=c.finished_at or c.started_at,
+                    started_at=c.started_at, passed=c.passed,
+                    failed_stage=c.failed_stage, fail_reason=c.fail_reason)
+                for c in self.checks(name)]

@@ -38,6 +38,11 @@ def _prep_pass_artifacts(config, name):
 # pass 路径
 # ---------------------------------------------------------------------------
 
+
+def _last_check(config, name):
+    """v2c: check 全史自 record 剥离,按需 store.checks() 现查。"""
+    return _store(config).checks(name)[-1]
+
 def test_pass_archives_to_lib(test_config, make_factor, fake_checkers, fake_metrics):
     cfg_path, config = test_config
     make_factor(name="AlphaWbaiTest", discovery_method="manual")
@@ -52,7 +57,7 @@ def test_pass_archives_to_lib(test_config, make_factor, fake_checkers, fake_metr
     # state → ACTIVE
     rec = _store(config).get("AlphaWbaiTest")
     assert rec.status == FactorStatus.ACTIVE
-    assert rec.check_history[-1].passed is True
+    assert _last_check(config, rec.name).passed is True
 
     # 文件落点:src/dump/pnl 进库,staging 清
     assert (config.alpha_src / "AlphaWbaiTest").exists()
@@ -130,8 +135,8 @@ def test_retry_reverts_to_submitted(test_config, make_factor, fake_checkers, sta
 
     rec = _store(config).get("AlphaWbaiRetry")
     assert rec.status == FactorStatus.SUBMITTED
-    assert rec.check_history[-1].passed is False
-    assert rec.check_history[-1].failed_stage == stage
+    assert _last_check(config, rec.name).passed is False
+    assert _last_check(config, rec.name).failed_stage == stage
     # 留 staging,未进 alpha_src
     assert (config.staging / "AlphaWbaiRetry").exists()
     assert not (config.alpha_src / "AlphaWbaiRetry").exists()
@@ -155,7 +160,7 @@ def test_reject_late_stage_keeps_pnl_dump(test_config, make_factor, fake_checker
 
     rec = _store(config).get("AlphaWbaiRejLate")
     assert rec.status == FactorStatus.REJECTED
-    assert rec.check_history[-1].failed_stage == "compliance"  # v2b: 派生自事件
+    assert _last_check(config, rec.name).failed_stage == "compliance"  # v2b: 派生自事件
     assert (config.alpha_src / "AlphaWbaiRejLate").exists()
     assert not (config.staging / "AlphaWbaiRejLate").exists()
     # 保留 pnl
@@ -175,7 +180,7 @@ def test_reject_early_stage_wipes_dump(test_config, make_factor, fake_checkers):
 
     rec = _store(config).get("AlphaWbaiRejEarly")
     assert rec.status == FactorStatus.REJECTED
-    assert rec.check_history[-1].failed_stage == "checkbias"  # v2b: 派生自事件
+    assert _last_check(config, rec.name).failed_stage == "checkbias"  # v2b: 派生自事件
     assert (config.alpha_src / "AlphaWbaiRejEarly").exists()
     # dump 被清
     assert not (config.alpha_dump / "AlphaWbaiRejEarly").exists()
@@ -194,7 +199,7 @@ def test_skip_reverts_to_submitted(test_config, make_factor, fake_checkers):
     assert ret == "error"
     rec = _store(config).get("AlphaWbaiSkip")
     assert rec.status == FactorStatus.SUBMITTED
-    assert rec.check_history[-1].passed is None  # skip → passed=None
+    assert _last_check(config, rec.name).passed is None  # skip → passed=None
     assert (config.staging / "AlphaWbaiSkip").exists()
 
 
@@ -211,8 +216,8 @@ def test_crash_reverts_to_submitted(test_config, make_factor, fake_checkers):
     assert ret == "error"
     rec = _store(config).get("AlphaWbaiCrash")
     assert rec.status == FactorStatus.SUBMITTED
-    assert rec.check_history[-1].passed is None
-    assert "unexpected" in (rec.check_history[-1].fail_reason or "")
+    assert _last_check(config, rec.name).passed is None
+    assert "unexpected" in (_last_check(config, rec.name).fail_reason or "")
     assert (config.staging / "AlphaWbaiCrash").exists()
 
 

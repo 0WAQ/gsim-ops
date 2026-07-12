@@ -72,8 +72,8 @@ class ArtifactScope(Flag):
     ALL = CHECK | SERVING
 
 
-# find() 的 SELECT 列(三表 LEFT JOIN + 最近失败 LATERAL)。check_history
-# 有意不取:find 是批量目录读,全史很重;要全史走 get()/record()。
+# find() 的 SELECT 列(三表 LEFT JOIN + 最近失败 LATERAL)。check 全史
+# 不在 record 上(v2c 剥离):按需 store.checks() / repo.history()。
 # lf.* 来自 factor_history 派生(v2b:state 的 rejected_at/last_fail_* 已删列)。
 _FIND_COLS = (
     "i.name, i.author, i.discovery_method, i.created_at, "
@@ -147,7 +147,7 @@ class FactorRepository:
         return self._info.get(name) is not None
 
     def record(self, name: str) -> FactorRecord | None:
-        """state 轻量读(含 check_history 全史),不拼 Factor。"""
+        """state 轻量读(纯状态机快照,v2c 起不含 check 全史),不拼 Factor。"""
         return self._state.get(name)
 
     def get(self, name: str) -> Factor | None:
@@ -170,7 +170,8 @@ class FactorRepository:
         )
 
     def history(self, name: str) -> list[HistoryEvent]:
-        """完整生命周期事件时间线(status 详情;json dev/test 后端返回 [])。"""
+        """完整生命周期事件时间线(status 详情;json dev/test 后端合成
+        check 事件,生命周期 op 缺席)。"""
         return self._state.history(name)
 
     def find(
@@ -195,7 +196,7 @@ class FactorRepository:
         snapshot 侧条件(field/tables/metrics)沿用 GIN/LIKE 下推,无快照的
         因子在这些条件下自然落选(与旧内存合并一致)。
 
-        返回的 Factor.state 不含 check_history(批量读不取全史 JSONB);
+        返回的 Factor.state 是纯状态机快照(check 全史 v2c 已剥离);
         排序:sort_by 命中白名单时按其 DESC NULLS LAST,并以 name 兜底稳定。
         limit 仅在给定时下推(ORDER BY 恒定,结果确定)。
         """
@@ -277,7 +278,6 @@ class FactorRepository:
                 submitted_at=_ts_out(submitted_at),
                 entered_at=_ts_out(entered_at),
                 version=version,
-                check_history=[],  # find 不取全史(见 _FIND_COLS 注)
             )
         snapshot = None
         if snapshot_at is not None:  # snapshot_at 列 NOT NULL → 行存在的判据

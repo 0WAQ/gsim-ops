@@ -1565,3 +1565,22 @@ list Total 8252 / TEXT[] glob / 时间线 / doctor exit=0 / e2e 全过。阶段 
 uv tool 形态下 git pull ≠ 部署(须 --reinstall,170 旧代码查已删列
 UndefinedColumn 即此)、root 属主 pycache 卡重装(挪树 + --force 绕过,
 150/144 各留一个 ops.broken.<ts> 待 sudo 清)。**schema v2 两批全部落地。**
+
+
+## schema v2c 小件批:遗留项收口(2026-07-12)
+
+分支 `claude/schema-v2c`。v2b 收官后 \d 两处观察 + 遗留讨论项:
+- **migrate_v2c_smalls.sql**(幂等):status 重复索引删除(idx_factor_state_status
+  与 ix_fs_status 同构,三表迁移遗留的写放大)、factor_state_new_* 约束/序列
+  归一(生产 ⇔ 代码 DDL 同名)、discovery_method CHECK(枚举 + NULL,前置守卫);
+- **check 全史自 FactorRecord 剥离**(遗留项④):record 是纯状态机快照,
+  全史按需 `store.checks(name)`(PG 事件表组装 / json 记录侧 raw dict ——
+  store 管理该键,写回自 raw 保留);json history 合成 check 事件,status
+  时间线两后端统一(cli 回落分支删除);report.py 改 store.checks;
+- **字典表维持缓议**(定案):触发条件 = field 元素级属性的真需求。
+门禁:173 passed / 8 契约 / pyright 0。
+
+**v2c 生产执行(2026-07-12,无窗口)**:执行者空档核对(无 check、PG 无活跃
+查询)后一次通过 —— 约束名归一、status 单索引、chk_discovery 在位、Total 8252、
+timeline 无回归。v2c 的 SQL 是纯元数据操作且新旧代码对迁移前后库均兼容,
+是三批里唯一不需要窗口纪律的(对照 v2b 的禁写窗口 —— 风险分级即流程分级)。

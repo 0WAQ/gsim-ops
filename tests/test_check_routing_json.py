@@ -38,6 +38,11 @@ def _run(cfg_path, config, name, checkers):
     return ret, store.get(name)
 
 
+
+def _last_check(config, name):
+    """v2c: check 全史自 record 剥离,按需 store.checks() 现查。"""
+    return default_store(config).checks(name)[-1]
+
 def test_reject_early_stage(json_config, write_factor, fake_checkers):
     """checkbias 失败 → REJECTED + src 归档 + dump 清 + @module 重写。"""
     cfg_path, config = json_config
@@ -50,7 +55,7 @@ def test_reject_early_stage(json_config, write_factor, fake_checkers):
     assert rec.status == FactorStatus.REJECTED
     # 归因是流水线盖的章(exception 不携带 stage);v2b: last_fail 是
     # check_history/事件的派生,断言其源头
-    assert rec.check_history[-1].failed_stage == "checkbias"
+    assert _last_check(config, rec.name).failed_stage == "checkbias"
     assert (config.alpha_src / "AlphaWbaiRejE").exists()
     assert not (config.staging / "AlphaWbaiRejE").exists()
     assert not (config.alpha_dump / "AlphaWbaiRejE").exists()  # early → dump 清
@@ -70,7 +75,7 @@ def test_reject_late_stage_keeps_pnl(json_config, write_factor, fake_checkers):
     ret, rec = _run(cfg_path, config, "AlphaWbaiRejL", checkers)
     assert ret == "fail"
     assert rec.status == FactorStatus.REJECTED
-    assert rec.check_history[-1].failed_stage == "compliance"
+    assert _last_check(config, rec.name).failed_stage == "compliance"
     assert (config.alpha_pnl / "AlphaWbaiRejL").exists()
 
 
@@ -83,8 +88,8 @@ def test_retryable_reverts_to_submitted(json_config, write_factor, fake_checkers
     ret, rec = _run(cfg_path, config, "AlphaWbaiRetry", checkers)
     assert ret == "error"
     assert rec.status == FactorStatus.SUBMITTED
-    assert rec.check_history[-1].failed_stage == stage
-    assert rec.check_history[-1].passed is False
+    assert _last_check(config, rec.name).failed_stage == stage
+    assert _last_check(config, rec.name).passed is False
     assert (config.staging / "AlphaWbaiRetry").exists()
     assert not (config.alpha_src / "AlphaWbaiRetry").exists()
 
@@ -97,8 +102,8 @@ def test_skip_reverts_to_submitted(json_config, write_factor, fake_checkers):
     ret, rec = _run(cfg_path, config, "AlphaWbaiSkip", checkers)
     assert ret == "error"
     assert rec.status == FactorStatus.SUBMITTED
-    assert rec.check_history[-1].passed is None
-    assert rec.check_history[-1].failed_stage == "checkpoint"
+    assert _last_check(config, rec.name).passed is None
+    assert _last_check(config, rec.name).failed_stage == "checkpoint"
     # short-circuit:checkpoint 之后的 checker 不被调
     assert call_log == ["validate", "checkbias", "checkpoint"]
 
@@ -111,7 +116,7 @@ def test_crash_reverts_to_submitted(json_config, write_factor, fake_checkers):
     ret, rec = _run(cfg_path, config, "AlphaWbaiCrash", checkers)
     assert ret == "error"
     assert rec.status == FactorStatus.SUBMITTED
-    assert "unexpected" in (rec.check_history[-1].fail_reason or "")
+    assert "unexpected" in (_last_check(config, rec.name).fail_reason or "")
     # crash 在最后一个 stage,前面全部跑到
     from ops.services.check.stages import STAGES
     assert call_log == list(STAGES)
@@ -145,7 +150,7 @@ def test_prepare_failure_is_loud(json_config, write_factor, fake_checkers, monke
     rec = store.get("AlphaWbaiPrep")
     assert ret == "error"
     assert rec.status == FactorStatus.SUBMITTED
-    assert "unexpected" in (rec.check_history[-1].fail_reason or "")
+    assert "unexpected" in (_last_check(config, rec.name).fail_reason or "")
     assert call_log == []  # checker 未被调到
     assert (config.staging / "AlphaWbaiPrep").exists()
 

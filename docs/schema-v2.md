@@ -155,9 +155,13 @@ ALTER TABLE factor_snapshot
 - **历史活过 rm**(无 FK;指向已删因子的事件属预期);
 - **回填尽量重建**(check_history 真实展开 + 时间戳合成,actor='migration')。
 
-## 遗留讨论(第 7 点,后续轮)
+## 遗留讨论 —— v2c 批收口(2026-07-12)
 
-- check_history 内存形态是否也从 FactorRecord 剥离(status 详情单独查);
-- `discovery_method` CHECK 约束(automated/manual/backfill);
-- 数据源字典表(field → 说明/负责人),TEXT[] 升关联表的触发条件;
-- factor_history 是否要配套 `ops status --timeline` 之类的展示增强(v2b 顺手)。
+- ~~check_history 内存形态剥离~~ **已做**(v2c ④):FactorRecord 纯状态机
+  快照,全史按需 `store.checks(name)`;json 后端 history 合成 check 事件,
+  status 时间线两后端统一;
+- ~~discovery_method CHECK~~ **已做**(v2c,migrate_v2c_smalls.sql);
+- **数据源字典表:维持缓议**(定案)—— 触发条件是"要给 field 挂说明/负责人
+  等元素级属性"的真需求出现;在那之前 TEXT[] 够用,不预建;
+- ~~status 时间线展示~~ 已随 v2b 落地。
+另收口两处 \d 观察(v2c):status 重复索引删除、factor_state_new_* 命名归一。

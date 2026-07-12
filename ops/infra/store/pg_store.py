@@ -103,8 +103,7 @@ class PostgresStateStore(StateStore):
         滚出 __init__)+ 生产 scripts/postgres 迁移。"""
         self.pool = get_pool(conninfo)
 
-    def _row_to_record(self, row,
-                       checks: list[CheckRecord] | None = None) -> FactorRecord:
+    def _row_to_record(self, row) -> FactorRecord:
         name, status, version, submitted_at, entered_at, updated_at = row
         return FactorRecord(
             name=name,
@@ -113,17 +112,17 @@ class PostgresStateStore(StateStore):
             submitted_at=_ts_out(submitted_at),
             entered_at=_ts_out(entered_at),
             version=version,
-            check_history=checks or [],
         )
 
-    def _fetch_checks(self, conn, name: str) -> list[CheckRecord]:
-        """check_history 内存形态:从事件表组装(op='check',at 升序)。
-        CheckRecord.finished_at ← 事件 at(发射时 at = finished_at or now)。"""
-        rows = conn.execute(
-            f"SELECT {_EVENT_COLS} FROM factor_history "
-            "WHERE name = %s AND op = 'check' ORDER BY at, id",
-            (name,),
-        ).fetchall()
+    def checks(self, name: str) -> "list[CheckRecord]":
+        """check 全史:从事件表组装(op='check',at 升序;v2c 自 record 剥离,
+        按需查)。CheckRecord.finished_at ← 事件 at(发射时 at=finished_at|now)。"""
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                f"SELECT {_EVENT_COLS} FROM factor_history "
+                "WHERE name = %s AND op = 'check' ORDER BY at, id",
+                (name,),
+            ).fetchall()
         out = []
         for r in rows:
             e = _row_to_event(r)
@@ -140,16 +139,13 @@ class PostgresStateStore(StateStore):
         sql = f"SELECT {_COLS} FROM factor_state WHERE name = %s"
         with self.pool.connection() as conn:
             row = conn.execute(sql, (name,)).fetchone()
-            if row is None:
-                return None
-            return self._row_to_record(row, self._fetch_checks(conn, name))
+            return self._row_to_record(row) if row else None
 
     @staticmethod
     def put_on(conn, record: FactorRecord, stamp: bool = True) -> None:
         """在调用方给定的连接/事务上执行 put —— repository.register 用它与
         factor_info 的 upsert 合进同一个事务(原子入库)。
-        注:record.check_history 不在此落库(事件表是正主,经 append_check /
-        emit_on 写);register 的新记录本就是空史。"""
+        注:check 史在事件表(v2c 起 record 无 check_history 字段)。"""
         # stamp=False preserves record.updated_at as-is (used by migration to
         # keep the original Redis timestamp). Normal writes bump it to now.
         if stamp:
@@ -177,7 +173,6 @@ class PostgresStateStore(StateStore):
         """列出所有因子状态，可按 status 过滤。
 
         author 过滤已移除（author 在 factor_info 表，需要 JOIN）。
-        check_history 不取(批量读不扫事件表;要全史走 get)。
         """
         sql = f"SELECT {_COLS} FROM factor_state"
         params: list[Any] = []

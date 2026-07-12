@@ -42,9 +42,10 @@ def test_put_get_roundtrip(state_store, seed_info):
     assert got is not None
     assert got.name == "A"
     assert got.status == FactorStatus.SUBMITTED
-    assert len(got.check_history) == 1
-    assert got.check_history[0].passed is True
-    assert got.check_history[0].finished_at == "2026-07-05T00:05:00"
+    checks = state_store.checks("A")  # v2c: 全史按需查
+    assert len(checks) == 1
+    assert checks[0].passed is True
+    assert checks[0].finished_at == "2026-07-05T00:05:00"
     assert state_store.get("missing") is None
 
 
@@ -82,10 +83,10 @@ def test_append_check_appends(state_store, seed_info):
     state_store.append_check("A", CheckRecord(started_at="2026-07-05T00:00:00", passed=True))
     state_store.append_check("A", CheckRecord(started_at="2026-07-05T01:00:00", passed=False,
                                               failed_stage="checkbias"))
-    got = state_store.get("A")
-    assert len(got.check_history) == 2
-    assert got.check_history[0].passed is True
-    assert got.check_history[1].failed_stage == "checkbias"
+    checks = state_store.checks("A")
+    assert len(checks) == 2
+    assert checks[0].passed is True
+    assert checks[1].failed_stage == "checkbias"
 
 
 def test_append_check_missing_raises(state_store):

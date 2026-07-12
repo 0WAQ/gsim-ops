@@ -117,7 +117,7 @@ def test_approve_correlation_rejected(test_config, seed_factor):
     ops = [e.op for e in store.history("AlphaWbaiApp")]
     assert "approve" in ops and "entered" in ops
     # check 时间线不再混入伪造的 approved 记录
-    assert all(c.fail_reason != "approved" for c in rec.check_history)
+    assert all(c.fail_reason != "approved" for c in store.checks("AlphaWbaiApp"))
 
 
 def test_approve_non_correlation_rejected(test_config, seed_factor):

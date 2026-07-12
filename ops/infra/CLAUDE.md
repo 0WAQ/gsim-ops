@@ -178,7 +178,7 @@ Per-factor advisory lock. Serializes all ops mutations on a single factor. **两
 
 ### `pg_store.py` (default since 2026-07-04, 真相源)
 
-`PostgresStateStore` — 因子生命周期真相源,从 Redis 迁入。`factor_state` 表 `id SERIAL` 主键 + `name UNIQUE`(2026-07-06 去掉 library_id / author / submitted_by —— 永远单库,author 移到 factor_info)。`name` 外键 `REFERENCES factor_info(name) ON DELETE CASCADE`。`FactorRecord` 现为纯状态机(status/version/submitted_at/entered_at/updated_at;**v2b 2026-07-12:rejected_at/last_fail_stage/last_fail_reason 三列 + check_history JSONB 退役**,事实迁 `factor_history` 全操作审计表 —— 同模块持有其 DDL 与唯一发射口 `emit_on`)。**factor_history**:一次操作一条记录(op ∈ submit/overwrite/check/approve/restage/cancel/rm/backfill/entered,`HISTORY_OPS` 与 DB chk_op 同一提交改),刻意无 FK(**历史活过 ops rm**),actor 经 `ops/utils/actor.py::current_actor`(SUDO_USER 优先)。发射与业务写**同事务**:transition 的 `op:` 参数 + 置 ACTIVE 自动发 'entered'(三径合流)、append_check = op='check' 事件、repo.delete/register 在各自事务内 emit。读侧:`get()` 的 check_history 从事件表组装(内存形态保留);`last_fail(name)` = 最新 passed=FALSE 的 check 事件(原三列的派生替身);`history(name)` = 完整时间线。json dev/test 后端无事件表:op/actor 忽略、last_fail 从 check_history 扫描合成、history 返回 []。原子性用 PG 事务 + `SELECT ... FOR UPDATE` 行级锁替代 Redis 的 WATCH/MULTI/EXEC(transition/append_check 锁行读改写,天然串行,无应用层重试)。时间戳列 TIMESTAMPTZ,读写边界做 ISO string ↔ 本地 tz 转换(`_ts_in`/`_ts_out`,与 Redis `_now()` 格式一致 —— naive datetime 必须打本地 tz 再入库,否则 PG 当 UTC 偏 8h)。连接池/UPSERT 范式同 `snapshot/pg_store.py`。迁移工具 `ops/tools/state_to_pg.py`(旧)+ `scripts/postgres/migrate_to_snapshot.sql`(三表迁移)。
+`PostgresStateStore` — 因子生命周期真相源,从 Redis 迁入。`factor_state` 表 `id SERIAL` 主键 + `name UNIQUE`(2026-07-06 去掉 library_id / author / submitted_by —— 永远单库,author 移到 factor_info)。`name` 外键 `REFERENCES factor_info(name) ON DELETE CASCADE`。`FactorRecord` 现为纯状态机(status/version/submitted_at/entered_at/updated_at;**v2b 2026-07-12:rejected_at/last_fail_stage/last_fail_reason 三列 + check_history JSONB 退役**,事实迁 `factor_history` 全操作审计表 —— 同模块持有其 DDL 与唯一发射口 `emit_on`)。**factor_history**:一次操作一条记录(op ∈ submit/overwrite/check/approve/restage/cancel/rm/backfill/entered,`HISTORY_OPS` 与 DB chk_op 同一提交改),刻意无 FK(**历史活过 ops rm**),actor 经 `ops/utils/actor.py::current_actor`(SUDO_USER 优先)。发射与业务写**同事务**:transition 的 `op:` 参数 + 置 ACTIVE 自动发 'entered'(三径合流)、append_check = op='check' 事件、repo.delete/register 在各自事务内 emit。读侧:`get()` 的 check_history 从事件表组装(内存形态保留);`last_fail(name)` = 最新 passed=FALSE 的 check 事件(原三列的派生替身);`history(name)` = 完整时间线。v2c(遗留项④):check 全史自 FactorRecord 剥离,按需 `checks(name)`(PG 从事件表组装 / json 读记录侧原始列表);json 后端 op/actor 忽略、last_fail 扫描合成、history 合成 check 事件(status 时间线两后端统一)。原子性用 PG 事务 + `SELECT ... FOR UPDATE` 行级锁替代 Redis 的 WATCH/MULTI/EXEC(transition/append_check 锁行读改写,天然串行,无应用层重试)。时间戳列 TIMESTAMPTZ,读写边界做 ISO string ↔ 本地 tz 转换(`_ts_in`/`_ts_out`,与 Redis `_now()` 格式一致 —— naive datetime 必须打本地 tz 再入库,否则 PG 当 UTC 偏 8h)。连接池/UPSERT 范式同 `snapshot/pg_store.py`。迁移工具 `ops/tools/state_to_pg.py`(旧)+ `scripts/postgres/migrate_to_snapshot.sql`(三表迁移)。
 
 ### `redis_store.py` — 已删除(2026-07-07 Wave 1)
 
@@ -194,7 +194,7 @@ state 2026-07-04 迁 PG 后 redis 仅名义回退;三表拆分后它读写已删
 - Single fcntl lock over the full read-modify-write window
 - Atomic write via tempfile + `os.replace`
 - Stale `.tmp` cleanup (> 1h) on lock acquisition
-- Methods: `get`, `put`, `list`, `transition`, `append_check`, `delete`
+- Methods: `get`, `put`, `list`, `transition`, `append_check`, `delete`, `checks`, `last_fail`, `history`(后三个 v2b/v2c 派生读;check 史存记录侧 raw dict,由 store 管理 —— FactorRecord 已无该字段,写回须从 raw 保留)
 
 ## S3 — 已删除(2026-07-07 Wave 1)
 
