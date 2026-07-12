@@ -280,6 +280,30 @@ artifact-orphan。
 
 ---
 
+## 处置结果(2026-07-12 执行,分支 claude/doctor-v11)
+
+按上表优先级 D→B+C→A 逐批执行,每批"先贴材料等拍板再动",全程零意外。执行原文摘录
+见 `VERIFY-DOCTOR-V11-RESULT.md`。
+
+| 批 | 对象 | 手段 | 计数 | 结果 |
+|---|---|---|---|---|
+| D | 4 alien 临时文件 | 人工 `sudo rm`(老板) | 4 | 全删;对应正式 npy 在位 |
+| B+C(feature 侧) | 62 feature 文件(31 因子 × v1+v2) | `ops doctor --fix artifact-orphan -y` | 62 | 62/62 已修复,零 skip/error;checked 24241→24179 |
+| A+C(src 侧) | 107 src-orphan 目录 | `scripts/cleanup_src_orphans.py --apply`(sudo,锁内 PG 复核) | 107 | 107/107 removed,零 skip/error |
+
+**复跑归零**(`ops doctor` 全库,EXIT=0):src-drift / artifact-orphan / snapshot-stale /
+info-orphan / staging-drift / dump-orphan 全 0;仅剩 **pool-ghost 8 条合法 WARN**
+(approve 豁免 + archive 瞬态,设计内不可修)。
+
+**边界确认**:C 批 5 个 ybai 两面(长名 src + 短名 feature)按长/短两名分别处置(feature 走
+B+C fix、src 走 cleanup 脚本),两面均清。删除 `AlphaZxu_260414_VOV_delay1` 时确认与在库
+ACTIVE 的 `AlphaZxu_260414_VOV`(无 `_delay1` 后缀)是两个名字,在库因子未受波及 —— apply
+时刻锁内 PG 复核亦兜此层。
+
+L1 / L2 挂账仍在(写入侧根因,非本轮处置)。
+
+---
+
 ## 独立挂账(非本轮处置,写入侧根因)
 
 - **L1 · meta.json 写入侧校验缺口**:`author` 大小写未归一(`Fguo`/`fguo` 同一人分裂);
