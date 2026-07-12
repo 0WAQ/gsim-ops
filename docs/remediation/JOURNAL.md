@@ -1574,4 +1574,9 @@ list Total 8252 / TEXT[] glob / 时间线 / doctor exit=0 / e2e 全过。
   store 管理该键,写回自 raw 保留);json history 合成 check 事件,status
   时间线两后端统一(cli 回落分支删除);report.py 改 store.checks;
 - **字典表维持缓议**(定案):触发条件 = field 元素级属性的真需求。
-门禁:173 passed / 8 契约 / pyright 0。生产迁移低风险(幂等纯 DDL,无删数据)。
+门禁:173 passed / 8 契约 / pyright 0。
+
+**v2c 生产执行(2026-07-12,无窗口)**:执行者空档核对(无 check、PG 无活跃
+查询)后一次通过 —— 约束名归一、status 单索引、chk_discovery 在位、Total 8252、
+timeline 无回归。v2c 的 SQL 是纯元数据操作且新旧代码对迁移前后库均兼容,
+是三批里唯一不需要窗口纪律的(对照 v2b 的禁写窗口 —— 风险分级即流程分级)。
