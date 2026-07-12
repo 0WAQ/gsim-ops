@@ -6,9 +6,10 @@ from ops.core.factormeta import FactorMeta, parse_factor
 from ops.core.paths import META_FILENAME
 from ops.core.state import FactorStatus
 from ops.infra.config import Config
+from ops.infra.lock import FactorLocked, factor_lock
 from ops.infra.repository import FactorRepository
 from ops.utils.clock import now_iso
-from ops.utils.printer import banner, bottom, error, info
+from ops.utils.printer import banner, bottom, error, info, warn
 
 
 def _iter_alpha_src(config: Config) -> list[Path]:
@@ -60,7 +61,7 @@ def run_backfill(args):
         info("构建 npy_index ...")
         npy_index = build_npy_index(config.nio_data_path)
 
-    created = skipped = failed = state_added = 0
+    created = skipped = failed = state_added = locked = 0
     failures: list[tuple[str, str]] = []
     now = now_iso()
 
@@ -76,34 +77,46 @@ def run_backfill(args):
             continue
 
         # info + state 记录:repo.register 一个事务原子写(legacy 因子已在库,
-        # status=ACTIVE + entered_at=now;submitted_at 留空 —— 真实提交时间不可知)
+        # status=ACTIVE + entered_at=now;submitted_at 留空 —— 真实提交时间不可知)。
+        # 全程持因子锁(2026-07-12 对抗评审):backfill 原是全库唯一不持锁的
+        # 状态写入方,会击穿 doctor 五道闸的 TOCTOU 防线(锁内重验挡不住
+        # 无锁写入者在"重验通过 → 删除"窗口里把因子登记成 ACTIVE)。
+        # repository.register 的契约本就要求调用方持锁,此处补齐。
         name = msg or factor_dir.name
-        if not dry_run and repo.record(name) is None:
-            meta_path = factor_dir / META_FILENAME
+        if not dry_run:
             try:
-                meta = FactorMeta.load(meta_path)
-                author = meta.author or "unknown"
-                discovery_method = meta.discovery_method or "backfill"
-            except Exception:
-                author = "unknown"
-                discovery_method = "backfill"
+                with factor_lock(name, config):
+                    if repo.record(name) is None:
+                        meta_path = factor_dir / META_FILENAME
+                        try:
+                            meta = FactorMeta.load(meta_path)
+                            author = meta.author or "unknown"
+                            discovery_method = meta.discovery_method or "backfill"
+                        except Exception:
+                            author = "unknown"
+                            discovery_method = "backfill"
 
-            repo.register(
-                FactorIdentity(
-                    name=name,
-                    author=author,
-                    discovery_method=discovery_method,
-                    created_at=now,
-                ),
-                status=FactorStatus.ACTIVE,
-                entered_at=now,
-            )
-            state_added += 1
+                        repo.register(
+                            FactorIdentity(
+                                name=name,
+                                author=author,
+                                discovery_method=discovery_method,
+                                created_at=now,
+                            ),
+                            status=FactorStatus.ACTIVE,
+                            entered_at=now,
+                        )
+                        state_added += 1
+            except FactorLocked:
+                locked += 1
+                warn(f"  {name}: 因子锁被持有,跳过(重跑 backfill 再补)")
 
     banner("回填汇总")
     info(f"✔ meta.json 新建 : {created:>4}")
     info(f"  meta.json 已存在 : {skipped:>4}")
     info(f"  state record 新增 : {state_added:>4}")
+    if locked:
+        info(f"  锁跳过 : {locked:>4}")
     if failed:
         error(f"✘ 失败 : {failed:>4}")
         for name, reason in failures[:20]:
