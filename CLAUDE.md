@@ -67,6 +67,9 @@ uv run ops clear -u lhw -y           # 按 author 推断过滤,跳过确认
 uv run ops setup                     # 拉平本机 alphalib 部署(幂等补建缺失目录/软链/权限组)
 uv run ops setup --check             # 只读体检:✔/✘/⚠ 清单 + 退出码(FAIL→1)
 uv run ops setup --migrate-mount     # 声明变更收敛:JFS 挂载点迁到 hosts 声明位置(TTY + 确认)
+uv run ops doctor                    # 盘 ↔ PG 数据对账,纯只读报告(零 sudo;FAIL→1)
+uv run ops doctor --family pool-ghost --format json  # 族过滤 + 全量明细 JSON
+uv run ops doctor --fix snapshot-stale  # 按族修复(逐族确认;可修族见 --help)
 uv run ops combo run <dir> --start 20250102 --end 20251231          # combo 端到端代测 (predict+backtest)
 uv run ops combo run <dir> --start 20241210 --end 20241231 --predict-start 20241201 --stats simple  # 留 warmup, 单 stats
 ```
@@ -111,8 +114,9 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
 | `setup` | 声明式管理本机 alphalib 部署:hosts 块按 hostname 匹配挂载点,缺省幂等补建(目录/软链/权限组),`--check` 只读体检。JFS 挂载本身归 join.sh | `ops/cli/setup.py` + `ops/services/setup/` |
+| `doctor` | 盘 ↔ PG 数据对账(7 族:池鬼影/stale 快照/info 孤儿/src·staging 漂移/产物孤儿/本机 dump 孤儿)。缺省纯只读;`--fix <族>` 逐族确认修复(五道闸删除管道) | `ops/cli/doctor.py` + `ops/services/doctor/` |
 
-Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwrite`), `recheck`(改名 `restage`), `health`(2026-07-07 Wave 2 退役: --fix 写的是没人读的僵尸表;对账职能归未来 ops doctor), `sync`(2026-07-07 Wave 1 退役: S3 模型已被 JFS 取代且回退配置早已不可用), `refresh`(2026-07-06 删除 —— metrics/datasources/bcorr 改为入库时不可变快照,不再支持重算;需最新表现须重跑 backtest)。
+Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwrite`), `recheck`(改名 `restage`), `health`(2026-07-07 Wave 2 退役: --fix 写的是没人读的僵尸表;对账职能已由 `ops doctor` 落地,2026-07-12), `sync`(2026-07-07 Wave 1 退役: S3 模型已被 JFS 取代且回退配置早已不可用), `refresh`(2026-07-06 删除 —— metrics/datasources/bcorr 改为入库时不可变快照,不再支持重算;需最新表现须重跑 backtest)。
 
 ### Design Principles
 

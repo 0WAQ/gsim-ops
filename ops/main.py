@@ -8,6 +8,7 @@ from ops.cli.cancel import add_cancel_subparser
 from ops.cli.check import add_check_subparser
 from ops.cli.clear import add_clear_subparser
 from ops.cli.combo import add_combo_subparser
+from ops.cli.doctor import add_doctor_subparser
 from ops.cli.info import add_info_subparser
 from ops.cli.list import add_list_subparser
 from ops.cli.pack import add_pack_subparser
@@ -39,6 +40,7 @@ SUBPARSER_REGISTRARS = (
     add_clear_subparser,
     add_combo_subparser,
     add_setup_subparser,
+    add_doctor_subparser,
 )
 
 
