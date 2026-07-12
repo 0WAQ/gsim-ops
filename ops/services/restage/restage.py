@@ -124,7 +124,7 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config,
         info(f"    ✔ 已回收 {r}")
 
     # CAS: 只允许从召回前状态(ACTIVE/REJECTED)翻 SUBMITTED
-    repo.transition(name, FactorStatus.SUBMITTED, expect=rec.status)
+    repo.transition(name, FactorStatus.SUBMITTED, expect=rec.status, op="restage")
 
     # 离库 → 旧快照失效。快照语义是"入库事件的不可变快照",re-check 通过后 archive
     # 会写新快照;不删则 insert 撞 name UNIQUE 被吞,反查/报告永远停在旧代码的指标

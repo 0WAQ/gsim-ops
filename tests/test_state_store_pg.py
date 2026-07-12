@@ -33,18 +33,18 @@ def _rec(name="A", status=FactorStatus.SUBMITTED,
 
 def test_put_get_roundtrip(state_store, seed_info):
     seed_info("A")
-    rec = _rec()
-    rec.check_history = [
-        CheckRecord(started_at="2026-07-05T00:00:00", finished_at="2026-07-05T00:05:00",
-                    passed=True),
-    ]
-    state_store.put(rec)
+    state_store.put(_rec())
+    # v2b: check_history 不随 put 落库(事件表是正主),经 append_check 写
+    state_store.append_check("A", CheckRecord(
+        started_at="2026-07-05T00:00:00", finished_at="2026-07-05T00:05:00",
+        passed=True))
     got = state_store.get("A")
     assert got is not None
     assert got.name == "A"
     assert got.status == FactorStatus.SUBMITTED
     assert len(got.check_history) == 1
     assert got.check_history[0].passed is True
+    assert got.check_history[0].finished_at == "2026-07-05T00:05:00"
     assert state_store.get("missing") is None
 
 

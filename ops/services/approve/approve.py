@@ -14,7 +14,7 @@
 approve 不重跑任何阶段,只翻状态。
 """
 from ops.core.factor import Factor
-from ops.core.state import CORRELATION, CheckRecord, FactorRecord, FactorStatus
+from ops.core.state import CORRELATION, FactorStatus
 from ops.infra.config import Config
 from ops.infra.repository import FactorRepository
 from ops.services._batch import BatchResult, SkipFactor, apply_locked, confirm_or_abort
@@ -22,9 +22,10 @@ from ops.utils.clock import now_iso as _now
 from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 
-def _eligible(rec: FactorRecord) -> bool:
-    # 语义 API(2026-07-09):谓词在 FactorRecord 上,不再跨包问 check 的 stage 表
-    return rec.correlation_rejected()
+def _eligible(f: Factor) -> bool:
+    # 语义 API:谓词在 Factor 聚合上(v2b 起需要 state + last_fail 两个切面 ——
+    # "最近失败"是 factor_history 的派生事实,FactorRecord 已无 last_fail_*)
+    return f.correlation_rejected()
 
 
 def _resolve_targets(args, repo: FactorRepository) -> tuple[list[Factor], list[tuple[Factor, str]]]:
@@ -42,8 +43,8 @@ def _resolve_targets(args, repo: FactorRepository) -> tuple[list[Factor], list[t
         if factor.state.status != FactorStatus.REJECTED:
             error(f"  ✘ {name} 状态为 {factor.state.status.value},approve 仅支持 rejected")
             return [], []
-        if factor.state.last_fail_stage != CORRELATION:
-            error(f"  ✘ {name} 失败阶段为 {factor.state.last_fail_stage},approve 仅支持 correlation")
+        if factor.last_fail_stage != CORRELATION:
+            error(f"  ✘ {name} 失败阶段为 {factor.last_fail_stage},approve 仅支持 correlation")
             return [], []
         return [factor], []
 
@@ -57,7 +58,7 @@ def _resolve_targets(args, repo: FactorRepository) -> tuple[list[Factor], list[t
     targets: list[Factor] = []
     skipped: list[tuple[Factor, str]] = []
     for f in factors:
-        if f.state is not None and _eligible(f.state):
+        if _eligible(f):
             targets.append(f)
         else:
             skipped.append((f, f"failed at {f.last_fail_stage or '?'}"))
@@ -68,7 +69,7 @@ def _print_plan(targets: list[Factor],
                 skipped: list[tuple[Factor, str]]) -> None:
     highlight(f"  将 approve {len(targets)} 个因子 → active:")
     for f in targets:
-        rejected_at = f.state.rejected_at if f.state else None
+        rejected_at = f.last_fail.at if f.last_fail else None
         info(f"    · {f.name:<40}  author={f.identity.author or '?':<10}  rejected_at={rejected_at or '?'}")
     if skipped:
         highlight(f"  跳过 {len(skipped)} 个(非 correlation 失败):")
@@ -76,28 +77,24 @@ def _print_plan(targets: list[Factor],
             info(f"    · {f.name:<40}  {why}")
 
 
-def _approve_one(rec: FactorRecord, repo: FactorRepository) -> None:
-    name = rec.name
+def _approve_one(f: Factor, repo: FactorRepository) -> None:
+    name = f.name
+    assert f.state is not None  # _eligible 已保证
 
     now = _now()
     # CAS: 只允许 REJECTED → ACTIVE(FOR UPDATE 行锁内校验;expect 不符抛
     # StateConflict,由批量骨架按'跳过'处理)。原 transition 无 from-status
     # 守卫,任何状态都能被翻成 ACTIVE(full-review 第三部分 §3.2)。
+    # 事件:op='approve'(豁免决定,含 actor)+ 自动 'entered'(入库统一标记)
+    # —— 原先伪造一条 passed=True 的 CheckRecord 留痕,v2b 起审计有真名分,
+    # check 时间线不再混入非 check 事件。
     repo.transition(
         name,
         FactorStatus.ACTIVE,
         expect=FactorStatus.REJECTED,
-        entered_at=rec.entered_at or now,
-        last_fail_stage=None,
-        last_fail_reason=None,
+        op="approve",
+        entered_at=f.state.entered_at or now,
     )
-    repo.append_check(name, CheckRecord(
-        started_at=now,
-        finished_at=now,
-        passed=True,
-        failed_stage=None,
-        fail_reason="approved",
-    ))
 
 
 def run_approve(args) -> BatchResult | None:
@@ -122,12 +119,13 @@ def run_approve(args) -> BatchResult | None:
         return None
 
     def _action(name: str) -> None:
-        # 锁内复验(TOCTOU):确认挂起期间因子可能已被 restage 召回 / rm 删除
-        fresh = repo.record(name)
-        if fresh is None:
-            raise SkipFactor("state 记录已不存在")
+        # 锁内复验(TOCTOU):确认挂起期间因子可能已被 restage 召回 / rm 删除。
+        # repo.get(全景,含 last_fail 派生)—— 资格谓词 v2b 起需要两个切面
+        fresh = repo.get(name)
+        if fresh is None or fresh.state is None:
+            raise SkipFactor("记录已不存在")
         if not _eligible(fresh):
-            raise SkipFactor(f"确认期间状态已变: status={fresh.status.value}, "
+            raise SkipFactor(f"确认期间状态已变: status={fresh.state.status.value}, "
                              f"fail_stage={fresh.last_fail_stage}")
         _approve_one(fresh, repo)
         info(f"  ✔ {name} rejected → active")

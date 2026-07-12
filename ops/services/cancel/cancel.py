@@ -133,7 +133,7 @@ def _cancel_one(name: str, repo: FactorRepository) -> None:
     # info",顺序反了会泄漏孤儿 info 行,full-review P0-6 同族;级联一步消灭
     # 中间态)。resolve 阶段的 entered_at 守卫保证走到这里的因子从未入库,
     # 身份行可安全移除;重新 submit 会重建。
-    if repo.delete(name):
+    if repo.delete(name, op="cancel"):
         info(f"    ✔ 已删除 factor_info + 级联 state record {name}")
     else:
         warn(f"    ⚠ 记录 {name} 已不存在")

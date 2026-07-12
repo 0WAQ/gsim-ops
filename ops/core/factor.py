@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ops.core.state import FactorRecord, FactorStatus
+from ops.core.state import CORRELATION, FactorRecord, FactorStatus, HistoryEvent
 from ops.utils.log import logger
 
 
@@ -75,11 +75,15 @@ class Factor:
 
     - state 为 None:factor_info 有行但 factor_state 无(异常孤儿,对账场景);
     - snapshot 为 None:未入库,或经 approve 豁免入库(合法无快照)。
+    - last_fail:最近一次 check 失败(factor_history 的派生事实,schema v2b;
+      state 三列 rejected_at/last_fail_* 已删)。None = 从未失败/无事件。
+      注意它不随 approve/restage 清空 —— 消费方一律与 status 联判。
     frozen 只冻结切面绑定;切面对象本身的可变性由各自类型决定。
     """
     identity: FactorIdentity
     state: FactorRecord | None = None
     snapshot: FactorSnapshot | None = None
+    last_fail: HistoryEvent | None = None
 
     def __post_init__(self) -> None:
         # 软校验:快照必须锚定当次入库事件。迁移期残留/删除失败的 stale 快照在
@@ -101,4 +105,18 @@ class Factor:
 
     @property
     def last_fail_stage(self) -> str | None:
-        return self.state.last_fail_stage if self.state is not None else None
+        return self.last_fail.failed_stage if self.last_fail is not None else None
+
+    @property
+    def last_fail_reason(self) -> str | None:
+        return self.last_fail.fail_reason if self.last_fail is not None else None
+
+    def correlation_rejected(self) -> bool:
+        """approve(多样性豁免)的资格谓词:当前 REJECTED 且最近失败在
+        correlation stage。其他阶段(checkbias/checkpoint/compliance)是
+        质量问题,不属豁免范畴。(原 FactorRecord 语义 API,v2b 随 last_fail
+        派生化上移到聚合 —— 谓词需要 state + history 两个切面。)"""
+        return (self.state is not None
+                and self.state.status == FactorStatus.REJECTED
+                and self.last_fail is not None
+                and self.last_fail.failed_stage == CORRELATION)

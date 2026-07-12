@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 
 from ops.core.factor import Factor, FactorIdentity, FactorSnapshot
 from ops.core.paths import FactorPaths
-from ops.core.state import CheckRecord, FactorRecord, FactorStatus
+from ops.core.state import CheckRecord, FactorRecord, FactorStatus, HistoryEvent
 from ops.infra.info import default_info_store
 from ops.infra.lock import factor_lock
 from ops.infra.pg import get_pool
@@ -47,6 +47,7 @@ from ops.infra.schema import ensure_schemas
 from ops.infra.snapshot import default_snapshot_store
 from ops.infra.snapshot.pg_store import metric_order_expr, snapshot_where
 from ops.infra.store import default_store
+from ops.utils.actor import current_actor
 from ops.utils.clock import now_iso
 from ops.utils.factor_dir import clean_pycache, rewrite_module_path
 from ops.utils.log import logger
@@ -71,15 +72,27 @@ class ArtifactScope(Flag):
     ALL = CHECK | SERVING
 
 
-# find() 的 SELECT 列(三表 LEFT JOIN)。state 的 check_history 有意不取:
-# find 是批量目录读,全史 JSONB 很重;要全史走 get()/record()。
+# find() 的 SELECT 列(三表 LEFT JOIN + 最近失败 LATERAL)。check_history
+# 有意不取:find 是批量目录读,全史很重;要全史走 get()/record()。
+# lf.* 来自 factor_history 派生(v2b:state 的 rejected_at/last_fail_* 已删列)。
 _FIND_COLS = (
     "i.name, i.author, i.discovery_method, i.created_at, "
-    "s.status, s.version, s.submitted_at, s.entered_at, s.rejected_at, "
-    "s.last_fail_stage, s.last_fail_reason, s.updated_at, "
+    "s.status, s.version, s.submitted_at, s.entered_at, s.updated_at, "
     "n.ret, n.shrp, n.mdd, n.tvr, n.fitness, n.fields, n.tables, n.delay, "
-    "n.max_bcorr, n.max_bcorr_factor, n.snapshot_at"
+    "n.max_bcorr, n.max_bcorr_factor, n.snapshot_at, "
+    "lf.at, lf.failed_stage, lf.fail_reason"
 )
+
+# 最近一次 check 失败(与 StateStore.last_fail 同语义的 SQL 形态)。
+# 8k 因子 × 每因子个位数事件 + ix_fh_name_at 索引,LATERAL 成本可忽略。
+_LAST_FAIL_LATERAL = """
+LEFT JOIN LATERAL (
+    SELECT h.at, h.failed_stage, h.fail_reason
+    FROM factor_history h
+    WHERE h.name = i.name AND h.op = 'check' AND h.passed = FALSE
+    ORDER BY h.at DESC, h.id DESC LIMIT 1
+) lf ON TRUE
+"""
 
 
 class FactorRepository:
@@ -138,12 +151,14 @@ class FactorRepository:
         return self._state.get(name)
 
     def get(self, name: str) -> Factor | None:
-        """单因子全景(identity + state + snapshot)。None = factor_info 无行。"""
+        """单因子全景(identity + state + snapshot + last_fail 派生)。
+        None = factor_info 无行。"""
         if not self._is_pg:
             rec = self._state.get(name)
             if rec is None:
                 return None
-            return Factor(identity=FactorIdentity(name=name), state=rec)
+            return Factor(identity=FactorIdentity(name=name), state=rec,
+                          last_fail=self._state.last_fail(name))
         identity = self._info.get(name)
         if identity is None:
             return None
@@ -151,7 +166,12 @@ class FactorRepository:
             identity=identity,
             state=self._state.get(name),
             snapshot=self._snapshot.get(name),
+            last_fail=self._state.last_fail(name),
         )
+
+    def history(self, name: str) -> list[HistoryEvent]:
+        """完整生命周期事件时间线(status 详情;json dev/test 后端返回 [])。"""
+        return self._state.history(name)
 
     def find(
         self,
@@ -195,7 +215,7 @@ class FactorRepository:
             where.append("i.author = %s")
             params.append(author)
         if fail_stage:
-            where.append("s.last_fail_stage = %s")
+            where.append("lf.failed_stage = %s")
             params.append(fail_stage)
 
         snap_clauses, snap_params = snapshot_where(
@@ -223,6 +243,7 @@ class FactorRepository:
             FROM factor_info i
             LEFT JOIN factor_state s ON s.name = i.name
             LEFT JOIN factor_snapshot n ON n.name = i.name
+            {_LAST_FAIL_LATERAL}
             WHERE {" AND ".join(where)}
             {order_sql}
             {limit_sql}
@@ -237,10 +258,10 @@ class FactorRepository:
     @staticmethod
     def _row_to_factor(row) -> Factor:
         (name, author, discovery_method, created_at,
-         status, version, submitted_at, entered_at, rejected_at,
-         last_fail_stage, last_fail_reason, updated_at,
+         status, version, submitted_at, entered_at, updated_at,
          ret, shrp, mdd, tvr, fitness, fields, tables, delay,
-         max_bcorr, max_bcorr_factor, snapshot_at) = row
+         max_bcorr, max_bcorr_factor, snapshot_at,
+         lf_at, lf_stage, lf_reason) = row
         identity = FactorIdentity(
             name=name,
             author=author,
@@ -255,9 +276,6 @@ class FactorRepository:
                 updated_at=_ts_out(updated_at),
                 submitted_at=_ts_out(submitted_at),
                 entered_at=_ts_out(entered_at),
-                rejected_at=_ts_out(rejected_at),
-                last_fail_stage=last_fail_stage,
-                last_fail_reason=last_fail_reason,
                 version=version,
                 check_history=[],  # find 不取全史(见 _FIND_COLS 注)
             )
@@ -273,7 +291,14 @@ class FactorRepository:
                 max_bcorr_factor=max_bcorr_factor,
                 snapshot_at=_ts_out(snapshot_at),
             )
-        return Factor(identity=identity, state=state, snapshot=snapshot)
+        last_fail = None
+        if lf_stage is not None:  # chk_fail_has_stage:失败事件必有 stage
+            last_fail = HistoryEvent(
+                name=name, op="check", at=_ts_out(lf_at) or "",
+                passed=False, failed_stage=lf_stage, fail_reason=lf_reason,
+            )
+        return Factor(identity=identity, state=state, snapshot=snapshot,
+                      last_fail=last_fail)
 
     # ------------------------------------------------------------ 记录面:写
     def register(
@@ -284,12 +309,15 @@ class FactorRepository:
         submitted_at: str | None = None,
         entered_at: str | None = None,
         version: int = 1,
+        op: str | None = None,
     ) -> None:
-        """登记因子:info(身份)+ state(状态)一个事务原子写。
+        """登记因子:info(身份)+ state(状态)+ 事件一个事务原子写。
 
         调用方(submit/backfill/check._ensure_record)在 factor_lock 内先判
         不存在再调;info 是 upsert、state 是 put(upsert),崩溃重跑幂等。
-        json dev/test 后端只有 state,identity 落不了库(尽力而为语义)。
+        op(submit/backfill)发射命令事件;status=ACTIVE(backfill)另发
+        'entered'(入库统一标记,与 transition 的自动发射同规)。
+        json dev/test 后端只有 state,identity/事件落不了库(尽力而为语义)。
         """
         record = FactorRecord(
             name=identity.name,
@@ -305,20 +333,32 @@ class FactorRepository:
         # 单事务:两表要么都写、要么都不写(原先 submit/backfill/check 各自
         # 顺序两次调用,崩在中间留"有 info 无 state"的半截因子)。
         from ops.infra.info.pg_store import PostgresInfoStore
-        from ops.infra.store.pg_store import PostgresStateStore
+        from ops.infra.store.pg_store import PostgresStateStore, emit_on
 
+        actor = current_actor()
         pool = get_pool(self._conninfo)
         with pool.connection() as conn, conn.transaction():
             PostgresInfoStore.upsert_on(conn, identity)
             PostgresStateStore.put_on(conn, record)
+            if op is not None:
+                emit_on(conn, HistoryEvent(
+                    name=identity.name, op=op,
+                    at=record.updated_at or now_iso(), actor=actor))
+            if status == FactorStatus.ACTIVE:
+                emit_on(conn, HistoryEvent(
+                    name=identity.name, op="entered",
+                    at=record.updated_at or now_iso(), actor=actor))
 
     def transition(self, name: str, to_status: FactorStatus,
-                   expect: FactorStatus | None = None, **updates) -> FactorRecord:
-        """状态转移(CAS 语义透传 StateStore.transition)。"""
-        return self._state.transition(name, to_status, expect=expect, **updates)
+                   expect: FactorStatus | None = None,
+                   op: str | None = None, **updates) -> FactorRecord:
+        """状态转移(CAS 语义透传 StateStore.transition)。op 非 None 时同
+        事务发射事件;置 ACTIVE 自动发射 'entered'(store 层保证)。"""
+        return self._state.transition(name, to_status, expect=expect,
+                                      op=op, actor=current_actor(), **updates)
 
     def append_check(self, name: str, check: CheckRecord) -> None:
-        self._state.append_check(name, check)
+        self._state.append_check(name, check, actor=current_actor())
 
     def attach_snapshot(self, snapshot: FactorSnapshot) -> None:
         """入库快照落库。snapshot_at 由此处强制 = state.entered_at(快照语义:
@@ -346,12 +386,24 @@ class FactorRepository:
             return False
         return self._snapshot.delete(name)
 
-    def delete(self, name: str) -> bool:
-        """删 factor_info,FK 级联删 state + snapshot(ops rm)。返回行是否存在。
+    def delete(self, name: str, op: str | None = None) -> bool:
+        """删 factor_info,FK 级联删 state + snapshot(ops rm / cancel)。
+        返回行是否存在。op(rm/cancel)与 DELETE 同事务发射事件 ——
+        factor_history 无 FK,是唯一活过删除的痕迹(v2b 的立项动机)。
         json dev/test 后端退化为删 state 记录。"""
         if not self._is_pg:
-            return self._state.delete(name)
-        return self._info.delete(name)
+            return self._state.delete(name, op=op)
+        if op is None:
+            return self._info.delete(name)
+        from ops.infra.store.pg_store import emit_on
+
+        pool = get_pool(self._conninfo)
+        with pool.connection() as conn, conn.transaction():
+            cur = conn.execute("DELETE FROM factor_info WHERE name = %s", (name,))
+            if cur.rowcount > 0:
+                emit_on(conn, HistoryEvent(
+                    name=name, op=op, at=now_iso(), actor=current_actor()))
+            return cur.rowcount > 0
 
     def lock(self, name: str):
         """per-factor advisory lock 门面(with repo.lock(name): ...)。"""

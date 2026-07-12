@@ -3,9 +3,11 @@
 DDL 不在本类执行(2026-07-09 滚出 __init__):schema 归
 `ops/infra/schema.py::ensure_schemas` + 生产 scripts/postgres 迁移。
 _ts_in/_ts_out 正主收敛到 ops/infra/pg.py(与 state store 的镜像合并)。
-"""
-from psycopg.types.json import Jsonb
 
+fields/tables 是 TEXT[](schema v2b;原 JSONB 是三表迁移时从 derived 层原样
+搬来的偷懒类型):psycopg 原生 list 适配零包裹、GIN(array_ops)吃 `@>` 包含
+查询、glob 经 unnest+LIKE —— 下推语义与 JSONB 版逐条等价。
+"""
 from ops.core.metrics import SNAPSHOT_METRICS
 from ops.infra.pg import get_pool
 from ops.infra.pg import ts_in as _ts_in
@@ -24,8 +26,8 @@ CREATE TABLE IF NOT EXISTS factor_snapshot (
     tvr DOUBLE PRECISION,
     fitness DOUBLE PRECISION,
 
-    fields JSONB,
-    tables JSONB,
+    fields TEXT[],
+    tables TEXT[],
 
     delay INT,
 
@@ -95,13 +97,13 @@ def snapshot_where(
 
     if field:
         clauses.append(f"{prefix}fields @> %s")
-        params.append(Jsonb([field]))
+        params.append([field])  # TEXT[] 包含:psycopg list → array
 
     if table_glob:
         like_pattern = _glob_to_like(table_glob)
         if like_pattern is not None:
             clauses.append(
-                f"EXISTS (SELECT 1 FROM jsonb_array_elements_text({prefix}tables) t "
+                f"EXISTS (SELECT 1 FROM unnest({prefix}tables) t "
                 "WHERE t LIKE %s)"
             )
             params.append(like_pattern)
@@ -159,8 +161,8 @@ class PostgresSnapshotStore(SnapshotStore):
                 (
                     snapshot.name,
                     snapshot.ret, snapshot.shrp, snapshot.mdd, snapshot.tvr, snapshot.fitness,
-                    Jsonb(snapshot.fields) if snapshot.fields else None,
-                    Jsonb(snapshot.tables) if snapshot.tables else None,
+                    snapshot.fields if snapshot.fields else None,
+                    snapshot.tables if snapshot.tables else None,
                     snapshot.delay,
                     snapshot.max_bcorr, snapshot.max_bcorr_factor,
                     _ts_in(snapshot.snapshot_at),  # 关键：转换时区

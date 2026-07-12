@@ -1,4 +1,4 @@
-# PG Schema v2 设计(2026-07-12,与用户逐条讨论收敛;待批)
+# PG Schema v2 设计(2026-07-12,与用户逐条讨论收敛;已批 —— v2a 已上线,v2b 代码在分支 claude/schema-v2b,迁移待执行)
 
 ## Context
 

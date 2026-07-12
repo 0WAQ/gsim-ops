@@ -6,7 +6,8 @@ server-160 Docker 跑的 Postgres,承载因子库的 **PG 真相源三表**(2026
 | 表 | 内容 | 代码侧 |
 |---|---|---|
 | `factor_info` | 身份(author/discovery_method/created_at;三表的根,FK 级联于它) | `ops/infra/info/` |
-| `factor_state` | 生命周期状态机(status/version/时间戳/check_history) | `ops/infra/store/` |
+| `factor_state` | 生命周期状态机(status/version/时间戳;v2b 后无 check_history/last_fail_*) | `ops/infra/store/` |
+| `factor_history` | 全操作审计事件(op/at/actor + check 四列;**无 FK,活过 rm**,v2b) | `ops/infra/store/`(同模块) |
 | `factor_snapshot` | 入库时不可变快照(metrics/datasources/delay/bcorr,snapshot_at=entered_at) | `ops/infra/snapshot/` |
 
 ## 快速上手
@@ -42,6 +43,7 @@ docker exec -it ops-pg psql -U ops -d ops -c '\dt'   # 预期 factor_info/state/
 | `migrate_drop_snapshot_index_cols.sql` | 删 has_pnl/dump_days 僵尸列 | ✅ 2026-07-12(v2a 补执行;用户查活表发现从未跑) |
 | `migrate_snapshot_at.py` | mismatch 时间戳一次性修正(doctor JSON 名单) | ✅ 2026-07-12(doctor v1 收官,UPDATE 20 行) |
 | `migrate_v2a_state_check.sql` | chk_active_entered 约束 | ✅ 2026-07-12(v2a) |
+| `migrate_v2b_history.sql` | factor_history 建表 + check_history 展开回填 + state 删四列 + fields/tables TEXT[] | ✅ 2026-07-12(v2b;22937 事件,锚点 6988/8419/7530 全中) |
 
 ## 备份
 

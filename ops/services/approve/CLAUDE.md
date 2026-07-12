@@ -20,11 +20,12 @@
 
 ## 适用范围
 
-仅 `status == REJECTED` 且 `last_fail_stage == "correlation"`。其他失败阶段
+仅 `status == REJECTED` 且最近失败在 correlation stage。其他失败阶段
 (checkbias / checkpoint / compliance)是因子**质量/正确性**问题,不属多样性豁免范畴,
-不允许 approve。资格谓词是语义 API `FactorRecord.correlation_rejected()`
-(`ops/core/state.py`,`CORRELATION` 常量同处定义,check/stages.py re-export;
-2026-07-09 起 approve 不再跨包引 check 的 stage 表)。
+不允许 approve。资格谓词是语义 API `Factor.correlation_rejected()`
+(`ops/core/factor.py`;v2b 自 FactorRecord 上移 —— "最近失败"是 factor_history
+的派生事实,谓词需要 state + last_fail 两个切面。`CORRELATION` 常量在
+`ops/core/state.py`,check/stages.py re-export)。
 
 **放行宽度是整个 correlation stage(业绩门槛 + 相关性),不收窄到只放 bcorr**——因为
 "为覆盖多样性保留一个因子"本就可能意味着接受它业绩差一点(如 ret 8% 低于 10% 线,但它
@@ -37,8 +38,11 @@
    - 批量(`-u`):`repo.find(author=..., status=REJECTED)` 单条三表 JOIN(2026-07-09 退役 info.list + state.list 内存交集);不匹配的归入 `Skipped` 段,不阻断。显示 author 从 `Factor.identity` 取(FactorRecord 已无 author 字段)
 2. apt 风格确认(`-y` 跳过)
 3. `_approve_one`:
-   - `repo.transition(name, ACTIVE, entered_at=..., last_fail_stage=None, last_fail_reason=None)`
-   - `append_check(CheckRecord(passed=True, fail_reason="approved"))` 留痕
+   - `repo.transition(name, ACTIVE, expect=REJECTED, op="approve", entered_at=...)`
+   - 留痕(v2b):factor_history 收 op='approve'(豁免决定,含 actor)+
+     自动 'entered'(入库统一标记);原先伪造 passed=True 的 CheckRecord 已废
+     ——check 时间线不再混入非 check 事件。旧失败事件保留(派生 last_fail
+     不清空,消费方一律与 status 联判)
 
 ## 不做的事
 
