@@ -337,7 +337,8 @@ class {name}(AlphaBase):
 '''
 
 
-def _minimal_xml(name: str, delay: int, discovery_method: str | None) -> str:
+def _minimal_xml(name: str, delay: int, discovery_method: str | None,
+                 birthday: int = 20200101) -> str:
     dm = f' discovery_method="{discovery_method}"' if discovery_method is not None else ""
     return f'''<gsim>
 \t<Constants backdays="256" niodatapath="/datasvc/data/cc_2025" niomapprivate="true"></Constants>
@@ -350,7 +351,7 @@ def _minimal_xml(name: str, delay: int, discovery_method: str | None) -> str:
 \t<Portfolio id="MyPort" booksize="20e6" homecurrency="CNY">
 \t\t<Stats module="StatsSimpleV6" mode="0" tradePrice="close" dumpPnl="true" pnlDir="/tmp/pnl"></Stats>
 \t\t<Alpha id="{name}" module="{name}Mod" universeId="ALL_TRD" booksize="20e6" delay="{delay}" ndays="20" dumpAlphaFile="true" dumpAlphaDir="/tmp/alpha">
-\t\t\t<Description name="{name}" author="wbai" birthday="20200101" category="test" universe="ALL_TRD" delay="{delay}"{dm}></Description>
+\t\t\t<Description name="{name}" author="wbai" birthday="{birthday}" category="test" universe="ALL_TRD" delay="{delay}"{dm}></Description>
 \t\t\t<Operations>
 \t\t\t\t<Operation module="AlphaOpRank" exp="1.0"></Operation>
 \t\t\t</Operations>
@@ -498,12 +499,13 @@ def make_dropbox_factor(test_config):
               user: str = "wbai",
               date: str = "20260705",
               delay: int = 0,
-              discovery_method: str | None = "manual") -> Path:
+              discovery_method: str | None = "manual",
+              birthday: int = 20200101) -> Path:
         d = config.dropbox_path / user / date / name
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{name}.py").write_text(_MINIMAL_PY.format(name=name))
         (d / f"Config.{name}.xml").write_text(
-            _minimal_xml(name, delay, discovery_method))
+            _minimal_xml(name, delay, discovery_method, birthday=birthday))
         return d
 
     return _make

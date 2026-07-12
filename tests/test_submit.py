@@ -108,3 +108,16 @@ def test_submit_no_factors_found(test_config, make_args):
     run_submit(make_args(user="wbai", start_date="20260705", end_date="20260705",
                          factor_name=None, overwrite=False))
     assert _store(config).list() == []
+
+
+def test_submit_rejects_bogus_birthday(test_config, make_dropbox_factor, make_args):
+    """L1(2026-07-12 TRIAGE):birthday 给了但离谱(如 zxu 的 20061219)拒收
+    并回滚 staging;PG 零写入。"""
+    from ops.services.submit.submit import run_submit
+    cfg_path, config = test_config
+    make_dropbox_factor(name="AlphaWbaiBadBday", user="wbai", date="20260705",
+                        birthday=20061219)
+    run_submit(make_args(user="wbai", start_date="20260705", end_date="20260705",
+                         factor_name=None, overwrite=False))
+    assert not (config.staging / "AlphaWbaiBadBday").exists()   # 回滚
+    assert _store(config).get("AlphaWbaiBadBday") is None       # PG 零写入

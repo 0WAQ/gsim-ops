@@ -236,9 +236,14 @@ def test_artifact_orphan_kinds():
     # 目录形态不静默吞(布局 SSOT:pnl/feature 是单文件;对抗评审)
     assert ("AlphaDirPnl", "alien") in kinds
     assert ("somedir", "alien") in kinds
-    # 新鲜 tmp(在跑的 pack)不报;正式 npy / pnl 孤儿 v1 一律不可修
+    # 新鲜 tmp(在跑的 pack)不报
     assert not any(f.name == "AlphaFresh" for f in findings)
-    assert not any(f.fixable for f in findings if f.kind != "pack-tmp")
+    # v1.1 放闸(2026-07-12 基线判读后):feature-orphan 可修;
+    # pnl-orphan / alien 仍只报告(无判读材料)
+    assert not any(f.fixable for f in findings
+                   if f.kind not in ("pack-tmp", "feature-orphan"))
+    feat = next(f for f in findings if f.kind == "feature-orphan")
+    assert feat.fixable and feat.ref == "AlphaGhostFeat.v1.npy"
     tmp = next(f for f in findings if f.kind == "pack-tmp")
     assert tmp.fixable and tmp.ref == ".AlphaOld.v2.npy.tmp"
 

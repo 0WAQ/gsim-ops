@@ -111,9 +111,10 @@ def _execute_locked(finding: Finding, fixer: Fixer, config, repo) -> tuple[str, 
             and not _is_tmp_residue(real)):
         return BLOCKED, "因子 ACTIVE,拒绝删除其产物(绝缘不变量)"
 
-    # 可选盘面复验(pack-tmp 重读 mtime:同名新 tmp 是在跑 pack 的活文件)
-    if fixer.path_ok is not None and not fixer.path_ok(real):
-        return VANISHED, "执行时刻盘面复验不成立(目标已变化/非残渣)"
+    # 可选盘面复验(pack-tmp 重读 mtime 防删在跑 pack 的活文件;
+    # feature-orphan 验文件名合式)
+    if fixer.path_ok is not None and not fixer.path_ok(finding, real):
+        return VANISHED, "执行时刻盘面复验不成立(目标已变化/非目标形态)"
 
     # 5. 形态闸 + 执行
     try:
