@@ -1476,3 +1476,8 @@ fields/tables JSONB→TEXT[](诚实类型:psycopg 原生 list + GIN array_ops,
   写路径不变量)。
 
 门禁:fast suite 162 passed(main 基线 161 + pin 1)。
+
+**v2a 生产执行收官(2026-07-12,VERIFY-SCHEMA-V2A-RESULT)**:五阶段全绿
+零意外 —— 备份 3.7M 落盘(pg_dump 17+ 的 `\unrestrict` 尾标经核实非截断)、
+violating_rows=0、空档确认后两 SQL 零报错、复验两列消失/约束出现/doctor
+exit=0/Total 8252 不变。2026-07-06 挂账的僵尸列至此清偿,README 台账 ✅。

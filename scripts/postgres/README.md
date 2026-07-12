@@ -39,9 +39,9 @@ docker exec -it ops-pg psql -U ops -d ops -c '\dt'   # 预期 factor_info/state/
 | `migrate_to_snapshot.sql` | 双表 → 三表重构 | ✅ 2026-07-06 |
 | `backfill_discovery_method.py` | discovery_method 回填 | ✅ 2026-07-06 |
 | `migrate_drop_derived.sql` | 删 derived 僵尸表 | ✅ 2026-07-08(三机滚存窗口) |
-| `migrate_drop_snapshot_index_cols.sql` | 删 has_pnl/dump_days 僵尸列 | ⬜ **待执行**(v2a;2026-07-12 用户查活表发现从未跑) |
+| `migrate_drop_snapshot_index_cols.sql` | 删 has_pnl/dump_days 僵尸列 | ✅ 2026-07-12(v2a 补执行;用户查活表发现从未跑) |
 | `migrate_snapshot_at.py` | mismatch 时间戳一次性修正(doctor JSON 名单) | ✅ 2026-07-12(doctor v1 收官,UPDATE 20 行) |
-| `migrate_v2a_state_check.sql` | chk_active_entered 约束 | ⬜ 待执行(v2a) |
+| `migrate_v2a_state_check.sql` | chk_active_entered 约束 | ✅ 2026-07-12(v2a) |
 
 ## 备份
 
