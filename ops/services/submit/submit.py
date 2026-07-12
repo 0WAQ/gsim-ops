@@ -107,6 +107,15 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
               f"<Description discovery_method=...> 补全)")
         return "fail"
 
+    # birthday 合法区间(L1,2026-07-12 TRIAGE:zxu birthday=20061219 错值入库)。
+    # 只校验"给了但离谱"的值;缺省 0(未填)放行 —— parse 不校验,backfill
+    # 存量因子无此字段(与 discovery_method 的校验分工一致)。
+    if meta.birthday and not (20150101 <= meta.birthday <= 20991231):
+        error(f"  ✘  {staging_dir.name} birthday 非法: {meta.birthday}"
+              "(须为 20150101-20991231 区间的 yyyymmdd,"
+              "请修 <Description birthday=...>)")
+        return "fail"
+
     # Authoritative existence check under the caller's factor_lock.
     rec = repo.record(meta.name)
     if rec is not None and not overwrite:

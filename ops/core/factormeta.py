@@ -207,7 +207,9 @@ def parse_factor(
     else:
         xml_author = desc.get("author", "")
         if xml_author and xml_author.lower() not in _GENERIC_AUTHORS:
-            author = xml_author
+            # 小写归一(L1,2026-07-12 TRIAGE):XML author 原文直取曾造成同一人
+            # 大小写分裂(Fguo/fguo 各成一桶);目录推断路径本就产出小写
+            author = xml_author.lower()
         else:
             author = "unknown"
     birthday = _to_int(desc.get("birthday"))

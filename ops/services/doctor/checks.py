@@ -48,8 +48,9 @@ class Fixer:
     recheck: Callable
     # (config) -> tuple[Path, ...] 允许的删除根(realpath 包含校验白名单)
     allowed_roots: Callable = lambda config: ()
-    # 可选盘面复验 (path) -> bool:执行时刻对目标现场再验一道(pack-tmp 重读
-    # mtime —— 防同名新 tmp 是在跑 pack 的活文件);False → 不删,记 VANISHED
+    # 可选盘面复验 (finding, path) -> bool:执行时刻对目标现场再验一道
+    # (pack-tmp 重读 mtime 防删在跑 pack 的活文件;feature-orphan 验文件名
+    # 合式);False → 不删,记 VANISHED
     path_ok: Callable | None = None
 
 
@@ -335,42 +336,60 @@ def _scan_artifact_orphan(inv: Inventory) -> list[Finding]:
                                "alpha_feature 下不合式文件(人工确认)",
                                path=str(feature.root / e.name)))
         elif name not in inv.factors:
+            # v1.1 放闸(2026-07-12,首轮基线判读完成:62 条名单全过目,
+            # DOCTOR-V11-TRIAGE):PG 全无记录的孤儿 feature 可修
             out.append(Finding(name, "artifact-orphan", "feature-orphan", WARN,
-                               "alpha_feature 有文件但 PG 全无记录(combo 生产消费物,"
-                               "v1 只报告)", path=str(feature.root / e.name)))
+                               "alpha_feature 有文件但 PG 全无记录",
+                               fixable=True, path=str(feature.root / e.name),
+                               ref=e.name))
     return out
 
 
-def _resolve_pack_tmp(finding, config):
+def _resolve_feature_file(finding, config):
     return config.alpha_feature / finding.ref
 
 
-def _recheck_pack_tmp(finding, factor) -> bool:
-    # tmp 残渣与 PG 状态无关(哪怕因子 ACTIVE,点开头 tmp 也不是消费物);
-    # 龄期在 guards 的路径/形态闸后由文件系统重验(mtime 重读)。
-    return finding.ref.startswith(".") and finding.ref.endswith(".npy.tmp")
+def _recheck_artifact(finding, factor) -> bool:
+    """按 kind 分派锁内重验。"""
+    if finding.kind == "pack-tmp":
+        # tmp 残渣与 PG 状态无关(哪怕因子 ACTIVE,点开头 tmp 也不是消费物);
+        # 龄期在 guards 的路径/形态闸后由文件系统重验(mtime 重读)。
+        return finding.ref.startswith(".") and finding.ref.endswith(".npy.tmp")
+    if finding.kind == "feature-orphan":
+        # 锁内重验:因子仍然 PG 全无记录(并发 submit/backfill 已登记 → 不删)
+        return factor is None
+    return False   # 其它 kind(alien / pnl-orphan)永不可修
 
 
-def _pack_tmp_still_stale(path) -> bool:
-    """执行时刻重读 mtime:同名文件若是在跑 pack 刚写的新 tmp(mtime 新),
-    不是残渣,不删。"""
-    import time
-    try:
-        return (time.time() - path.stat().st_mtime) > PACK_TMP_MAX_AGE_S
-    except OSError:
-        return False
+def _artifact_path_ok(finding, path) -> bool:
+    """执行时刻盘面复验(按 kind)。"""
+    if finding.kind == "pack-tmp":
+        # 重读 mtime:同名文件若是在跑 pack 刚写的新 tmp,不是残渣,不删
+        import time
+        try:
+            return (time.time() - path.stat().st_mtime) > PACK_TMP_MAX_AGE_S
+        except OSError:
+            return False
+    if finding.kind == "feature-orphan":
+        # 只删标准命名的正式单文件(点开头/不合式文件是 alien,不归这里)
+        return (not path.name.startswith(".")
+                and _feature_factor_name(path.name) == finding.name)
+    return False
 
 
-_PACK_TMP_FIXER = Fixer(
+_ARTIFACT_FIXER = Fixer(
     plan=FixPlan(
         action="unlink",
-        target="alpha_feature/ 下点开头 `.*.npy.tmp` 且 mtime>24h 的 pack 崩溃残渣",
-        keeps="不碰任何正式 <name>.vN.npy(含孤儿 —— 只报告)、不碰 PG",
+        target="alpha_feature/ 下两类:①PG 全无记录的孤儿 <name>.vN.npy"
+               "(v1.1 放闸,2026-07-12 基线判读后);②点开头 `.*.npy.tmp` 且 "
+               "mtime>24h 的 pack 崩溃残渣",
+        keeps="不碰任何 PG 有记录因子的 feature、不碰 alien 不合式文件(只报告)、"
+              "不碰 alpha_pnl 孤儿(无判读材料,仍只报告)、不碰 PG",
     ),
-    resolve=_resolve_pack_tmp,
-    recheck=_recheck_pack_tmp,
+    resolve=_resolve_feature_file,
+    recheck=_recheck_artifact,
     allowed_roots=lambda config: (config.alpha_feature,),
-    path_ok=_pack_tmp_still_stale,
+    path_ok=_artifact_path_ok,
 )
 
 
@@ -451,7 +470,7 @@ FAMILIES: tuple[DoctorFamily, ...] = (
                  ("alpha_pnl", "alpha_feature"), _scan_artifact_orphan,
                  lambda inv: len(inv.areas["alpha_pnl"].entries)
                  + len(inv.areas["alpha_feature"].entries),
-                 _PACK_TMP_FIXER),
+                 _ARTIFACT_FIXER),
     DoctorFamily("dump-orphan", "本机 dump sidecar ⇔ factor_info", "host",
                  ("dump_local",), _scan_dump_orphan,
                  lambda inv: len(inv.areas["dump_local"].entries),
