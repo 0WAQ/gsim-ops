@@ -26,3 +26,21 @@
 
 生产 PG 自此:factor_history 22937 条事件(6988 真实 check + 15949 条
 actor='migration' 合成);factor_state 纯状态机 6 列;fields/tables TEXT[]。
+
+## 阶段 6 · 四机滚存收窗(2026-07-12,PR #15 合并后)
+
+四机 HEAD 全部 34e25d2(main),`ops list` 冒烟 Total 8252 一致,窗口解除。
+过程中两个部署坑(执行者现场排障):
+
+- **uv tool 部署形态**:160/170(以及排障后确认的 150/144)`ops` 都是
+  `uv tool install` 的全局命令 —— **git pull 不等于部署**,须
+  `uv tool install --reinstall .` 才跑新代码(170 首次冒烟报 UndefinedColumn
+  rejected_at 即旧 commit 521533f 查已删列);
+- **root 属主 pycache 卡重装**:150/144 的 uv tool 目录里有 root 属主
+  `__pycache__`(2026-07-08 某次 sudo 跑 ops 以 root 写的 .pyc),
+  `--reinstall` 递归删不掉。绕法:整棵 `tools/ops` rename 成
+  `ops.broken.<ts>`(只需父目录写权限)+ `uv tool install --force .`。
+  **遗留**:150/144 各一个 `~/.local/share/uv/tools/ops.broken.<ts>`
+  孤儿目录待用户 sudo rm -rf。
+
+schema v2(v2a + v2b)至此全部落地。

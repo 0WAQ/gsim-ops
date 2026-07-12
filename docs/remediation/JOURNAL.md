@@ -1560,7 +1560,11 @@ e2e 断言同批适配(last_fail → check_history[-1] 派生源)。
 三锚点精确命中(check 6988 / submit 8419 / entered 7530,共 22937 事件)。
 一处现场判读:factor_history 迁移前已存在(空表)—— 开窗前的空档确认用
 新代码跑,ensure_schemas 引导建表(幂等设计,计数守卫证明零污染)。
-list Total 8252 / TEXT[] glob / 时间线 / doctor exit=0 / e2e 全过。
+list Total 8252 / TEXT[] glob / 时间线 / doctor exit=0 / e2e 全过。阶段 6
+四机滚存收窗(HEAD 34e25d2,四机冒烟 8252 一致);两个部署坑记档:
+uv tool 形态下 git pull ≠ 部署(须 --reinstall,170 旧代码查已删列
+UndefinedColumn 即此)、root 属主 pycache 卡重装(挪树 + --force 绕过,
+150/144 各留一个 ops.broken.<ts> 待 sudo 清)。**schema v2 两批全部落地。**
 
 
 ## schema v2c 小件批:遗留项收口(2026-07-12)
