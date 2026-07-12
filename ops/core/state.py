@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from enum import Enum
 
 
@@ -71,7 +71,8 @@ class FactorRecord:
     rejected_at / last_fail_stage / last_fail_reason 已删(schema v2b):
     "最近一次失败"是 factor_history 的派生事实(op='check' AND passed=FALSE
     的最新行),读侧走 `Factor.last_fail`(repository 组装)。check_history
-    保留为内存形态:PG 后端从事件表组装,json dev/test 后端仍随记录存。
+    v2c 起也不在 record 上(遗留项 ④):全史按需 `store.checks(name)` /
+    时间线 `store.history(name)`,record 是纯状态机快照。
     """
     name: str
     status: FactorStatus
@@ -79,7 +80,6 @@ class FactorRecord:
     submitted_at: str | None = None
     entered_at: str | None = None
     version: int = 1
-    check_history: list[CheckRecord] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -91,9 +91,9 @@ class FactorRecord:
         d = dict(d)
         d["status"] = FactorStatus(d["status"])
         d.setdefault("version", 1)
-        d["check_history"] = [CheckRecord.from_dict(c) for c in d.get("check_history", [])]
-        # v2b 前的 json state 文件可能带已删除的三列,静默丢弃(dev/test 后端
-        # 的旧文件兼容;PG 侧列已物理删除,不会走到)
-        for legacy in ("rejected_at", "last_fail_stage", "last_fail_reason"):
+        # 旧 json state 文件兼容:v2b 删的三列 + v2c 剥离的 check_history
+        # (全史按需查 store.checks(),record 不再背着走)静默丢弃
+        for legacy in ("rejected_at", "last_fail_stage", "last_fail_reason",
+                       "check_history"):
             d.pop(legacy, None)
         return cls(**d)

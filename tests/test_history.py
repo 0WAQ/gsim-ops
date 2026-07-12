@@ -101,4 +101,5 @@ def test_json_backend_last_fail_from_check_history(tmp_path):
         started_at="2026-07-06T00:00:00", passed=True))
     lf = store.last_fail("A")
     assert lf is not None and lf.failed_stage == "correlation"
-    assert store.history("A") == []  # 无事件表,cli 回落 check_history
+    evs = store.history("A")  # v2c: 合成 check 事件(生命周期 op 缺席)
+    assert [e.op for e in evs] == ["check", "check"]

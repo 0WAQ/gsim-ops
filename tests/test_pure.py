@@ -48,10 +48,10 @@ def test_json_state_append_check(jstate):
     jstate.put(_rec())
     jstate.append_check("A", CheckRecord(started_at="2026-07-05T00:00:00", passed=True))
     jstate.append_check("A", CheckRecord(started_at="2026-07-05T01:00:00", passed=False))
-    got = jstate.get("A")
-    assert len(got.check_history) == 2
-    assert got.check_history[0].passed is True
-    assert got.check_history[1].passed is False
+    checks = jstate.checks("A")  # v2c: 全史按需查,record 不背
+    assert len(checks) == 2
+    assert checks[0].passed is True
+    assert checks[1].passed is False
 
 
 def test_json_state_delete(jstate):

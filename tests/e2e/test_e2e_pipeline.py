@@ -72,7 +72,7 @@ def test_e2e_pass_to_active(e2e_env, make_e2e_factor, relax_thresholds):
     rec = _store(config).get("AlphaWbaiPass")
     assert rec is not None
     assert rec.status == FactorStatus.ACTIVE, \
-        f"期望 ACTIVE,实际 {rec.status.value}/{rec.check_history[-1].failed_stage if rec.check_history else None}"
+        f"期望 ACTIVE,实际 {rec.status.value}/{_store(config).checks(rec.name)}"
     # 文件落点:src/pnl 进库,staging 清
     assert (config.alpha_src / "AlphaWbaiPass").exists()
     assert (config.alpha_pnl / "AlphaWbaiPass").exists()
@@ -107,7 +107,7 @@ def test_e2e_validate_fail(e2e_env, make_e2e_factor):
     assert rec.status == FactorStatus.SUBMITTED
     assert (config.staging / "AlphaWbaiValFail").exists()
     assert not (config.alpha_src / "AlphaWbaiValFail").exists()
-    assert rec.check_history[-1].failed_stage == "validate"
+    assert _store(config).checks(rec.name)[-1].failed_stage == "validate"
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +122,7 @@ def test_e2e_checkbias_fail(e2e_env, make_e2e_factor):
     rec = _store(config).get("AlphaWbaiBiasFail")
     # checkbias 失败 → REJECTED,src 进 alpha_src,staging 清
     assert rec.status == FactorStatus.REJECTED
-    assert rec.check_history[-1].failed_stage == "checkbias"  # v2b: 派生自事件
+    assert _store(config).checks(rec.name)[-1].failed_stage == "checkbias"  # v2b: 派生自事件
     assert (config.alpha_src / "AlphaWbaiBiasFail").exists()
     assert not (config.staging / "AlphaWbaiBiasFail").exists()
 
@@ -139,7 +139,7 @@ def test_e2e_checkpoint_fail(e2e_env, make_e2e_factor):
     rec = _store(config).get("AlphaWbaiCkptFail")
     # checkpoint 失败 → REJECTED(early stage,dump/feature 应被清)
     assert rec.status == FactorStatus.REJECTED
-    assert rec.check_history[-1].failed_stage == "checkpoint"  # v2b: 派生自事件
+    assert _store(config).checks(rec.name)[-1].failed_stage == "checkpoint"  # v2b: 派生自事件
     assert not (config.alpha_dump / "AlphaWbaiCkptFail").exists()
 
 
@@ -154,7 +154,7 @@ def test_e2e_compliance_fail(e2e_env, make_e2e_factor):
     _check(cfg_path, "AlphaWbaiCompFail")
     rec = _store(config).get("AlphaWbaiCompFail")
     assert rec.status == FactorStatus.REJECTED
-    assert rec.check_history[-1].failed_stage == "compliance"  # v2b: 派生自事件
+    assert _store(config).checks(rec.name)[-1].failed_stage == "compliance"  # v2b: 派生自事件
     assert (config.alpha_src / "AlphaWbaiCompFail").exists()
     # late stage 保留 pnl
     assert (config.alpha_pnl / "AlphaWbaiCompFail").exists()
@@ -183,4 +183,4 @@ def test_e2e_correlation_fail(e2e_env, make_e2e_factor):
     # (若池空导致 skip 则 SUBMITTED;两种都可接受但优先断言 rejected)
     assert rec.status in (FactorStatus.REJECTED, FactorStatus.SUBMITTED)
     if rec.status == FactorStatus.REJECTED:
-        assert rec.check_history[-1].failed_stage == "correlation"  # v2b: 派生自事件
+        assert _store(config).checks(rec.name)[-1].failed_stage == "correlation"  # v2b: 派生自事件

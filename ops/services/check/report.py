@@ -1,8 +1,8 @@
 """Structured check report.
 
 `ops check` 跑完落一份结构化 JSON 到 docs/reports/check/,给 QR 发失败原因用,
-也方便随仓库一起提交归档。完整 fail_reason(不截断)从 PG factor_state 的
-check_history 读,不用 UI rows 里被截断的 note。
+也方便随仓库一起提交归档。完整 fail_reason(不截断)从 factor_history 的
+check 事件读(store.checks,v2c),不用 UI rows 里被截断的 note。
 
 一次 run 一份,不 rotation。数据本身可再生(PG state + factor_snapshot),但报告随
 仓库版本化保留,方便回溯与转发。
@@ -37,7 +37,8 @@ def write_check_report(config: Config, config_path: Path,
     """把本次 check 涉及因子的终态汇总成 JSON,返回文件路径。
 
     rows 是 parent 持有、LiveDriver 原地 mutate 过的 dict,已含 outcome_kind。
-    每因子完整 check 记录从 store.get(name).check_history[-1] 读(本次刚 append)。
+    每因子完整 check 记录从 store.checks(name)[-1] 读(本次刚 append;v2c
+    起 record 不背全史)。
     pass 因子附 metrics。
     """
     store = default_store(config)
@@ -54,7 +55,8 @@ def write_check_report(config: Config, config_path: Path,
         rec = store.get(name)
         info_rec = info_store.get(name)
         snapshot = snapshot_store.get(name) if kind == "pass" else None
-        last = rec.check_history[-1] if rec and rec.check_history else None
+        checks = store.checks(name)
+        last = checks[-1] if checks else None
 
         # 构造 metrics dict（只取 pass 因子的 snapshot 数据）
         m = None

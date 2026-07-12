@@ -69,14 +69,8 @@ def _print_detail(factor: "Factor", events: "list[HistoryEvent]") -> None:
             if e.actor:
                 line += f"  [dim]by {e.actor}[/]"
             _console.print(line)
-    elif rec.check_history:
-        # json dev/test 后端无事件表 —— 回落检测历史
-        _console.print(_kv("check_history", f"({len(rec.check_history)})"))
-        for i, c in enumerate(rec.check_history, 1):
-            line = f"    [dim][{i}][/] {c.started_at} → {c.finished_at}  {_outcome(c)}"
-            if c.failed_stage:
-                line += f"  [red]({c.failed_stage}: {c.fail_reason})[/]"
-            _console.print(line)
+    # (v2c:json 后端 history() 合成 check 事件,时间线渲染两后端统一,
+    # 原 check_history 回落分支删除 —— record 已无该字段)
     _console.print(Rule(style="cyan", characters="━"))
 
 
