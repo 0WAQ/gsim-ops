@@ -4,7 +4,7 @@
 # **常跑**:postgres service 起 ops_test,per-session schema 隔离
 # (tests/conftest.py);"PG 可达"有独立断言步 —— service 挂了是红,不是
 # skip 假绿。e2e (marker: slow) 默认排除。ruff/pyright(A1)与 import-linter
-# (7/7 enforcing,ratchet 已退役)已进门禁。
+# (8/8 enforcing,ratchet 已退役)已进门禁。
 name: ci
 
 on:
@@ -45,7 +45,7 @@ jobs:
       - name: Typecheck (pyright)
         run: uv run pyright ops
       - name: Import contracts (enforcing)
-        # 全部 7 份契约(C1/C2/C3/C5/C6/C7/C8)在 pyproject [tool.importlinter],
+        # 全部 8 份契约(C1/C2/C3/C5-C9)在 pyproject [tool.importlinter],
         # 红即挂。ratchet 基线阶段结束(2026-07-09 阶段 3:C2/C3 均清零)。
         run: uv run lint-imports
       - name: Assert test PG reachable

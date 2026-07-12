@@ -105,7 +105,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `combo` | QR combo 端到端代测(predict+backtest, 占位符注入, 无状态) | `ops/services/combo/` |
 | `check` | 7-stage validation pipeline (runs in-place on staging) | `ops/services/check/` |
 | `run` | Run backtest on factors in library | `ops/services/run/` |
-| `status` | Query factor lifecycle state | `ops/services/status/` |
+| `status` | Query factor lifecycle state | `ops/cli/status.py` + `ops/services/status/` |
 | `backfill` | One-shot: generate `meta.json` + ACTIVE for existing factors in `alpha_src/` | `ops/services/backfill/` |
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
@@ -226,7 +226,7 @@ metric 表达式已收敛,S8);新发现的多真相源加 ⚠ 行并在
 | stage 身份 / 顺序 / 路由策略 | `services/check/stages.py` 的 `PIPELINE` | 新增 stage = 加一行 |
 | 时间戳格式 | `ops/utils/clock.py::now_iso` | |
 | 状态值 | `FactorStatus` 枚举 | 与 DB CHECK 约束同一提交改 |
-| 依赖分层规则 | pyproject `[tool.importlinter]`(7/7 enforcing;cli 接缝豁免点 `ops/cli/common.py`) | 2026-07-09 进 CI;ratchet 已退役(阶段 3) |
+| 依赖分层规则 | pyproject `[tool.importlinter]`(8/8 enforcing;cli 接缝豁免点 `ops/cli/common.py`) | 2026-07-09 进 CI;ratchet 已退役(阶段 3);C9 结果渲染归 cli(2026-07-11 展示层上收) |
 | 盘面布局(src/pnl/dump/feature/staging/池副本/meta.json) | `ops/core/paths.py::FactorPaths` | 2026-07-09 收编(40+ 处拼接清零) |
 | 因子领域类型 | `ops/core/factor.py::Factor`(identity/state/snapshot 三切面) | 2026-07-09 阶段 2;全库唯一叫"因子"的类型 |
 | 因子记录读写 + 产物清理 | `ops/infra/repository.py::FactorRepository` | find 单条三表 JOIN;register 原子双表写;purge_artifacts 按 ArtifactScope 两面 |

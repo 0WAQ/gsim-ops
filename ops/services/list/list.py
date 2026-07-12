@@ -1,144 +1,13 @@
+"""list 查询编排 —— 零展示(2026-07-11 展示层上收:表格/JSON 渲染在
+`ops/cli/list.py`,本模块只负责解析过滤条件 + 下推查询 + 内存兜底,返回
+`list[Factor]`;解析失败抛 `FilterError`,由 cli 呈现)。"""
 import fnmatch
-import json
 import re
-import shutil
 
-from rich import box
-from rich.console import Console
-from rich.table import Table
-
-from ops.core.factor import Factor, FactorSnapshot
+from ops.core.factor import Factor
 from ops.core.metrics import SNAPSHOT_METRICS, metric_value
-from ops.core.state import FactorStatus
 from ops.infra.config import Config
 from ops.infra.repository import FactorRepository
-
-DASH = "—"
-
-_console = Console(width=shutil.get_terminal_size((140, 50)).columns)
-
-_STATUS_STYLE = {
-    FactorStatus.ACTIVE:    "green",
-    FactorStatus.REJECTED:  "red",
-    FactorStatus.SUBMITTED: "yellow",
-    FactorStatus.CHECKING:  "yellow",
-}
-
-
-def _fmt(v, prec=2):
-    return f"{v:.{prec}f}" if v is not None else DASH
-
-
-def _metric(snap: FactorSnapshot | None, name: str):
-    """从 snapshot 读取 metric 值。"""
-    if not snap:
-        return DASH
-    v = getattr(snap, name, None)
-    return _fmt(v)
-
-
-def _bcorr(snap: FactorSnapshot | None):
-    """从 snapshot 读取 bcorr 值。"""
-    if not snap:
-        return DASH
-    return _fmt(snap.max_bcorr)
-
-
-def _datasource(snap: FactorSnapshot | None, key: str):
-    """从 snapshot 读取 datasources (fields/tables)。"""
-    if not snap:
-        return ""
-    vals = getattr(snap, key, None)
-    return ", ".join(vals or [])
-
-
-def _fail_stage(row: Factor):
-    if row.status == FactorStatus.REJECTED and row.last_fail_stage:
-        return row.last_fail_stage
-    return ""
-
-
-# (header, justify, extras, getter(row: Factor) -> str)
-_BASE_COLS = [
-    ("name",    "left",  {"no_wrap": True, "max_width": 36, "overflow": "ellipsis"}, lambda x: x.identity.name),
-    ("author",  "left",  {},                lambda x: x.identity.author or ""),
-    ("delay",   "right", {},                lambda x: str(x.snapshot.delay) if x.snapshot and x.snapshot.delay is not None else "?"),
-    ("ret%",    "right", {},                lambda x: _metric(x.snapshot, "ret")),
-    ("shrp",    "right", {},                lambda x: _metric(x.snapshot, "shrp")),
-    ("mdd%",    "right", {},                lambda x: _metric(x.snapshot, "mdd")),
-    ("tvr%",    "right", {},                lambda x: _metric(x.snapshot, "tvr")),
-    ("fitness", "right", {},                lambda x: _metric(x.snapshot, "fitness")),
-    ("bcorr",   "right", {},                lambda x: _bcorr(x.snapshot)),
-]
-_FAIL_COL   = ("fail_stage", "left", {},                    lambda x: _fail_stage(x))
-_TABLES_COL = ("tables",     "left", {"overflow": "fold"},  lambda x: _datasource(x.snapshot, "tables"))
-_FIELDS_COL = ("fields",     "left", {"overflow": "fold"},  lambda x: _datasource(x.snapshot, "fields"))
-
-
-def print_table(rows: list[Factor], show_tables=False, show_fields=False):
-    if not rows:
-        _console.print("[yellow]No factors found.[/]")
-        return
-
-    has_rejected = any(x.status == FactorStatus.REJECTED for x in rows)
-
-    cols = list(_BASE_COLS)
-    if has_rejected:
-        cols.append(_FAIL_COL)
-    if show_tables:
-        cols.append(_TABLES_COL)
-    if show_fields:
-        cols.append(_FIELDS_COL)
-
-    table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", pad_edge=False)
-    for header, justify, extras, _ in cols:
-        table.add_column(header, justify=justify, **extras)
-
-    for x in rows:
-        style = _STATUS_STYLE.get(x.status, "") if x.status else ""
-        table.add_row(*(get(x) for _, _, _, get in cols), style=style)
-
-    _console.print(table)
-    _console.print(f"Total: {len(rows)} factors")
-
-
-def _row_to_json(row: Factor) -> dict:
-    """将 Factor 转换为 JSON 字典。
-
-    ⚠ 2026-07-07 Wave 2 输出变更: has_pnl/dump_days 两个键移除 —— 它们是实时
-    物理状态,唯一来源是全库扫盘(每次 list ~25s),与"list 是 PG catalog 查询"
-    冲突。单因子的物理状态看 `ops info`(现场 stat,便宜);批量对账属后续
-    ops doctor。新增 status 键(因子集判据变更后调用方常需要)。
-    """
-    snap = row.snapshot
-
-    metrics = None
-    if snap and (snap.ret is not None or snap.shrp is not None or snap.fitness is not None):
-        metrics = {"ret%": snap.ret, "tvr%": snap.tvr, "shrp": snap.shrp, "mdd%": snap.mdd, "fitness": snap.fitness}
-
-    datasources = None
-    if snap and (snap.fields is not None or snap.tables is not None):
-        datasources = {"fields": snap.fields or [], "tables": snap.tables or []}
-
-    bcorr = None
-    if snap and snap.max_bcorr is not None:
-        bcorr = {"max_bcorr": snap.max_bcorr, "max_bcorr_factor": snap.max_bcorr_factor}
-
-    return {
-        "name": row.identity.name,
-        "author": row.identity.author,
-        "status": row.status.value if row.status else None,
-        "delay": snap.delay if snap else None,
-        "metrics": metrics,
-        "datasources": datasources,
-        "bcorr": bcorr,
-    }
-
-
-def print_json(rows: list[Factor]):
-    data = [_row_to_json(x) for x in rows]
-    print(json.dumps(data, indent=2, ensure_ascii=False))
-
 
 _FILTER_PATTERN = re.compile(r"^(\w+)([><=!]+)(.+)$")
 # 可排序/过滤的 metric 键 —— 从注册表派生(SSOT S8,core/metrics.py),
@@ -151,9 +20,19 @@ FILTER_KEYS = {"tables", "field"} | _SORTABLE_KEYS
 _VALID_OPS = {">", ">=", "<", "<=", "=", "!="}
 
 
-def parse_filters(filter_str: str) -> list[tuple[str, str, str]] | None:
-    filters = []
-    has_error = False
+class FilterError(ValueError):
+    """`--filter-by` 表达式非法。`errors` 是给用户看的逐条纯文本信息
+    (渲染归 cli,这里不带任何标记语法)。"""
+
+    def __init__(self, errors: list[str]):
+        super().__init__("; ".join(errors))
+        self.errors = errors
+
+
+def parse_filters(filter_str: str) -> list[tuple[str, str, str]]:
+    """解析 --filter-by 逗号分隔表达式;任一条非法即收集全部错误抛 FilterError。"""
+    filters: list[tuple[str, str, str]] = []
+    errors: list[str] = []
     for part in filter_str.split(","):
         part = part.strip()
         if not part:
@@ -162,22 +41,19 @@ def parse_filters(filter_str: str) -> list[tuple[str, str, str]] | None:
         if m:
             key, op, value = m.group(1), m.group(2), m.group(3)
             if key not in FILTER_KEYS:
-                _console.print(f"[red]Unknown filter key:[/] '{key}'. Supported: {', '.join(sorted(FILTER_KEYS))}")
-                has_error = True
+                errors.append(f"Unknown filter key: '{key}'. Supported: {', '.join(sorted(FILTER_KEYS))}")
                 continue
             if op not in _VALID_OPS:
                 hint = " (did you mean '>=')" if op == "=>" else \
                        " (did you mean '<=')" if op == "=<" else ""
-                _console.print(f"[red]Unknown operator:[/] '{op}'{hint}. "
-                               f"Supported: {', '.join(sorted(_VALID_OPS))}")
-                has_error = True
+                errors.append(f"Unknown operator: '{op}'{hint}. "
+                              f"Supported: {', '.join(sorted(_VALID_OPS))}")
                 continue
             filters.append((key, op, value))
         else:
-            _console.print(f"[red]Invalid filter syntax:[/] '{part}'. Expected: key=value or key>value (use quotes: --filter-by \"...\")")
-            has_error = True
-    if has_error:
-        return None
+            errors.append(f"Invalid filter syntax: '{part}'. Expected: key=value or key>value (use quotes: --filter-by \"...\")")
+    if errors:
+        raise FilterError(errors)
     return filters
 
 
@@ -227,8 +103,10 @@ def _metric_pushdown(filters: list[tuple[str, str, str]]) -> list[tuple[str, str
     return out
 
 
-def run_list(args):
-    """列出库内因子 —— 零扫盘,纯 PG catalog 查询。
+def list_factors(args) -> list[Factor]:
+    """列出库内因子 —— 零扫盘,纯 PG catalog 查询;返回已过滤/排序/截断的行。
+
+    `--filter-by` 非法时抛 `FilterError`(含逐条错误信息)。
 
     2026-07-07 Wave 2 (JOURNAL V1): 因子集判据收敛为
     `factor_state.status != 'submitted'`(在 repo.find 里定义,PG 是唯一
@@ -245,11 +123,8 @@ def run_list(args):
     filters: list[tuple[str, str, str]] | None = None
     if args.filter_by is not None:
         if not args.filter_by.strip():
-            _console.print("[red]Empty filter expression.[/]")
-            return
+            raise FilterError(["Empty filter expression."])
         filters = parse_filters(args.filter_by)
-        if filters is None:
-            return
 
     field_pd, table_pd = _pushdown_params(filters) if filters else (None, None)
     metric_pd = _metric_pushdown(filters) if filters else []
@@ -279,8 +154,4 @@ def run_list(args):
     if args.n is not None:
         rows = rows[:args.n]
 
-    if args.format == "json":
-        print_json(rows)
-    else:
-        print_table(rows,
-                    show_tables=args.show_tables, show_fields=args.show_fields)
+    return rows

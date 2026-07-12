@@ -75,12 +75,20 @@ def test_json_state_list_filters(jstate):
 
 def test_parse_filters_rejects_bad_operator():
     """typo 比较符(=> 等)必须响亮拒绝 —— 原先能过正则但下推白名单与内存
-    if 链都没有分支,条件被静默吞掉且新旧读路径因子集不一致。"""
-    from ops.services.list.list import parse_filters
+    if 链都没有分支,条件被静默吞掉且新旧读路径因子集不一致。
+    2026-07-11 展示层上收:报错从"打印 + 返回 None"改为抛 FilterError
+    (携带逐条纯文本信息,渲染归 cli)。"""
+    import pytest
 
-    assert parse_filters("ret=>30") is None      # typo → 报错返回 None
-    assert parse_filters("ret=<30") is None
-    assert parse_filters("shrp><1") is None
+    from ops.services.list.list import FilterError, parse_filters
+
+    for bad in ("ret=>30", "ret=<30", "shrp><1"):
+        with pytest.raises(FilterError):
+            parse_filters(bad)
+    with pytest.raises(FilterError) as ei:
+        parse_filters("ret=>30,bogus=1")         # 多条错误一次性收集
+    assert len(ei.value.errors) == 2
+    assert "did you mean '>='" in ei.value.errors[0]
     assert parse_filters("ret>=30") == [("ret", ">=", "30")]   # 合法原样通过
     assert parse_filters("tables=ashare*,shrp>2") == [
         ("tables", "=", "ashare*"), ("shrp", ">", "2")]

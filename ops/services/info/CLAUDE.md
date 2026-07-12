@@ -1,8 +1,10 @@
 # Info
 
-显示单个因子的详细信息。
+显示单个因子的详细信息。**零展示**(2026-07-11 上收):本包只有
+`collect_info(args) -> InfoData | None`(factor 聚合 + FactorPaths + 物理现场
+ScannedFactor + dump 日期区间);Tree 渲染在 `ops/cli/info.py`(C9 契约)。
 
-## 输出内容
+## 输出内容(cli 渲染)
 
 - 基本信息: author, paths (src/dump/pnl)
 - 统计: dump_days, date range, has_pnl

@@ -34,4 +34,12 @@ Repeated keys AND together: `--filter-by "ret>20,ret<=30"`.
 - **JSON 输出变更(同批)**: `has_pnl`/`dump_days` 键移除(实时物理事实,唯一来源是全库扫盘;单因子看 `ops info`),新增 `status` 键。
 - **`-n` limit 不下推**(P0-5 语义:先滤后截): list.py 不给 `find` 传 limit,由内存过滤后 `[:n]` 截断(`find` 的 limit 参数仅显式给定时下推)。
 
-**Validation**: unknown keys, invalid syntax, and empty expressions print an error and exit early (no output). Regex was considered but deferred — glob covers the common case.
+**Validation**: unknown keys, invalid syntax, and empty expressions raise `FilterError`
+(collects all errors as plain-text messages); cli prints them red and exits early
+(no output, exit 0 保持旧行为). Regex was considered but deferred — glob covers the common case.
+
+## 展示层(2026-07-11 上收)
+
+本包**零展示**:`list_factors(args) -> list[Factor]` 只做解析/下推/内存兜底。
+表格(rich Table)/JSON 渲染在 `ops/cli/list.py`(C9 契约钉住:services 不得
+直引 rich);过滤错误经 `FilterError.errors` 传给 cli 呈现。
