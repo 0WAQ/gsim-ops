@@ -1462,3 +1462,12 @@ A 107 src-only 残留(完整目录、PG 零记录、零产物侧影;4 个 mtime 
   归一有误配风险);
 - 测试 +4(feature 放闸邻居不碰/TOCTOU、cleanup 脚本三守卫、birthday 拒收),
   conftest dropbox 工厂加 birthday 参数。
+
+**doctor v1.1 执行收官(2026-07-12)**:四批 173 条残留全部处置零意外
+(VERIFY-DOCTOR-V11-RESULT):D 4 alien 人工 rm / B+C 62 feature 经
+`--fix artifact-orphan`(62/62 无一 skip)/ A+C 107 src 目录经 cleanup 脚本
+(dry-run 107 全 would-remove → apply 107 全 removed)。复跑全库 doctor:
+七族 fail 全 0、六族 warn 全 0,仅剩 pool-ghost 8 条合法 WARN(approve 豁免
+/archive 瞬态,设计内只报不删),EXIT=0 —— **生产库对账基线自此全绿**。
+勘误:RESULT 末行"L1 挂账仍在"有误 —— L1(author 归一 + birthday 校验)已在
+本分支 c382de5 修复;真正留后续的只有 L2(ybai 长短双命名,只档案不写代码)。
