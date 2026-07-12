@@ -133,6 +133,7 @@ def test_fix_dump_orphan_spares_recorded(test_config, seed_factor):
 
 def test_fix_pack_tmp_stale_only(test_config, seed_factor):
     _, config = test_config
+    seed_factor("AlphaOld", FactorStatus.ACTIVE)    # 在库因子:其正式 npy 绝不可碰
     stale = config.alpha_feature / ".AlphaOld.v2.npy.tmp"
     fresh = config.alpha_feature / ".AlphaNew.v2.npy.tmp"
     real = config.alpha_feature / "AlphaOld.v2.npy"
@@ -145,7 +146,40 @@ def test_fix_pack_tmp_stale_only(test_config, seed_factor):
 
     r = _result(results, "artifact-orphan")
     assert r.fixed == 1 and not stale.exists()
-    assert fresh.exists() and real.exists()   # 新鲜 tmp(在跑 pack)与正式 npy 不碰
+    assert fresh.exists() and real.exists()   # 新鲜 tmp(在跑 pack)与在库正式 npy 不碰
+
+
+def test_fix_feature_orphan_v11(test_config, seed_factor):
+    """v1.1 放闸:PG 全无记录的孤儿 feature 可删;在库因子 feature、alien、
+    pnl 孤儿(无判读材料)全部不碰。"""
+    _, config = test_config
+    seed_factor("AlphaLive", FactorStatus.ACTIVE)
+    orphan_v1 = config.alpha_feature / "AlphaGone.v1.npy"
+    orphan_v2 = config.alpha_feature / "AlphaGone.v2.npy"
+    live = config.alpha_feature / "AlphaLive.v2.npy"
+    alien = config.alpha_feature / "AlphaWeird.v2.npy.318CBB27"
+    pnl_orphan = config.alpha_pnl / "AlphaGonePnl"
+    for p in (orphan_v1, orphan_v2, live, alien, pnl_orphan):
+        p.write_text("x")
+
+    _, results = run_doctor(config, fix=("artifact-orphan",), confirm=YES)
+
+    r = _result(results, "artifact-orphan")
+    assert r.fixed == 2
+    assert not orphan_v1.exists() and not orphan_v2.exists()
+    assert live.exists() and alien.exists() and pnl_orphan.exists()
+
+    # TOCTOU:确认窗口里孤儿被并发 submit 登记 → 锁内重验拒删
+    orphan_v1.write_text("x")
+
+    def register_then_yes(result, fixer):
+        seed_factor("AlphaGone", FactorStatus.SUBMITTED)
+        return True
+
+    _, results2 = run_doctor(config, fix=("artifact-orphan",), confirm=register_then_yes)
+    r2 = _result(results2, "artifact-orphan")
+    assert r2.fixed == 0 and orphan_v1.exists()
+    assert r2.fix_log and r2.fix_log[0][1] == VANISHED
 
 
 def test_confirm_denied_means_no_action(test_config, seed_factor):
@@ -292,3 +326,41 @@ def test_backfill_holds_factor_lock(test_config, seed_factor):
     factor = repo.get("AlphaWbaiLegacy")             # 锁放开:正常补录 ACTIVE
     assert factor is not None and factor.state is not None
     assert factor.state.status == FactorStatus.ACTIVE
+
+
+def test_cleanup_src_orphans_guards(test_config, seed_factor):
+    """A 批一次性脚本(scripts/cleanup_src_orphans.py)守卫:只删 PG 无记录
+    的名单目录;有记录 / 在 staging / dry-run 一律不动。"""
+    import importlib.util
+
+    from ops.infra.config import get_project_root
+    from ops.infra.repository import FactorRepository
+
+    spec = importlib.util.spec_from_file_location(
+        "cleanup_src_orphans",
+        get_project_root() / "scripts" / "cleanup_src_orphans.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    _, config = test_config
+    repo = FactorRepository(config)
+    orphan = config.alpha_src / "AlphaOrphanDir"
+    recorded = config.alpha_src / "AlphaRecorded"
+    staged = config.alpha_src / "AlphaInStaging"
+    for d in (orphan, recorded, staged):
+        d.mkdir(parents=True)
+        (d / "x.py").write_text("x=1\n")
+    seed_factor("AlphaRecorded", FactorStatus.ACTIVE)
+    (config.staging / "AlphaInStaging").mkdir(parents=True)
+
+    # dry-run:零删除
+    for name in ("AlphaOrphanDir", "AlphaRecorded", "AlphaInStaging"):
+        outcome, _ = mod.cleanup_one(name, config, repo, apply=False)
+    assert orphan.exists() and recorded.exists() and staged.exists()
+
+    # apply:只删真孤儿
+    assert mod.cleanup_one("AlphaOrphanDir", config, repo, apply=True)[0] == "removed"
+    assert mod.cleanup_one("AlphaRecorded", config, repo, apply=True)[0] == "skip"
+    assert mod.cleanup_one("AlphaInStaging", config, repo, apply=True)[0] == "skip"
+    assert not orphan.exists()
+    assert recorded.exists() and staged.exists()
