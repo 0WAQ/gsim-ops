@@ -1471,3 +1471,46 @@ A 107 src-only 残留(完整目录、PG 零记录、零产物侧影;4 个 mtime 
 /archive 瞬态,设计内只报不删),EXIT=0 —— **生产库对账基线自此全绿**。
 勘误:RESULT 末行"L1 挂账仍在"有误 —— L1(author 归一 + birthday 校验)已在
 本分支 c382de5 修复;真正留后续的只有 L2(ybai 长短双命名,只档案不写代码)。
+
+## schema v2 设计收敛 + v2a 小件批(2026-07-12)
+
+分支 `claude/schema-v2`。doctor 清完 835 条历史欠账后,用户复审三表 schema
+提出七点(时间戳冗余 / NULL 泛滥 / check_history 装 JSONB / 字段分配 /
+僵尸列 / 类型选择),多轮讨论收敛为 `docs/schema-v2.md`:改什么、为什么、
+**明确不改什么**(定案表防回潮:id 保留 —— 用户原则"不拿业务字段做主键";
+snapshot_at 保留正名为对账见证列;delay/fields/tables 留 snapshot ——
+代码版本属性与 metrics 同生共死;entered_at 保留 —— 不可派生 + 硬消费方)。
+
+**v2b 已批待做(大件)**:`factor_history` 全操作审计表(**用户提议**,从
+check 专用表泛化;无 FK 活过 rm、actor 列、Repository 同事务发射、回填
+尽量重建 actor='migration')+ state 删三列(rejected_at/last_fail_stage/
+last_fail_reason 变 LATERAL 派生)+ check_history JSONB 退役 +
+fields/tables JSONB→TEXT[](诚实类型:psycopg 原生 list + GIN array_ops,
+放弃关联表 —— 元素无独立生命周期,收益无买家)。
+
+**v2a 本批落地(小件,先行)**:
+- **补执行 `migrate_drop_snapshot_index_cols.sql`**:has_pnl/dump_days 代码侧
+  2026-07-06 已删,但生产删列**从未执行**(用户查活表发现;infra/CLAUDE.md
+  却是"已删列"口吻 —— 文档失实同批改口)。教训:迁移脚本"写了"≠"跑了",
+  README 迁移台账自此带执行状态列;
+- **`migrate_v2a_state_check.sql`**:`chk_active_entered` CHECK
+  (status='active' ⇒ entered_at 非空)—— "不该 NULL 的状态下 NULL"
+  (doctor snapshot-stale 抓的那类漂移的近亲)在写入口被 DB 拒掉。事务内
+  前置 SELECT violating_rows,有违规行时 ADD CONSTRAINT 自然失败回滚;
+  代码侧两处 DDL(pg_store._SCHEMA + init/01-schema.sql)同步加约束;
+- **DDL 双真相源 pin 测试**(`tests/test_schema_pin.py`):init SQL 是代码
+  `_SCHEMA` 的手抄镜像(S2 挂账,上次 bootstrap 起出过迁移前的旧世界
+  P0-3)—— 规范化(去注释/压平/排序)逐语句比对,drift 即红;
+- **`scripts/postgres/README.md` 全量重写**:原文通篇仍是"派生层存储 /
+  确认 factor_derived 建好"(derived 层 2026-07-07 已删,照文档操作会找
+  一张不存在的表)。新版:三表现实 + 双真相源说明 + **迁移脚本台账
+  (含执行状态)**;
+- 测试适配:seed_factor ACTIVE 缺省补 entered_at(与新约束一致,镜像生产
+  写路径不变量)。
+
+门禁:fast suite 162 passed(main 基线 161 + pin 1)。
+
+**v2a 生产执行收官(2026-07-12,VERIFY-SCHEMA-V2A-RESULT)**:五阶段全绿
+零意外 —— 备份 3.7M 落盘(pg_dump 17+ 的 `\unrestrict` 尾标经核实非截断)、
+violating_rows=0、空档确认后两 SQL 零报错、复验两列消失/约束出现/doctor
+exit=0/Total 8252 不变。2026-07-06 挂账的僵尸列至此清偿,README 台账 ✅。

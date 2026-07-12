@@ -1,8 +1,8 @@
 -- ops 三表 schema — 首次 initdb 时自动执行 (仅 volume 为空时跑一次)。
--- 幂等重建见 ops 代码里各 store 的 _init_schema(); 这里是 bootstrap。
+-- 幂等重建见 ops/infra/schema.py::ensure_schemas(); 这里是 bootstrap。
 --
 -- ⚠ 本文件是各 pg_store._SCHEMA 的镜像 (多真相源, full-review S2)。改表结构
--- 时两处同改;G-wave 计划让 init SQL 从 store 常量生成。
+-- 时两处同改;一致性由 tests/test_schema_pin.py 钉住(drift 即红,2026-07-12)。
 -- 2026-07-07 Wave 2 重写: 原文件仍是迁移前的 factor_derived + 带
 -- library_id/author 的旧 factor_state —— 空库 bootstrap 会起出旧世界
 -- (full-review P0-3)。旧生产库的僵尸表清理见 ../migrate_drop_derived.sql。
@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS factor_state (
     check_history JSONB NOT NULL DEFAULT '[]',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     FOREIGN KEY (name) REFERENCES factor_info(name) ON DELETE CASCADE,
-    CONSTRAINT chk_status CHECK (status IN ('submitted', 'checking', 'active', 'rejected'))
+    CONSTRAINT chk_status CHECK (status IN ('submitted', 'checking', 'active', 'rejected')),
+    CONSTRAINT chk_active_entered CHECK (status <> 'active' OR entered_at IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS ix_fs_status ON factor_state(status);
 

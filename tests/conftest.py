@@ -299,7 +299,7 @@ def seed_factor(test_config):
     factor_info,且 factor_state.name 的外键要求 info 父行先在(直接 put →
     ForeignKeyViolation,生产验证第一轮 11 个失败的根因)。
     """
-    from ops.core.state import FactorRecord
+    from ops.core.state import FactorRecord, FactorStatus
     from ops.infra.info import FactorInfo, default_info_store
     from ops.infra.store import default_store
 
@@ -313,6 +313,10 @@ def seed_factor(test_config):
                                      discovery_method=discovery_method,
                                      created_at="2026-07-05T00:00:00"))
         state_kw.setdefault("updated_at", "2026-07-05T00:00:00")
+        if status == FactorStatus.ACTIVE:
+            # 镜像生产不变量(chk_active_entered,schema v2a):ACTIVE 必有
+            # 入库时刻 —— 全部生产写路径都遵守,测试种子同样遵守
+            state_kw.setdefault("entered_at", "2026-07-01T00:00:00")
         store.put(FactorRecord(name=name, status=status, **state_kw))
 
     return _seed
