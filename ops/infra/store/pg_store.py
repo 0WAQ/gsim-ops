@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS factor_state (
     check_history JSONB NOT NULL DEFAULT '[]',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     FOREIGN KEY (name) REFERENCES factor_info(name) ON DELETE CASCADE,
-    CONSTRAINT chk_status CHECK (status IN ('submitted', 'checking', 'active', 'rejected'))
+    CONSTRAINT chk_status CHECK (status IN ('submitted', 'checking', 'active', 'rejected')),
+    CONSTRAINT chk_active_entered CHECK (status <> 'active' OR entered_at IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS ix_fs_status ON factor_state(status);
 """

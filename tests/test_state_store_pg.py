@@ -22,8 +22,12 @@ pytestmark = pytest.mark.pg
 
 def _rec(name="A", status=FactorStatus.SUBMITTED,
          updated_at="2026-07-05T00:00:00"):
+    # chk_active_entered(schema v2a):ACTIVE 必有入库时刻,直连 store 的
+    # 测试种子同样遵守数据库约束
+    entered = "2026-07-01T00:00:00" if status == FactorStatus.ACTIVE else None
     return FactorRecord(name=name, status=status,
                         updated_at=updated_at,
+                        entered_at=entered,
                         submitted_at="2026-07-05T00:00:00")
 
 

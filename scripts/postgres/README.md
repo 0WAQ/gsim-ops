@@ -1,42 +1,51 @@
-# ops Postgres (派生层存储)
+# ops Postgres(因子三表真相源)
 
-server-160 上用 Docker 跑的 Postgres，承载因子库**派生层**数据（index / metrics /
-datasources / bcorr），替代原来 per-machine 的 `~/.cache/ops/lib/<lib>/*.json`，
-让三机共享一份、查询不扫盘。背景见 `.claude/plans/` 派生层迁 PG 计划 +
-memory `project_factor_library_storage_architecture`。
+server-160 Docker 跑的 Postgres,承载因子库的 **PG 真相源三表**(2026-07-06
+三表重构后;原"派生层 factor_derived"已于 2026-07-07 Wave 2 退役删除):
+
+| 表 | 内容 | 代码侧 |
+|---|---|---|
+| `factor_info` | 身份(author/discovery_method/created_at;三表的根,FK 级联于它) | `ops/infra/info/` |
+| `factor_state` | 生命周期状态机(status/version/时间戳/check_history) | `ops/infra/store/` |
+| `factor_snapshot` | 入库时不可变快照(metrics/datasources/delay/bcorr,snapshot_at=entered_at) | `ops/infra/snapshot/` |
 
 ## 快速上手
 
 ```bash
 cd scripts/postgres
-# .env 已含 OPS_PG_PASSWORD (gitignore, 不进版本库)
+# .env 已含 OPS_PG_PASSWORD(gitignore,不进版本库;新机器从 160 scp,600 权限)
 docker compose up -d
 docker compose ps                      # 看 healthy
-docker exec -it ops-pg psql -U ops -d ops -c '\dt'   # 确认 factor_derived 建好
+docker exec -it ops-pg psql -U ops -d ops -c '\dt'   # 预期 factor_info/state/snapshot 三表
 ```
 
 ## 关键约定
 
-- **host 端口 15432**（避开默认 5432），容器内仍是 5432。连接串 `host=server-160 port=15432 dbname=ops user=ops`。
-- **数据在 named volume `ops-pg-data`**（本地 ext4，绝不放 JFS/网络 FS）。
-- **迁移/备份走 `pg_dump`**（`backup.sh`），逻辑备份跨 PG 版本、跨机安全。不要直接搬 volume 物理目录。
-- **schema** 见 `init/01-schema.sql`，仅 volume 为空首次 initdb 时自动执行；ops 代码侧有幂等 `_init_schema()` 兜底。
+- **host 端口 15432**(避开默认 5432),容器内 5432。连接串
+  `host=10.9.100.160 port=15432 dbname=ops user=ops`;
+- **数据在 named volume `ops-pg-data`**(本地 ext4,绝不放 JFS/网络 FS);
+- **schema 双真相源**:`init/01-schema.sql`(volume 为空首次 initdb 自动执行)
+  是代码侧三个 `pg_store._SCHEMA` 的镜像,改表结构两处同改 ——
+  一致性由 `tests/test_schema_pin.py` 钉住(drift 即红);代码侧幂等引导是
+  `ops/infra/schema.py::ensure_schemas`;
+- **测试库 `ops_test`** 同实例(per-session schema 隔离,见 tests/README.md),
+  与生产 `ops` 库隔离;
+- **迁移/备份走 `pg_dump`**(`backup.sh`,保留最近 14 份),不搬 volume 物理目录。
+
+## 迁移脚本台账(按时间序;生产执行前先 pg_dump 备份)
+
+| 脚本 | 作用 | 生产执行状态 |
+|---|---|---|
+| `migrate_to_snapshot.sql` | 双表 → 三表重构 | ✅ 2026-07-06 |
+| `backfill_discovery_method.py` | discovery_method 回填 | ✅ 2026-07-06 |
+| `migrate_drop_derived.sql` | 删 derived 僵尸表 | ✅ 2026-07-08(三机滚存窗口) |
+| `migrate_drop_snapshot_index_cols.sql` | 删 has_pnl/dump_days 僵尸列 | ⬜ **待执行**(v2a;2026-07-12 用户查活表发现从未跑) |
+| `migrate_snapshot_at.py` | mismatch 时间戳一次性修正(doctor JSON 名单) | ✅ 2026-07-12(doctor v1 收官,UPDATE 20 行) |
+| `migrate_v2a_state_check.sql` | chk_active_entered 约束 | ⬜ 待执行(v2a) |
 
 ## 备份
 
 ```bash
-./backup.sh              # 导出到 ./dumps/ops-<时间>.sql.gz, 保留最近 14 份
-# 恢复
-gunzip -c dumps/ops-XXXX.sql.gz | docker exec -i ops-pg psql -U ops -d ops
+./backup.sh              # 导出到 ./dumps/ops-<时间>.sql.gz
+gunzip -c dumps/ops-XXXX.sql.gz | docker exec -i ops-pg psql -U ops -d ops   # 恢复
 ```
-
-建议挂 cron（每日）：`0 2 * * * cd /home/wbai/gsim-ops/scripts/postgres && ./backup.sh`
-
-## 迁到别的机器
-
-1. 源机 `./backup.sh` 得到 `.sql.gz`
-2. 目标机 `docker compose up -d` 起空库
-3. `gunzip -c xxx.sql.gz | docker exec -i ops-pg psql -U ops -d ops` 灌回
-
-派生数据本身可从 JFS 整库 rebuild（`ops list --refresh`），PG 丢了不致命，
-备份只是加速用的第二层保险。
