@@ -46,9 +46,9 @@ docker exec -it ops-pg psql -U ops -d ops -c '\dt'   # 预期 factor_info/state/
 | `migrate_v2c_smalls.sql` | 重复索引删除 + _new 命名归一 + chk_discovery 约束 | ✅ 2026-07-12(v2c,无窗口) |
 | `migrate_v3_measured_snapshots.py` | 测得快照回填(738)+ created_at 修正(730) | ✅ 2026-07-13(v3;首跑抓获 autocommit 缺陷后二跑成功) |
 | `migrate_v2b_history.sql` | factor_history 建表 + check_history 展开回填 + state 删四列 + fields/tables TEXT[] | ✅ 2026-07-12(v2b;22937 事件,锚点 6988/8419/7530 全中) |
-| `migrate_legacy_snapshot_at.sql` | legacy 批①:472 条 snapshot_at 漂移拉回最近 check 事件 at(600 守卫 + 残余断言,幂等) | ⬜ 待执行(legacy 清理批;沙盘验证 ✅ 2026-07-13) |
-| `backfill_compliance_snapshots.py` | legacy 批②:compliance 被拒 22 条补跑 simsummary → 测得快照(缺省 dry-run) | ⬜ 待执行(legacy 清理批;沙盘验证 ✅ 2026-07-13) |
-| `migrate_discovery_notnull.py` | legacy 批③:discovery_method 归一(池位置 + --assign 人工名单)+ chk_discovery 收窄 + SET NOT NULL(可分批,幂等) | ⬜ 待执行(legacy 清理批;沙盘验证 ✅ 2026-07-13) |
+| `migrate_legacy_snapshot_at.sql` | legacy 批①:472 条 snapshot_at 漂移拉回最近 check 事件 at(600 守卫 + 残余断言,幂等) | ✅ 2026-07-13(legacy 清理批,VERIFY-LEGACY-CLEANUP-RESULT) |
+| `backfill_compliance_snapshots.py` | legacy 批②:compliance 被拒 22 条补跑 simsummary → 测得快照(缺省 dry-run) | ✅ 2026-07-13(legacy 清理批,VERIFY-LEGACY-CLEANUP-RESULT) |
+| `migrate_discovery_notnull.py` | legacy 批③:discovery_method 归一(池位置 + --assign 人工名单)+ chk_discovery 收窄 + SET NOT NULL(可分批,幂等) | ✅ 2026-07-13(legacy 清理批,VERIFY-LEGACY-CLEANUP-RESULT) |
 
 ## 备份
 
