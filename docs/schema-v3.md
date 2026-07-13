@@ -1,4 +1,4 @@
-# Schema v3:词汇正名 + 检测结果安家(2026-07-13,与用户逐条讨论收敛;待批)
+# Schema v3:词汇正名 + 快照语义变更(2026-07-13,与用户逐条讨论收敛;二轮定稿)
 
 ## Context(起点:zxu 被拒因子在 list 里整行空)
 
@@ -41,38 +41,42 @@ alphalib / 归档。四个正交谓词:
 为 NULL 除外)。落地:CLAUDE.md 收录词汇表,list/status 等文档改口
 ("库内因子"→"在册因子")。
 
-## 二、检测结果安家:check 事件携带测得值(待批,核心变更)
+## 二、快照语义变更:factor_snapshot = 最近一次 check 测得的表现(用户提案,二轮采纳)
 
-**动机**:测得值是 check 运行的事实,入库决定只是消费它。现状它寄居在
-fail_reason 文本里(correlation)或随入库固化进快照(pass),被拒因子的
-评审(approve 多样性豁免)拿不到结构化数据。
+**动机**:测得值是 check 运行的事实,入库决定只是消费它。一轮方案(check
+事件加 7 窄列)被用户方案取代 —— **v2b 建成审计表后,快照不再需要兼职
+"入库见证"**(entered 事件 + entered_at 全权负责),绑着入库语义只是历史
+惯性。改快照语义的四个优势:读路径零改动(list/approve/find 已 JOIN
+snapshot,被拒因子的行自然出现)、消灭"合法无快照的 ACTIVE"特例(approve
+放行的因子有被拒那次的测得值)、fields/tables/delay 一起覆盖(fail 时 py
+还在 staging,datasources 照采)、v2b"check 仅四列"定案不用翻。
 
-**DDL**:factor_history 的 check 行加**窄类型列**(全部 nullable;非 check
-op 与没跑出指标的失败恒 NULL):
+**新语义**:`factor_snapshot` = **测得快照**(最近一次 check 测得的表现)。
+- `snapshot_at` = 测得时刻(再正名:对账见证 → 测得见证;列名照旧不改);
+- 仍然**只由 check 写**、每次测量原子替换(复用 stale 自愈的 delete+insert)、
+  永无离线重算 —— v2 反对的"refresh 可变刷新"依然被拒之门外,不可变精神
+  保留为"每行不可变,替换即新测量";
+- 写入时机:pass → archive 段照旧;**correlation 失败 → 也写**(simsummary
+  已跑、CorrResult 已有 bcorr,零额外计算;datasources/delay 同批采集);
+  checkbias/checkpoint 等早期失败没跑出指标,不写(NULL 诚实);
+- compliance 失败:long_backtest 已完成、pnl 在,可低成本补跑 simsummary
+  落快照 —— 随本批一起做(推翻一轮"不做"预案,写入点同 correlation)。
 
-```sql
-ALTER TABLE factor_history
-    ADD COLUMN ret DOUBLE PRECISION, ADD COLUMN shrp DOUBLE PRECISION,
-    ADD COLUMN mdd DOUBLE PRECISION, ADD COLUMN tvr DOUBLE PRECISION,
-    ADD COLUMN fitness DOUBLE PRECISION, ADD COLUMN bcorr DOUBLE PRECISION,
-    ADD COLUMN delay INT;
-```
+**代码适配面**:
+- `repository.attach_snapshot`:entered_at 硬闸删除,`snapshot_at = 测得
+  时刻`(由调用方传,= 该次 check 事件的 at);
+- `Factor.__post_init__` 软校验改:snapshot_at 不再对 entered_at,改对
+  "最近一次带指标的 check 事件"(或降级为不校验,doctor 全权);
+- `check.py`:on_reject 对 correlation/compliance 增加快照采集落库
+  (_persist_derived 泛化,pass/fail 共用);
+- **doctor snapshot-stale 族判据重定义**:illegal(非 ACTIVE 却有快照)
+  整个作废;新判据 = `snapshot_at == 最近一次测得指标的 check 事件的 at`
+  (与 factor_history 交叉对账,比旧判据更强);--fix 语义随判据重写;
+- list/approve/status:**零渲染改动**(数据源自然回来)。
 
-- **这推翻 v2b"check 专属仅四列、不上 JSONB"定案** —— 当时反对的是无结构
-  JSONB;窄类型列 + 新证据(无正主事实族、780 个被拒因子的评审需求)构成
-  翻案理由。定案表照 v2 惯例更新并记翻案依据;
-- **写侧**:CheckRecord 增补对应字段;correlation checker 把 simsummary 结果
-  结构化填入(pass 与 fail 都填),fail_reason 回归纯"原因"(违规说明);
-  pass 路径 archive 段复用同一份结果(simsummary 只跑一次);
-- **读侧**:`ops list` 对无快照的 REJECTED 行,指标/delay 从 last_fail
-  LATERAL 直取(**该 JOIN 本来就在,零额外查询零文本解析**),淡色渲染
-  区分"入检值 ≠ 入库快照";approve 计划表同源展示 ret/shrp/bcorr;
-- **factor_snapshot 角色不变**:仍是入库时事实的固化(= 入库那次 check 的
-  测得值拷贝),读路径不动;
-- **迁移**:存量 738 条 correlation fail_reason 解析回填(`key=value`
-  解析器,四种历史格式已验证覆盖);6988 条 pass 事件可选自快照回填
-  (推荐做,事实族不裂两半);checkbias/checkpoint 的 20 条本就无值,NULL 诚实。
-
+**迁移**:给存量被拒因子回填快照行 —— 738 条 correlation fail_reason
+解析(`key=value`,四种历史格式已验证)+ meta.json 补 delay/datasources;
+compliance 22 条可选人工补跑;snapshot_at = 对应 check 事件的 at。
 ## 三、数据修正(已拍板)
 
 - `created_at := submitted_at`,对违反 `created_at > submitted_at` 的行
@@ -91,22 +95,26 @@ ALTER TABLE factor_history
 
 | 项 | 决定 | 理由 |
 |---|---|---|
-| REJECTED 写 factor_snapshot | 不做 | 快照 = 入库见证,语义不掺水;测得值的家在 check 事件 |
-| compliance 失败补算指标 | 不做 | pnl 在盘上可人工重算;22 个存量不值得开新采集路径 |
+| check 事件加指标列(一轮方案) | 不做 | 被快照语义变更取代;v2b"仅四列"定案得以保留。代价:丢"历次测量时间序列",fail_reason 文本兜底 |
 | entered_at 改名 | 不做 | 代价(代码+迁移+习惯)> 收益;保留 + 正名(同 snapshot_at 先例) |
+| REJECTED 写快照 = 入库? | 否 | 写快照 ≠ 入库;入库判据只看 status/entered_at/entered 事件,词汇表为准 |
 | 数据源字典表 | 维持缓议 | v2c 定案不变 |
 
-## 六、待拍板点
+## 六、已拍板记录(2026-07-13 二轮)
 
-1. **翻 v2b"仅四列"定案**,check 事件加 7 窄列(推荐:翻);
-2. **pass 事件也携带/回填测得值**(推荐:是,事实族不裂两半);
-3. `ops list` 混排时加 status 列(可选,顺手项)。
+- **快照语义变更为"测得快照"**(用户提案,取代一轮的 check 事件加列);
+- 词汇表全部术语(在册/已归档/入库/在库/已入库 + 入库时刻定义);
+- created_at := submitted_at 数据修正(81 违反者,成因不追);
+- legacy 老因子档案清理独立成批("找个时间一起解决")。
+
+仍待拍板:`ops list` 混排时加 status 列(可选顺手项,实施时一并定)。
 
 ## 七、实施顺序
 
-1. 代码批:CheckRecord/DDL/checker 落值/list·approve 渲染/解析器 + 测试
-   + 对抗评审;
-2. 迁移脚本(加列 + 回填,幂等设计,沙盘实测);加列为低风险 DDL,预计
-   免禁写窗口(照 v2c 先例,风险分级即流程分级);
-3. 执行者窗口 + 复验(list -s rejected 出指标为验收标准);
+1. 代码批:attach_snapshot 闸重写 / check.py 失败路径采集 / Factor 软校验 /
+   doctor 族判据重定义 + 解析器 + 测试 + 对抗评审(重点镜头:doctor 新旧
+   判据切换期的误报面);
+2. 迁移脚本(回填 738+22 快照行,幂等设计,沙盘实测);零 DDL 变更
+   (snapshot 表结构不动,纯 INSERT),预计免禁写窗口;
+3. 执行者复验(验收标准 = `ops list -s rejected` 出指标 + doctor 全绿);
 4. 词汇表进 CLAUDE.md 随代码批同 PR。
