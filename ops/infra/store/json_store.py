@@ -164,6 +164,17 @@ class JsonStateStore(StateStore):
                 )
         return None
 
+    def latest_check_ats(self) -> "dict[str, str]":
+        with self._locked():
+            raw = self._read_raw()
+        out = {}
+        for name, d in raw.items():
+            checks = d.get("check_history", [])
+            if checks:
+                c = checks[-1]
+                out[name] = c.get("finished_at") or c.get("started_at") or ""
+        return out
+
     def history(self, name: str) -> "list[HistoryEvent]":
         """合成 check 事件时间线(无事件表,生命周期 op 缺席)——
         使 status 详情在 dev/test 后端也有时间线可渲染。"""

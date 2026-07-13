@@ -7,12 +7,21 @@ from ops.core.alpha.results.base import Result
 class CheckFail(Exception):
     """因子质量失败信号 → REJECTED(retryable stage 除外)。
 
+    result(可选,schema v3):checker 在失败前已测得的结果对象
+    (如 CorrResult —— metrics + bcorr),流水线捕获后落"测得快照"
+    (factor_snapshot 新语义:最近一次 check 测得的表现,被拒也写)。
+    不携带则按该 stage 没测出指标处理(checkbias/checkpoint 等)。
+
     失败发生在哪个 stage 由流水线在捕获时按"当前正在跑的 stage"归因,
     exception 自己不携带 stage —— 原先 12 个单行子类(ValidateFail …
     CorrelationFail)各自硬编码 stage 字符串,checker 代码复制到新 stage
     时旧字符串跟着走就是静默路由错误(full-review S11);流水线是唯一
     捕获方且始终知道当前 stage,由它归因不可能错位。
     """
+
+    def __init__(self, reason, result=None):
+        super().__init__(reason)
+        self.result = result
 
 
 class CheckSkip(Exception):

@@ -86,7 +86,11 @@ class CorrelationChecker(Checker):
         # 3. 判断是否满足要求
         violations = self._gate_violations(metrics, factor.delay)
         if violations:
-            raise CheckFail(f"{'; '.join(violations)} | {metrics}")
+            # 业绩门槛失败:reason 文本格式不变,result 携带测得值
+            # (bcorr 此时已算出,corrs[-1] 是排序后的最大值)—— schema v3
+            max_f, max_c = corrs[-1]
+            raise CheckFail(f"{'; '.join(violations)} | {metrics}",
+                            result=CorrResult(metrics, max_c, max_f))
 
         # 4. 找出最大相关系数 (bcorr 输出已排序，取最后一行)
         max_corr_factor, max_corr = corrs[-1]
@@ -107,11 +111,13 @@ class CorrelationChecker(Checker):
 
             # 未打败
             if not self._check_beat(metrics, competitor_metrices):
-                raise CheckFail(CorrResult(
-                                        metrics,
-                                        max_corr, max_corr_factor,
-                                        len(high_corr_factors),
-                                        (competitor_name, corr, competitor_metrices)))
+                # reason = str(CorrResult)(文本不变),result 同对象(v3)
+                _cr = CorrResult(
+                    metrics,
+                    max_corr, max_corr_factor,
+                    len(high_corr_factors),
+                    (competitor_name, corr, competitor_metrices))
+                raise CheckFail(_cr, result=_cr)
 
         return CorrResult(metrics,
                           max_corr,max_corr_factor,

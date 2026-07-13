@@ -50,7 +50,7 @@
   (correlation 失败时 check.py on_reject 已保留这些产物)
 - 不动 `version`
 - 不重跑任何 check 阶段
-- 不写 `factor_snapshot`(快照只在 check archive 时产生)—— approve 放行的因子是**合法无快照的 ACTIVE**,不属数据异常
+- 不写 `factor_snapshot` —— v3 起被拒因子带着 correlation 那次的**测得快照**,approve 放行后快照随行("无快照 ACTIVE"特例自 v3 消灭;存量 approve 因子仍可能无快照,属 legacy)
 - 不替换 / 不降级库内既有因子
 
 ## 并发安全

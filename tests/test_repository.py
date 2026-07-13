@@ -193,28 +193,30 @@ def test_pg_find_factor_set_and_filters(test_config, seed_factor):
     assert rej[0].correlation_rejected()  # v2b: 谓词在 Factor 聚合(state+last_fail)
 
 
-def test_pg_attach_snapshot_stamps_entered_at(test_config, seed_factor):
-    """attach_snapshot 强制 snapshot_at = entered_at(调用方不填);
-    重复 attach 走 stale 自愈(旧行让位,新值可见)。"""
+def test_pg_attach_snapshot_stamps_measured_at(test_config, seed_factor):
+    """v3 测得快照:snapshot_at = measured_at(测得时刻,调用方传);
+    重复 attach = 新测量原子替换(旧行让位,新值可见);被拒也可写。"""
     _, config = test_config
     repo = FactorRepository(config)
-    seed_factor("AlphaWbaiSnap", FactorStatus.ACTIVE,
-                entered_at="2026-07-02T12:00:00")
+    seed_factor("AlphaWbaiSnap", FactorStatus.REJECTED)  # 被拒因子照写(v3)
 
-    repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiSnap", ret=30.0, shrp=2.5))
+    repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiSnap", ret=30.0, shrp=2.5),
+                         measured_at="2026-07-02T12:00:00")
     factor = repo.get("AlphaWbaiSnap")
     assert factor is not None and factor.snapshot is not None
     assert factor.snapshot.snapshot_at == "2026-07-02T12:00:00"
     assert factor.snapshot.ret == 30.0
 
-    # stale 自愈:再 attach 不撞 UNIQUE,读到新值
-    repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiSnap", ret=99.0))
+    # 新测量替换:再 attach 不撞 UNIQUE,读到新值新时刻
+    repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiSnap", ret=99.0),
+                         measured_at="2026-07-03T12:00:00")
     factor2 = repo.get("AlphaWbaiSnap")
     assert factor2 is not None and factor2.snapshot is not None
     assert factor2.snapshot.ret == 99.0
+    assert factor2.snapshot.snapshot_at == "2026-07-03T12:00:00"
 
     # find 侧拼出同一份快照
-    found = repo.find(author="wbai", status=FactorStatus.ACTIVE)
+    found = repo.find(author="wbai", status=FactorStatus.REJECTED)
     assert found[0].snapshot is not None and found[0].snapshot.ret == 99.0
 
 
@@ -229,10 +231,12 @@ def test_pg_snapshot_text_array_roundtrip_and_pushdown(test_config, seed_factor)
     repo.attach_snapshot(FactorSnapshot(
         name="AlphaWbaiArr",
         fields=["ashareeodprices.s_dq_close", "Interval5m.close"],
-        tables=["ashareeodprices", "Interval5m"]))
+        tables=["ashareeodprices", "Interval5m"]),
+        measured_at="2026-07-02T12:00:00")
     repo.attach_snapshot(FactorSnapshot(
         name="AlphaWbaiArr2", fields=["asharebalancesheet.accounts_payable"],
-        tables=["asharebalancesheet"]))
+        tables=["asharebalancesheet"]),
+        measured_at="2026-07-02T12:00:00")
 
     got = repo.get("AlphaWbaiArr")
     assert got is not None and got.snapshot is not None
@@ -244,15 +248,15 @@ def test_pg_snapshot_text_array_roundtrip_and_pushdown(test_config, seed_factor)
     assert {f.name for f in by_glob} == {"AlphaWbaiArr", "AlphaWbaiArr2"}
 
 
-def test_pg_attach_snapshot_requires_entered_at(test_config, seed_factor):
+def test_pg_attach_snapshot_requires_measured_at(test_config, seed_factor):
     import pytest
 
     _, config = test_config
     repo = FactorRepository(config)
-    seed_factor("AlphaWbaiNoEnter", FactorStatus.SUBMITTED)  # 无 entered_at
+    seed_factor("AlphaWbaiNoTs", FactorStatus.SUBMITTED)
 
-    with pytest.raises(ValueError):
-        repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiNoEnter", ret=1.0))
+    with pytest.raises(ValueError):  # v3:measured_at 必传(测得时刻)
+        repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiNoTs", ret=1.0))
 
 
 def test_pg_delete_cascades(test_config, seed_factor):
@@ -260,7 +264,8 @@ def test_pg_delete_cascades(test_config, seed_factor):
     _, config = test_config
     repo = FactorRepository(config)
     seed_factor("AlphaWbaiDel", FactorStatus.ACTIVE, entered_at="2026-07-01T00:00:00")
-    repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiDel", ret=1.0))
+    repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiDel", ret=1.0),
+                         measured_at="2026-07-02T12:00:00")
 
     assert repo.delete("AlphaWbaiDel") is True
     assert repo.get("AlphaWbaiDel") is None

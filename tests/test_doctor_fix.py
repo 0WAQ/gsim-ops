@@ -22,8 +22,7 @@ def _result(results, family_id):
 
 
 def _seed_snapshot(config, name, snapshot_at):
-    """直插 snapshot 行(绕过 repo.attach_snapshot 的 entered_at 强制)——
-    模拟迁移期存量的非法行。"""
+    """直插 snapshot 行(不走 attach,自定 snapshot_at)—— 造对账样本。"""
     from ops.core.factor import FactorSnapshot
     from ops.infra.snapshot import default_snapshot_store
     default_snapshot_store(config).insert(
@@ -43,7 +42,8 @@ def test_readonly_never_touches_anything(test_config, seed_factor):
     _, results = run_doctor(config)
 
     assert any(f.kind == "ghost" for f in _result(results, "pool-ghost").findings)
-    assert any(f.kind == "illegal" for f in _result(results, "snapshot-stale").findings)
+    # v3:无 check 事件且 entered_at 空的快照 = 无锚(原 illegal 语义作废)
+    assert any(f.kind == "unanchored" for f in _result(results, "snapshot-stale").findings)
     assert any(f.kind == "orphan" for f in _result(results, "dump-orphan").findings)
     # 只读:全部原样
     assert ghost.exists() and orphan_dump.exists()
@@ -97,22 +97,34 @@ def test_fix_pool_ghost_skips_info_orphan(test_config, seed_factor):
                for f in _result(results, "info-orphan").findings)
 
 
-def test_fix_snapshot_illegal_only(test_config, seed_factor):
-    """illegal(entered_at 空)删行;合法快照(ACTIVE 对齐)绝不碰。"""
+def test_snapshot_family_report_only_v3(test_config, seed_factor):
+    """v3 测得快照:被拒因子带快照是合法形态,doctor 全族只报告零删除。
+    锚点吻合(快照 at == check 事件 at)不上报;漂移只报 mismatch 不 fixable。"""
     _, config = test_config
-    seed_factor("AlphaRejSnap", FactorStatus.REJECTED)
-    _seed_snapshot(config, "AlphaRejSnap", "2026-07-04T00:00:00")
-    seed_factor("AlphaGood", FactorStatus.ACTIVE, entered_at="2026-07-02T00:00:00")
-    _seed_snapshot(config, "AlphaGood", "2026-07-02T00:00:00")
+    from ops.core.state import CheckRecord
+    from ops.infra.store import default_store
+    store = default_store(config)
+    # 被拒 + 测得快照锚定 check 事件 → 合法零发现
+    seed_factor("AlphaRejSnap", FactorStatus.REJECTED,
+                last_fail_stage="correlation")  # seed 的 check 事件 finished 00:05
+    _seed_snapshot(config, "AlphaRejSnap", "2026-07-05T00:05:00")
+    # 漂移:快照时间戳 ≠ 最近 check 事件
+    seed_factor("AlphaDrift", FactorStatus.REJECTED)
+    store.append_check("AlphaDrift", CheckRecord(
+        started_at="2026-07-05T00:00:00", finished_at="2026-07-05T00:05:00",
+        passed=False, failed_stage="correlation", fail_reason="x"))
+    _seed_snapshot(config, "AlphaDrift", "2026-07-06T00:00:00")
 
-    _, results = run_doctor(config, fix=("snapshot-stale",), confirm=YES)
-
-    assert _result(results, "snapshot-stale").fixed == 1
+    # 全族已无 fixer:--fix 点名该族应被拒绝/无动作,只读扫描出 mismatch
+    _, results = run_doctor(config, fix=(), confirm=YES)
+    r = _result(results, "snapshot-stale")
+    kinds = {(f.name, f.kind) for f in r.findings}
+    assert kinds == {("AlphaDrift", "mismatch")}
+    assert r.fixed == 0
     from ops.infra.repository import FactorRepository
     repo = FactorRepository(config)
-    assert repo.get("AlphaRejSnap").snapshot is None       # illegal 已删
-    assert repo.get("AlphaGood").snapshot is not None      # 合法快照原样
-    assert repo.get("AlphaRejSnap").state is not None      # state/info 行不碰
+    assert repo.get("AlphaRejSnap").snapshot is not None   # 合法测得快照,不碰
+    assert repo.get("AlphaDrift").snapshot is not None     # mismatch 只报告
 
 
 def test_fix_dump_orphan_spares_recorded(test_config, seed_factor):

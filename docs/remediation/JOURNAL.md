@@ -1584,3 +1584,38 @@ UndefinedColumn 即此)、root 属主 pycache 卡重装(挪树 + --force 绕过,
 查询)后一次通过 —— 约束名归一、status 单索引、chk_discovery 在位、Total 8252、
 timeline 无回归。v2c 的 SQL 是纯元数据操作且新旧代码对迁移前后库均兼容,
 是三批里唯一不需要窗口纪律的(对照 v2b 的禁写窗口 —— 风险分级即流程分级)。
+
+
+## schema v3:词汇正名 + 测得快照(2026-07-13,代码批)
+
+分支 `claude/schema-v3`,设计 docs/schema-v3.md(用户深度参与,快照语义变更
+是用户提案)。起点:zxu 被拒因子 list 整行空(两轮生产取证定格因果 ——
+指标列只读 factor_snapshot,快照只随入库写;测得值都在 fail_reason 文本里)。
+
+**词汇表**(已拍板):在册/已归档/入库(动作)/在库(状态)/已入库(完成时)
++ 入库时刻 = 最近一次变为在库的时刻;"因子库"专指成员集合;不变量
+created_at <= submitted_at。进根 CLAUDE.md。
+
+**测得快照**(核心):factor_snapshot 语义 = 最近一次 check 测得的表现
+(v2b 审计表卸掉"入库见证"兼职是解锁前提)。CheckFail 携带 result
+(CorrResult),correlation 失败零额外计算落快照、compliance 失败补跑
+simsummary;attach_snapshot(measured_at) 去 entered_at 硬闸;Factor 构造
+软校验删除;**doctor snapshot-stale 族判据重定义**(snapshot_at ⇔ 最近
+check 事件 at,legacy 锚 entered_at;原 illegal kind 作废、fixer 退役 ——
+误留会删掉被拒因子的合法测得快照);list/approve/status 零渲染改动,
+被拒因子的指标列自然复活。
+
+**迁移** migrate_v3_measured_snapshots.py(dry-run 缺省):A. created_at :=
+submitted_at(81 违反者,合成 submit 事件同步修正)B. 回填 738 条
+correlation 被拒的测得快照(fail_reason key=value 解析 + meta.json 补
+delay/datasources,snapshot_at = check 事件 at)。零 DDL,预计免禁写。
+
+
+**v3 生产执行收官(2026-07-13,VERIFY-SCHEMA-V3-RESULT)**:[A] 730 行
+created_at 拉正(97% 为 fguo 07-09/10 批,比先前以为的 81 大 —— 那次批量写
+波及未被拒因子)+ [B] 738 条测得快照回填(snapshot 7472→8210,fitness 日期
+脏值隔离 39)。执行期抓获两个我方脚本缺陷(fitness 脏值 / psycopg3
+autocommit 零持久化 —— 打印正确数据全回滚,执行者用"新连接查库验证持久化"
+纪律抓获),均修复后重跑成功。doctor 新判据顺带抓出 472 条历史存量
+snapshot_at 漂移(挂 legacy 清理批)。**zxu 那 28 行从空白到带指标回到
+list,发现→取证→设计→落地全线闭环。**

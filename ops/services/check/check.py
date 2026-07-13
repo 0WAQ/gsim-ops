@@ -4,6 +4,7 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 
 from ops.core.alpha.metadata import AlphaMetadata
+from ops.core.alpha.results.correlation import CorrResult
 from ops.core.datasource import (
     build_npy_index,
     parse_datasources,
@@ -120,15 +121,18 @@ class CheckerPipeline:
         每次现构造 + get_pool 按 (pid, conninfo) 去重 → 子进程拿到自己的池。"""
         return FactorRepository(self.config)
 
-    def _persist_derived(self, factor: AlphaMetadata, metrics, corr_result) -> None:
-        """入库前把所有派生数据写入 factor_snapshot (入库时快照，不可变)。
+    def _persist_derived(self, factor: AlphaMetadata, metrics, corr_result,
+                         measured_at: str) -> None:
+        """把本次 check 测得的表现写入 factor_snapshot(**测得快照**,schema v3:
+        最近一次 check 测得的表现 —— pass 与 correlation/compliance 失败都写,
+        入库见证已全权归 entered_at/entered 事件)。
 
-        必须在 to_lib 之前调 —— datasources 依赖 factor.py_file(此时仍在 staging)。
-        各组独立 try，互不阻断入库（快照缺失可运维补救，但入库不能失败）。
+        必须在盘面搬运(to_lib / on_reject)之前调 —— datasources 依赖
+        factor.py_file(此时仍在 staging)。各组独立 try,互不阻断主流程。
 
-        落库半边(snapshot_at = entered_at 强制 + stale 自愈)归
-        repo.attach_snapshot(2026-07-09 迁 Repository);本方法只负责**采集**
-        (metrics / datasources / bcorr / delay —— check 期领域知识)。
+        落库半边(snapshot_at = measured_at + stale 自愈替换)归
+        repo.attach_snapshot;本方法只负责**采集**(metrics / datasources /
+        bcorr / delay —— check 期领域知识)。
         """
         # 准备各组数据
         ret = shrp = mdd = tvr = fitness = None
@@ -149,16 +153,6 @@ class CheckerPipeline:
             max_bcorr = corr_result.max_bcorr
             max_bcorr_factor = corr_result.max_bcorr_factor
 
-        # state 读在吞噬 try **之外**(对抗评审):PG 瞬时故障要冒泡走 unexpected
-        # 臂 revert SUBMITTED(因子留 staging 重跑自愈,旧代码语义);若也吞掉,
-        # 因子会静默入库且不可变快照永久缺失(无重算路径,只能人工 restage 重跑
-        # 30min+ 全流水线)。entered_at 真缺失(数据问题)与旧代码等价:记日志
-        # 放弃快照,入库继续。
-        state = self._repo().record(factor.name)
-        if state is None or not state.entered_at:
-            logger.error("Cannot persist snapshot: factor {} has no entered_at", factor.name)
-            return
-
         try:
             self._repo().attach_snapshot(FactorSnapshot(
                 name=factor.name,
@@ -172,7 +166,7 @@ class CheckerPipeline:
                 delay=factor.delay,
                 max_bcorr=max_bcorr,
                 max_bcorr_factor=max_bcorr_factor,
-            ))
+            ), measured_at=measured_at)
         except Exception:
             logger.exception("persist snapshot failed factor={}", factor.name)
 
@@ -347,8 +341,9 @@ class CheckerPipeline:
             repo.append_check(factor.name, check)
             repo.transition(factor.name, FactorStatus.ACTIVE, entered_at=now)
 
-            # 再写入 snapshot (需要 entered_at 作为 snapshot_at)
-            self._persist_derived(factor, metrics, corr_result)
+            # 再写入测得快照(measured_at = 同一个 now → 对 pass 因子
+            # snapshot_at 仍与 entered_at 逐字符相等,v3 前后无差)
+            self._persist_derived(factor, metrics, corr_result, measured_at=now)
 
             # 最后移动文件到 alpha_src
             prepare_for_archive(factor)
@@ -399,8 +394,24 @@ class CheckerPipeline:
                 logger.warning("check rejected factor={} stage={} reason={}",
                                factor.key, stage_name, str(e))
                 # Factor quality failure — REJECTED (src → alpha_src)
-                self.on_reject(factor, stage_name)
                 now = now_iso()
+                # 测得快照(schema v3):correlation 失败自带测得值(CheckFail
+                # .result = CorrResult);compliance 失败 long_backtest 已跑完,
+                # 补一次 simsummary(轻)。必须在 on_reject 搬运前采集
+                # (datasources 依赖 staging 里的 py_file)。快照失败不阻断拒绝。
+                try:
+                    _cr = getattr(e, "result", None)
+                    _cr = _cr if isinstance(_cr, CorrResult) else None
+                    _m = _cr.metrics if _cr else None
+                    if _m is None and stage_name in KEEP_ARTIFACTS_STAGES \
+                            and factor.pnl_file.exists():
+                        _m = Runner.run_simsummary(factor.pnl_file, self.config)
+                    if _m is not None:
+                        self._persist_derived(factor, _m, _cr, measured_at=now)
+                except Exception:
+                    logger.exception("measured snapshot on reject failed factor={}",
+                                     factor.name)
+                self.on_reject(factor, stage_name)
                 check.finished_at = now
                 check.passed = False
                 check.failed_stage = stage_name

@@ -155,7 +155,8 @@ def test_restage_discards_snapshot(test_config, seed_factor):
     seed_factor("AlphaWbaiSnapDrop", FactorStatus.ACTIVE,
                 entered_at="2026-07-02T12:00:00")
     repo = FactorRepository(config)
-    repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiSnapDrop", ret=30.0))
+    repo.attach_snapshot(FactorSnapshot(name="AlphaWbaiSnapDrop", ret=30.0),
+                         measured_at="2026-07-02T12:00:00")
     factor = repo.get("AlphaWbaiSnapDrop")
     assert factor is not None and factor.snapshot is not None  # 前置:快照在
 

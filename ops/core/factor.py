@@ -4,23 +4,21 @@
   - identity(FactorIdentity):身份,不可变 —— name/author/discovery_method/created_at,
     落 PG factor_info 表(三表之根,FK 级联);
   - state(FactorRecord,见 core/state.py):生命周期状态机;
-  - snapshot(FactorSnapshot):入库时不可变快照(未入库 = None)。
+  - snapshot(FactorSnapshot):测得快照(v3:最近一次 check 测得的表现;未测得 = None)。
 
 service 层只见 `Factor`(由 FactorRepository 组装);三张表各自的 dataclass 降级
 为 Repository/store 的内部行网关。此前领域模型碎成 12 个按存储介质命名的投影、
 零个类型代表"因子"本身(full-review 第三部分),本类型是那次诊断的答案。
 
-**不变量(构造时软校验,坏数据 warn 不炸)**:snapshot 存在 ⇒
-`snapshot.snapshot_at == state.entered_at`(快照语义 = "本次入库事件的快照")。
-注意 *不是* "ACTIVE ⇒ snapshot 存在":`ops approve`(correlation 拒绝的多样性
-豁免)合法产生无快照的 ACTIVE 因子(REJECTED 不写快照,approve 只翻状态)。
+**不变量(doctor 全权对账,构造零校验)**:snapshot 存在 ⇒
+`snapshot_at == 最近一次 check 事件的 at`(测得快照语义,v3;legacy 无事件
+锚 entered_at)。approve 放行的因子带着被拒那次的测得快照转 ACTIVE。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from ops.core.state import CORRELATION, FactorRecord, FactorStatus, HistoryEvent
-from ops.utils.log import logger
 
 
 @dataclass(frozen=True)
@@ -38,10 +36,12 @@ class FactorIdentity:
 
 @dataclass
 class FactorSnapshot:
-    """因子入库时快照(不可变)。PG factor_snapshot 表的领域形态。
+    """**测得快照**(schema v3):最近一次 check 测得的表现。
 
-    所有字段都是 check 通过时(factor_state.entered_at)的状态,之后永不更新;
-    需要最新表现必须重跑 backtest(`ops refresh` 已删除,无重算路径)。
+    PG factor_snapshot 表的领域形态。pass 与 correlation/compliance 失败都写
+    (被拒因子也有测得值);snapshot_at = 测得时刻(该次 check 事件的 at)。
+    每行不可变,新测量原子替换;仍然只由 check 写,永无离线重算
+    (`ops refresh` 已删除)。写快照 ≠ 入库 —— 入库判据看 status/entered_at。
     2026-07-09 自 infra/snapshot/base.py 迁入 core(理由同 FactorIdentity)。
     """
     name: str
@@ -65,7 +65,7 @@ class FactorSnapshot:
     max_bcorr: float | None = None
     max_bcorr_factor: str | None = None
 
-    # 快照时间点 = factor_state.entered_at (入库时间)
+    # 测得时刻 = 该次 check 事件的 at(v3;pass 因子恰与 entered_at 同值)
     snapshot_at: str | None = None  # ISO timestamp
 
 
@@ -74,7 +74,7 @@ class Factor:
     """一个因子(identity + state + snapshot 三切面的聚合)。
 
     - state 为 None:factor_info 有行但 factor_state 无(异常孤儿,对账场景);
-    - snapshot 为 None:未入库,或经 approve 豁免入库(合法无快照)。
+    - snapshot 为 None:从未测得(早期 stage 失败 / 从未 check 的 legacy)。
     - last_fail:最近一次 check 失败(factor_history 的派生事实,schema v2b;
       state 三列 rejected_at/last_fail_* 已删)。None = 从未失败/无事件。
       注意它不随 approve/restage 清空 —— 消费方一律与 status 联判。
@@ -84,15 +84,6 @@ class Factor:
     state: FactorRecord | None = None
     snapshot: FactorSnapshot | None = None
     last_fail: HistoryEvent | None = None
-
-    def __post_init__(self) -> None:
-        # 软校验:快照必须锚定当次入库事件。迁移期残留/删除失败的 stale 快照在
-        # 这里现形(U2 鬼影);warn 不炸 —— 读路径不应因坏数据拒绝服务。
-        if (self.snapshot is not None and self.state is not None
-                and self.snapshot.snapshot_at != self.state.entered_at):
-            logger.warning(
-                "Factor {}: snapshot_at={} != entered_at={} (stale 快照,需对账)",
-                self.identity.name, self.snapshot.snapshot_at, self.state.entered_at)
 
     @property
     def name(self) -> str:

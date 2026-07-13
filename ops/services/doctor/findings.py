@@ -101,3 +101,5 @@ class Inventory:
                             # pool_automated / pool_manual / dump_local
     hostname: str = ""
     now: float = 0.0        # 采集时刻(pack-tmp 的 mtime 阈值判定用,保持纯函数)
+    # name → 最近一次 check 事件的 at(schema v3:测得快照对账的期望值来源)
+    last_check_at: dict = field(default_factory=dict)

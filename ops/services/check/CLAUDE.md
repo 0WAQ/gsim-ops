@@ -48,7 +48,7 @@ restage 删失败残留)则先 delete 再 insert,并 warn 日志 —— 否则 U
 `repo.archive`(分流仅入库成功时,REJECTED 不拷;来源未知则 warn 跳过)。
 Fail: mark REJECTED (src 归档到 alpha_src)
 
-**快照落库时机**:主路径(pass→archive)metrics/datasources/bcorr/delay 齐全(原 index 组的 has_pnl/dump_days 已随三表重构删列)。REJECTED 因子(`on_reject`)**不写 snapshot**(未入库);快照不可变,无运维补救路径(旧 `ops refresh` 已删)。
+**快照落库时机(v3 测得快照)**:pass→archive 段照旧齐全;**correlation 失败也写**(CheckFail.result 携带 CorrResult,零额外计算)、**compliance 失败补跑一次 simsummary 后写**;checkbias/checkpoint 早期失败没测出指标,不写。measured_at = 该次 check 事件的 at;采集在 on_reject 搬运前(datasources 依赖 staging 里的 py_file),快照失败不阻断拒绝。
 
 **Correlation stage 门槛** (`checker/correlation_checker.py`):
 
