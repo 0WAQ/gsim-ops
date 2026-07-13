@@ -15,8 +15,14 @@
 cd ~/gsim-ops && git fetch origin claude/legacy-cleanup \
   && git checkout claude/legacy-cleanup && git pull && uv sync --group dev
 uv run pytest -m "not slow" -q     # 预期 174 passed, 0 skipped
-uv run ops backfill --help 2>&1 | head -3   # 预期报错: invalid choice(已退役)
+uv run python -m ops.main backfill --help 2>&1 | head -3   # 预期: invalid choice(已退役)
 ```
+
+**⚠ 本手册所有 ops CLI 验证一律 `uv run python -m ops.main <cmd>`,不用
+`uv run ops`**:项目 not packaged,`uv run ops` 会 fall through 到 PATH 上
+全局 uv-tool 旧 shim(2026-07-13 执行者实测抓获)—— 测的是已部署版本不是
+分支代码。**不要**中途 `uv tool install --reinstall` 把未合并分支装成全局
+命令 —— 生产工具跟 main 走,四机滚存在 PR 合并后照常做。
 
 ## 阶段 2 · 生成 --assign 名单(只读;dm-probe 产物还在 /tmp)
 
@@ -45,14 +51,9 @@ WHERE i.discovery_method IS NULL AND i.author = 'fguo';"
 贴:两个计数 + fguo 2 条全行。**等我方回 fguo 的 2 行**
 (`<name> automated|manual`),追加进 /tmp/dm-assign.txt 后进阶段 3。
 
-顺手排查(发现①,zxu 的 40 条 NULL 不该存在 —— 疑似旧部署机器提交):
-```bash
-docker exec ops-pg psql -U ops -d ops -At -c "SELECT actor, count(*)
-FROM factor_history WHERE op='submit'
-  AND name IN (SELECT name FROM factor_info WHERE discovery_method IS NULL)
-GROUP BY 1;"
-# 若能定位提交机:该机 uv tool list | grep ops,贴 rev(git pull ≠ 部署的老坑)
-```
+顺手排查(发现①)**已完成,假设不成立**(2026-07-13 执行者实测):129/129
+NULL-dm 的 submit 事件 actor=migration —— 全是 v2b 迁移合成的存量档案,
+不是旧部署机器的真实提交;不存在正在产 NULL 的部署漂移,无 rev 可追。
 
 ## 阶段 3 · 备份(160)
 
@@ -77,13 +78,13 @@ WHERE coalesce(lc.at, st.entered_at) IS NOT NULL
   AND n.snapshot_at IS DISTINCT FROM coalesce(lc.at, st.entered_at);"
 # ② compliance 22 补跑(dry-run 会真跑 simsummary,只算不写)
 uv run python scripts/postgres/backfill_compliance_snapshots.py
-# ③ discovery 归一(dry-run)
+# ③ discovery 归一(dry-run;fguo 2 行未追加前 unresolved=2 属预期)
 uv run python scripts/postgres/migrate_discovery_notnull.py --assign /tmp/dm-assign.txt
 ```
 
 贴:三段全文。**判读锚点**:①≈472;②候选 22 / 可补跑接近 22(skip 名单
-全贴);③候选 129,可判定 = 8(pool)+ 121(assign)= 129,unresolved 0,
-冲突名单全贴。
+全贴);③候选 129,可判定 = 8(pool)+ 119(assign)= 127,unresolved =
+fguo 2 条(点名追加后复跑 dry-run 应 unresolved 0),冲突名单全贴。
 
 ## 阶段 5 · --apply(判读放行后,顺序执行,逐个贴全文)
 
@@ -118,15 +119,15 @@ fguo 2 视点名;不符 = 停判读)。
 ## 阶段 7 · 复验(160,分支代码)
 
 ```bash
-uv run ops doctor --family snapshot-stale --family timeline-drift ; echo "exit=$?"
+uv run python -m ops.main doctor --family snapshot-stale --family timeline-drift ; echo "exit=$?"
 # 预期两族均 0 findings,exit=0
 docker exec ops-pg psql -U ops -d ops -c "SELECT discovery_method, count(*)
 FROM factor_info GROUP BY 1;"          # 预期仅 automated/manual,无 NULL
 docker exec ops-pg psql -U ops -d ops -c "\d factor_info" | grep -A1 discovery
 # 预期 not null + CHECK IN ('automated','manual')
-uv run ops list 2>/dev/null | tail -1  # Total 8252 不变
-uv run ops list -u zxu 2>/dev/null | head -8   # 混排应出现 status 列
-uv run ops doctor ; echo "exit=$?"     # 全量:pool-ghost missing 应比之前少 ≈31
+uv run python -m ops.main list 2>/dev/null | tail -1  # Total 8252 不变
+uv run python -m ops.main list -u zxu 2>/dev/null | head -8   # 混排应出现 status 列
+uv run python -m ops.main doctor ; echo "exit=$?"  # 全量:pool-ghost missing 少 ≈31
 ```
 
 六段贴回。判读通过 → 我方提 PR;合并后四机 `git pull` +

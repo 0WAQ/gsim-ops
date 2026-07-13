@@ -64,8 +64,9 @@ GROUP BY 1,2 ORDER BY 3 DESC;"
   31 条池补账(手册阶段 6,**只补本批**,approve 豁免的 missing 不动);
   SUBMITTED 81 条档案先行(XML 仍缺字段,将来 check 回退全库池 + 不分流,
   入库后经 doctor missing → 补账闭环;不改 QR 的 XML);REJECTED 9 条纯档案。
-- 遗留排查:zxu 40 条 NULL 疑似旧部署机器提交(git pull ≠ 部署),执行者
-  阶段 2 顺手定位提交机 rev。
+- ~~遗留排查:zxu 40 条 NULL 疑似旧部署机器提交~~ **假设不成立**(2026-07-13
+  执行者实测):129/129 NULL-dm 的 submit 事件 actor=migration,全是 v2b
+  迁移合成的存量档案 —— 不存在正在产 NULL 的部署漂移,submit 硬校验有效。
 
 执行手册:`docs/remediation/VERIFY-LEGACY-CLEANUP.md`。
 
