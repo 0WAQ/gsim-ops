@@ -54,6 +54,21 @@ WHERE i.name = ANY(string_to_array('$(paste -sd, /tmp/dm-unresolved.txt)', ','))
 GROUP BY 1,2 ORDER BY 3 DESC;"
 ```
 
+## 拍板记录:--assign 映射(2026-07-13,探针判读后)
+
+- **ybai / zxu / cchang / sli → manual(全量,含 submitted 队列 —— 不走
+  cancel 捷径)**;**hwang → automated(全量)**;**fguo(2 条 active)
+  按具体因子名单独点名**(执行者阶段 2 贴名单,用户回 2 行)。
+- 8 条池位置可判的(active,manual 池)不进名单,留给脚本按池判。
+- 状态维度迁移无差别(身份属性统一 UPDATE);下游行为面三分:ACTIVE
+  31 条池补账(手册阶段 6,**只补本批**,approve 豁免的 missing 不动);
+  SUBMITTED 81 条档案先行(XML 仍缺字段,将来 check 回退全库池 + 不分流,
+  入库后经 doctor missing → 补账闭环;不改 QR 的 XML);REJECTED 9 条纯档案。
+- 遗留排查:zxu 40 条 NULL 疑似旧部署机器提交(git pull ≠ 部署),执行者
+  阶段 2 顺手定位提交机 rev。
+
+执行手册:`docs/remediation/VERIFY-LEGACY-CLEANUP.md`。
+
 ## 实施顺序
 
 1. ~~代码批~~ **已完成(2026-07-13)**:backfill 退役 + doctor timeline-drift 族 +
