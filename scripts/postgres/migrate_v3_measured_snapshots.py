@@ -28,13 +28,26 @@ import psycopg
 _TOKEN = re.compile(r"(bcorr|ret|shrp|mdd|tvr|fitness)%?=(-?\d+(?:\.\d+)?)%?")
 
 
-def parse_metrics(reason: str) -> dict[str, float]:
-    """fail_reason → 指标 dict(key=value 扫描,同键取最后一次出现 ——
-    阈值段与全量段重复时两处同值)。"""
+# 字段级合理域(生产 dry-run 实测:老 fail_reason 有 fitness=20150115 这类
+# 日期错位脏值 —— 疑似当年 simsummary 负收益行列错位,原样入库即脏快照)。
+# 越界字段单独置 None(隔离该字段,不弃整行),计数上报判读。
+_BOUNDS = {"ret": (-1000, 1000), "shrp": (-50, 50), "mdd": (0, 100),
+           "tvr": (0, 1000), "fitness": (-1000, 1000), "bcorr": (-1, 1)}
+
+
+def parse_metrics(reason: str) -> tuple[dict[str, float], list[str]]:
+    """fail_reason → (指标 dict, 越界被隔离的字段名)。key=value 扫描,
+    同键取最后一次出现(阈值段与全量段重复时两处同值)。"""
     out: dict[str, float] = {}
+    quarantined: list[str] = []
     for k, v in _TOKEN.findall(reason or ""):
         out[k] = float(v)
-    return out
+    for k in list(out):
+        lo, hi = _BOUNDS[k]
+        if not (lo <= out[k] <= hi):
+            quarantined.append(f"{k}={out[k]}")
+            out[k] = None  # type: ignore[assignment]
+    return out, quarantined
 
 
 def main() -> None:
@@ -69,9 +82,11 @@ def main() -> None:
         ORDER BY s.name
     """).fetchall()
 
-    plans, skipped = [], []
+    plans, skipped, dirty = [], [], []
     for name, at, reason in rows:
-        m = parse_metrics(reason)
+        m, quarantined = parse_metrics(reason)
+        if quarantined:
+            dirty.append((name, quarantined))
         if "ret" not in m:
             skipped.append((name, "fail_reason 无指标"))
             continue
@@ -87,9 +102,12 @@ def main() -> None:
             skipped.append((name, "meta.json 不可读(仅指标回填)"))
         plans.append((name, at, m, delay, fields, tables))
 
-    print(f"[B] 回填候选 {len(rows)},可回填 {len(plans)},跳过 {len(skipped)}")
+    print(f"[B] 回填候选 {len(rows)},可回填 {len(plans)},跳过 {len(skipped)},"
+          f"含越界隔离字段 {len(dirty)}")
     for n, why in skipped[:10]:
         print(f"    skip {n}: {why}")
+    for n, q in dirty[:20]:
+        print(f"    dirty {n}: {', '.join(q)}(该字段置 None,其余照填)")
     for n, at, m, delay, _f, _t in plans[:5]:
         print(f"    plan {n}: at={at} {m} delay={delay}")
 
