@@ -57,7 +57,11 @@ def main() -> None:
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
 
-    conn = psycopg.connect(args.conninfo)
+    # autocommit=True:否则首个 execute 隐式开外层事务,下方
+    # with conn.transaction() 退化成 savepoint,close() 时整体回滚 ——
+    # 生产 --apply 首跑实测零持久化(打印行数正确但全回滚,执行者抓获)。
+    # autocommit 下 transaction() 才是真顶层事务,退出即 commit。
+    conn = psycopg.connect(args.conninfo, autocommit=True)
     conn.execute("SET TIME ZONE 'Asia/Shanghai'")
 
     # ---- A. created_at 修正(前置打印违反行数)
