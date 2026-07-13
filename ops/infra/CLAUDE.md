@@ -207,6 +207,6 @@ state 2026-07-04 迁 PG 后 redis 仅名义回退;三表拆分后它读写已删
 Static methods shell out to gsim tools via `subprocess.run`:
 - `run_backtest(xml_path, config)` — runs gsim backtest, raises `BacktestError` on failure
 - `run_simsummary(pnl_path, config)` → `Metrics | None`
-- `run_bcorr(pnl_file, config, pools=None)` → `list[(factor, corr)] | None`;对 `pools` 里每个 pnl 目录各跑一次 bcorr 合并结果,缺省 `pools=[pnl_prod_path, pnl_alphalib]`(全库)。`resolve_bcorr_pools(config, discovery_method)` 按因子来源返回同类池(automated/manual 各比各的,legacy 回退全库)。
+- `run_bcorr(pnl_file, config, pools=None)` → `list[(factor, corr)] | None`;对 `pools` 里每个 pnl 目录各跑一次 bcorr 合并结果,缺省 `pools=[pnl_prod_path, pnl_alphalib]`(全库)。`resolve_bcorr_pools(config, discovery_method)` 按因子来源返回同类池(automated/manual 各比各的;来源未知回退全库 —— 2026-07-13 discovery_method NOT NULL 后 check 路径恒有值,此支降为防御兜底)。
 
 Configurable timeout from `config.timeout`.
