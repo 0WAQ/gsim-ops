@@ -57,8 +57,9 @@ GROUP BY 1,2 ORDER BY 3 DESC;"
 ## 拍板记录:--assign 映射(2026-07-13,探针判读后)
 
 - **ybai / zxu / cchang / sli → manual(全量,含 submitted 队列 —— 不走
-  cancel 捷径)**;**hwang → automated(全量)**;**fguo(2 条 active)
-  按具体因子名单独点名**(执行者阶段 2 贴名单,用户回 2 行)。
+  cancel 捷径)**;**hwang → automated(全量)**;**fguo 2 条已点名
+  (2026-07-13):AlphaFguo20260615GA267 / GA283 均 automated(机器因子)**。
+  至此 129 条全部有值来源:8 池位置 + 119 author 映射 + 2 点名。
 - 8 条池位置可判的(active,manual 池)不进名单,留给脚本按池判。
 - 状态维度迁移无差别(身份属性统一 UPDATE);下游行为面三分:ACTIVE
   31 条池补账(手册阶段 6,**只补本批**,approve 豁免的 missing 不动);

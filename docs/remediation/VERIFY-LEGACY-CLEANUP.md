@@ -113,8 +113,8 @@ awk '$3=="active" && $4=="auto=N" && $5=="man=N" {print $1}' /tmp/dm-probe.txt \
   done
 ```
 
-贴补账清单。**预期 =31 条**(zxu 28 → manual,hwang 1 → automated,
-fguo 2 视点名;不符 = 停判读)。
+贴补账清单。**预期 =31 条**(zxu 28 → pnl_manual;hwang 1 + fguo 2 →
+pnl_automated;不符 = 停判读)。
 
 ## 阶段 7 · 复验(160,分支代码)
 
