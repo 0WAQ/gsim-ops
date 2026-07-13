@@ -317,9 +317,9 @@ class FactorRepository:
     ) -> None:
         """登记因子:info(身份)+ state(状态)+ 事件一个事务原子写。
 
-        调用方(submit/backfill/check._ensure_record)在 factor_lock 内先判
-        不存在再调;info 是 upsert、state 是 put(upsert),崩溃重跑幂等。
-        op(submit/backfill)发射命令事件;status=ACTIVE(backfill)另发
+        调用方(submit/check._ensure_record;原第三方 backfill 2026-07-13
+        退役)在 factor_lock 内先判不存在再调;info 是 upsert、state 是
+        put(upsert),崩溃重跑幂等。op 发射命令事件;status=ACTIVE 另发
         'entered'(入库统一标记,与 transition 的自动发射同规)。
         json dev/test 后端只有 state,identity/事件落不了库(尽力而为语义)。
         """

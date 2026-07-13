@@ -38,8 +38,6 @@ uv run ops submit -u wbai -s 20260401 --overwrite  # 已入库同名因子改提
 uv run ops check                                 # Run 7-stage pipeline on staging
 uv run ops status AlphaXxx                       # Query factor lifecycle state
 uv run ops status -u wbai --status submitted     # Filter by author/state
-uv run ops backfill --dry-run                    # Preview backfill on alpha_src/
-uv run ops backfill                              # Generate meta.json + ACTIVE for legacy factors
 uv run ops list                      # List factors (default config.yaml → JFS)
 uv run ops list -u wbai              # Filter by author (-u/--user)
 uv run ops list --format json        # JSON output
@@ -109,14 +107,13 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `check` | 7-stage validation pipeline (runs in-place on staging) | `ops/services/check/` |
 | `run` | Run backtest on factors in library | `ops/services/run/` |
 | `status` | Query factor lifecycle state | `ops/cli/status.py` + `ops/services/status/` |
-| `backfill` | One-shot: generate `meta.json` + ACTIVE for existing factors in `alpha_src/` | `ops/services/backfill/` |
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
 | `setup` | 声明式管理本机 alphalib 部署:hosts 块按 hostname 匹配挂载点,缺省幂等补建(目录/软链/权限组),`--check` 只读体检。JFS 挂载本身归 join.sh | `ops/cli/setup.py` + `ops/services/setup/` |
-| `doctor` | 盘 ↔ PG 数据对账(7 族:池鬼影/stale 快照/info 孤儿/src·staging 漂移/产物孤儿/本机 dump 孤儿)。缺省纯只读;`--fix <族>` 逐族确认修复(五道闸删除管道) | `ops/cli/doctor.py` + `ops/services/doctor/` |
+| `doctor` | 盘 ↔ PG 数据对账(8 族:池鬼影/stale 快照/时间线不变量/info 孤儿/src·staging 漂移/产物孤儿/本机 dump 孤儿)。缺省纯只读;`--fix <族>` 逐族确认修复(五道闸删除管道) | `ops/cli/doctor.py` + `ops/services/doctor/` |
 
-Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwrite`), `recheck`(改名 `restage`), `health`(2026-07-07 Wave 2 退役: --fix 写的是没人读的僵尸表;对账职能已由 `ops doctor` 落地,2026-07-12), `sync`(2026-07-07 Wave 1 退役: S3 模型已被 JFS 取代且回退配置早已不可用), `refresh`(2026-07-06 删除 —— metrics/datasources/bcorr 改为入库时不可变快照,不再支持重算;需最新表现须重跑 backtest)。
+Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwrite`), `recheck`(改名 `restage`), `health`(2026-07-07 Wave 2 退役: --fix 写的是没人读的僵尸表;对账职能已由 `ops doctor` 落地,2026-07-12), `sync`(2026-07-07 Wave 1 退役: S3 模型已被 JFS 取代且回退配置早已不可用), `refresh`(2026-07-06 删除 —— metrics/datasources/bcorr 改为入库时不可变快照,不再支持重算;需最新表现须重跑 backtest), `backfill`(2026-07-13 legacy 清理批退役: bootstrap 使命 2026-07-06 已完成,正常流程永不再补录;留着 = src 孤儿整批复活成 ACTIVE 的风险。`HISTORY_OPS`/DB `chk_op` 保留 'backfill' 枚举值 —— 存量事件是历史事实)。
 
 ### Design Principles
 

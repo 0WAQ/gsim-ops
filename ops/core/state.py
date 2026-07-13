@@ -37,8 +37,10 @@ class CheckRecord:
 
 # factor_history.op 的合法值(与 DB chk_op CHECK 约束同一提交改,schema v2b)。
 # 'entered' 是唯一非命令 op:任何写路径把 status 置 ACTIVE(check 归档 /
-# approve 放行 / backfill 补录)都自动发射,是"入库了"这一事实的统一标记;
-# 其余 op 一一对应写命令动作。CHECKING / revert-SUBMITTED 是瞬时态,无事件。
+# approve 放行)都自动发射,是"入库了"这一事实的统一标记;其余 op 一一对应
+# 写命令动作。CHECKING / revert-SUBMITTED 是瞬时态,无事件。'backfill' 是
+# 历史枚举:命令 2026-07-13 退役(legacy 清理批),存量事件是历史事实,
+# 枚举值与 DB chk_op 一并保留。
 HISTORY_OPS = ("submit", "overwrite", "check", "approve",
                "restage", "cancel", "rm", "backfill", "entered")
 

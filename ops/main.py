@@ -3,7 +3,6 @@ import os
 import sys
 
 from ops.cli.approve import add_approve_subparser
-from ops.cli.backfill import add_backfill_subparser
 from ops.cli.cancel import add_cancel_subparser
 from ops.cli.check import add_check_subparser
 from ops.cli.clear import add_clear_subparser
@@ -31,7 +30,6 @@ SUBPARSER_REGISTRARS = (
     add_info_subparser,
     add_submit_subparser,
     add_status_subparser,
-    add_backfill_subparser,
     add_pack_subparser,
     add_rm_subparser,
     add_restage_subparser,
