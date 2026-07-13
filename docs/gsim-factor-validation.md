@@ -250,7 +250,7 @@ XML 中通过 `Constants` 控制：
 
 未通过的因子:
 - **src** 归档到 `alpha_src/<name>/`(与 ACTIVE 同库,状态靠 state 区分)
-- **失败阶段 / 原因** 记在 state 的 `last_fail_stage` / `last_fail_reason` + `check_history`
+- **失败阶段 / 原因** 记在 `factor_history` 全操作审计表(schema v2b,2026-07-12:原 state 的 `last_fail_stage`/`last_fail_reason`/`check_history` 三列已删;"最近失败"由 `Factor.last_fail` 从事件表派生,`ops list` 的 fail_stage 列即读它)
 - compliance/correlation 这类 late-stage 失败额外保留 pnl + dump(数据完整,有分析价值);
   checkbias/checkpoint 失败清掉 dump/feature(短期数据不完整)
 

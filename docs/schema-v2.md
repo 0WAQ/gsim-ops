@@ -42,8 +42,9 @@ CREATE INDEX ix_fh_name_at ON factor_history(name, at DESC);
 ```
 
 (这张表的 id 是真主键 —— 事件无自然键;与三主表"id 死列"情况不同。
-`entered` 事件 = check 归档入库 / approve 放行 / backfill 补录三径合流的
-"入库"语义,回填合成也用它。)
+`entered` 事件 = check 归档入库 / approve 放行的"入库"语义,回填合成也用它
+(原第三径 backfill 补录 2026-07-13 随 `ops backfill` 命令退役;`chk_op` 仍
+保留 'backfill' 枚举值 —— 存量事件是历史事实,审计活过命令退役)。)
 
 **发射机制(可靠性关键)**:全部写路径已收口 `FactorRepository`
 (register/transition/append_check/delete 单一门面,无旁路)—— 事件在 repo
