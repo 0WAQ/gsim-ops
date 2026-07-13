@@ -215,6 +215,19 @@ AlphaXxx/
 - **rich** - Terminal output (tables / live progress)
 - **psycopg** / **psycopg-pool** - Postgres client (state + info + snapshot 真相源, `ops/infra/store/pg_store.py` / `ops/infra/info/pg_store.py` / `ops/infra/snapshot/pg_store.py`)
 
+## 词汇表(schema v3 正名,2026-07-13;"因子库"专指成员集合)
+
+| 术语 | 定义 | 实现锚点 |
+|---|---|---|
+| **在册** | 有档案记录、目录可见(含被拒) | `status != 'submitted'` = `ops list` 因子集 |
+| **已归档** | 盘面产物落 alphalib | ACTIVE 与晚期 REJECTED 都发生 |
+| **入库**(动作) | 从不在库变为在库的那一刻(入库时刻 = entered_at) | `transition(ACTIVE)`;history `entered` 事件 |
+| **在库**(状态) | 因子库成员 = ACTIVE(combo 消费、bcorr 池范围) | `status='active'` |
+| **已入库**(完成时) | 至少入库过一次,离库不清除 | `entered_at` 非空(cancel 守卫语义) |
+| **测得快照** | 最近一次 check 测得的表现(被拒也写) | `factor_snapshot`,snapshot_at = 测得时刻 |
+
+不变量:`created_at <= submitted_at`(首提逐字符相等;backfill 存量 submitted_at=NULL 除外)。
+
 ## SSOT 表(事实族 → 正主)
 
 改代码/review 第一问:**"你在问正主吗?"** 每个事实族只有一个权威来源,其余都是
@@ -226,7 +239,7 @@ metric 表达式已收敛,S8);新发现的多真相源加 ⚠ 行并在
 |---|---|---|
 | 因子集(什么算在库) | PG `factor_state.status != 'submitted'` | 2026-07-07 起纯 PG,零扫盘 |
 | 身份(author / discovery_method) | PG `factor_info` | 目录名推断只是 guess,不权威 |
-| 入库快照(metrics/datasources/bcorr/delay) | PG `factor_snapshot` | 不可变,`snapshot_at = entered_at`,无重算路径 |
+| 测得表现(metrics/datasources/bcorr/delay) | PG `factor_snapshot` | v3 测得快照:最近一次 check 测得,被拒也写;snapshot_at = 测得时刻;每行不可变、新测量替换,无离线重算 |
 | stage 身份 / 顺序 / 路由策略 | `services/check/stages.py` 的 `PIPELINE` | 新增 stage = 加一行 |
 | 时间戳格式 | `ops/utils/clock.py::now_iso` | |
 | 状态值 | `FactorStatus` 枚举 | 与 DB CHECK 约束同一提交改 |

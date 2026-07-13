@@ -153,41 +153,26 @@ _POOL_FIXER = Fixer(
 # --------------------------------------------------------------- snapshot-stale
 
 def _scan_snapshot_stale(inv: Inventory) -> list[Finding]:
+    """schema v3(测得快照):snapshot = 最近一次 check 测得的表现,被拒也写。
+    原 illegal kind("非 ACTIVE 却有快照")整个作废 —— 那正是 v3 的合法形态。
+    新判据:snapshot_at 必须锚定最近一次 check 事件的 at(与 factor_history
+    交叉对账);无任何 check 事件的 legacy 快照(backfill 存量)锚 entered_at。
+    全族只报告 —— 时间戳修正走一次性脚本,doctor 不 UPDATE 快照。"""
     out: list[Finding] = []
     for name, x in sorted(inv.factors.items()):
         if x.snapshot is None or x.state is None:
             continue
-        if x.state.entered_at is None:
-            # 语义违规:未入库(REJECTED / 从未 entered)却带入库快照 ——
-            # ops list 每次全库读都 WARNING 刷屏的来源(2026-07-11 实测 662 的主体)
-            out.append(Finding(name, "snapshot-stale", "illegal", WARN,
-                               f"status={x.state.status.value}、entered_at 为空但存在快照"
-                               f"(snapshot_at={x.snapshot.snapshot_at})",
-                               fixable=True))
-        elif x.snapshot.snapshot_at != x.state.entered_at:
+        expected = inv.last_check_at.get(name) or x.state.entered_at
+        if expected is None:
+            out.append(Finding(name, "snapshot-stale", "unanchored", WARN,
+                               f"快照无锚(无 check 事件且 entered_at 为空,"
+                               f"snapshot_at={x.snapshot.snapshot_at})—— 来源不明,人工判读"))
+        elif x.snapshot.snapshot_at != expected:
             out.append(Finding(name, "snapshot-stale", "mismatch", WARN,
-                               f"snapshot_at={x.snapshot.snapshot_at} != "
-                               f"entered_at={x.state.entered_at}(时间戳修正走 "
-                               "scripts/postgres/migrate_snapshot_at.py,doctor 不 UPDATE)"))
+                               f"snapshot_at={x.snapshot.snapshot_at} != 期望 {expected}"
+                               "(最近 check 事件 at,无事件则 entered_at;"
+                               "时间戳修正走一次性脚本,doctor 不 UPDATE)"))
     return out
-
-
-def _recheck_snapshot(finding, factor) -> bool:
-    return (factor is not None and factor.snapshot is not None
-            and factor.state is not None and factor.state.entered_at is None)
-
-
-_SNAPSHOT_FIXER = Fixer(
-    plan=FixPlan(
-        action="discard_snapshot",
-        target="factor_snapshot 表中 illegal kind(entered_at 为空却带快照)的行,"
-               "经 repo.discard_snapshot(ops rm 同款 API)",
-        keeps="不碰任何盘面文件、不碰 factor_info/factor_state 行;"
-              "mismatch kind(ACTIVE 时间戳不符)只报告 —— 快照不可重算,discard 即抹掉在库表现",
-    ),
-    resolve=lambda finding, config: finding.name,
-    recheck=_recheck_snapshot,
-)
 
 
 # ----------------------------------------------------------------- info-orphan
@@ -453,11 +438,10 @@ FAMILIES: tuple[DoctorFamily, ...] = (
                  lambda inv: len(inv.areas["pool_automated"].entries)
                  + len(inv.areas["pool_manual"].entries),
                  _POOL_FIXER),
-    DoctorFamily("snapshot-stale", "入库快照 snapshot_at ⇔ entered_at", "pg", (),
+    DoctorFamily("snapshot-stale", "测得快照 snapshot_at ⇔ 最近 check 事件", "pg", (),
                  _scan_snapshot_stale,
                  lambda inv: sum(1 for x in inv.factors.values()
-                                 if x.snapshot is not None),
-                 _SNAPSHOT_FIXER),
+                                 if x.snapshot is not None)),
     DoctorFamily("info-orphan", "factor_info ⇔ factor_state 成对", "pg", (),
                  _scan_info_orphan, _pop_factors),
     DoctorFamily("src-drift", "alpha_src 目录 ⇔ PG 在库集", "global",

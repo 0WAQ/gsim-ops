@@ -66,6 +66,13 @@ class StateStore(ABC):
         ...
 
     @abstractmethod
+    def latest_check_ats(self) -> "dict[str, str]":
+        """全库 name → 最近一次 check 事件的 at(schema v3:doctor 用它对账
+        测得快照 —— snapshot_at 应等于最近一次测得的 check 时刻)。
+        json dev/test 后端从记录侧 check 列表合成。"""
+        ...
+
+    @abstractmethod
     def history(self, name: str) -> "list[HistoryEvent]":
         # 注解加引号:类体内裸 list 会被上面的同名抽象方法遮蔽(TypeError)
         """完整生命周期事件时间线(at 升序)。json dev/test 后端无事件表,

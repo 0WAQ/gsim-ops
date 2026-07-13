@@ -267,6 +267,14 @@ class PostgresStateStore(StateStore):
             ).fetchone()
             return _row_to_event(row) if row else None
 
+    def latest_check_ats(self) -> "dict[str, str]":
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT ON (name) name, at FROM factor_history "
+                "WHERE op = 'check' ORDER BY name, at DESC, id DESC",
+            ).fetchall()
+            return {r[0]: _ts_out(r[1]) or "" for r in rows}
+
     def history(self, name: str) -> "list[HistoryEvent]":  # 引号防 list 方法遮蔽
         with self.pool.connection() as conn:
             rows = conn.execute(

@@ -46,6 +46,7 @@ def _list_area(root: Path) -> Area:
 
 def collect_inventory(config, repo: FactorRepository) -> Inventory:
     factors = {x.identity.name: x for x in repo.find(include_submitted=True)}
+    last_check_at = repo.latest_check_ats()  # v3 测得快照对账的期望值
     areas = {
         "alpha_src": _list_area(config.alpha_src),
         "staging": _list_area(config.staging),
@@ -57,7 +58,8 @@ def collect_inventory(config, repo: FactorRepository) -> Inventory:
         "dump_local": _list_area(config.alpha_dump),
     }
     return Inventory(factors=factors, areas=areas,
-                     hostname=socket.gethostname(), now=time.time())
+                     hostname=socket.gethostname(), now=time.time(),
+                     last_check_at=last_check_at)
 
 
 def _probe_pg(config) -> None:

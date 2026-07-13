@@ -104,21 +104,32 @@ def test_pool_ghost_scan_kinds():
 # ------------------------------------------------------------ snapshot-stale
 
 def test_snapshot_stale_kinds():
+    """v3 测得快照:snapshot_at 锚最近一次 check 事件 at(无事件锚 entered_at)。
+    被拒因子带快照 + 锚点吻合 = 合法(原 illegal kind 作废);全族只报告。"""
     inv = _inv(factors=[
-        _factor("AlphaIllegal", FactorStatus.REJECTED,
-                snapshot_at="2026-07-04T00:00:00"),               # entered None
-        _factor("AlphaMismatch", FactorStatus.ACTIVE,
-                entered_at="2026-07-02T00:00:00", snapshot_at="2026-07-04T00:00:00"),
-        _factor("AlphaClean", FactorStatus.ACTIVE,
+        # 被拒 + 快照锚定其 check 事件 → 合法(v3 的核心新形态)
+        _factor("AlphaRejMeasured", FactorStatus.REJECTED,
+                snapshot_at="2026-07-04T00:00:00"),
+        # 被拒 + 快照时间戳与 check 事件不符 → mismatch
+        _factor("AlphaRejDrift", FactorStatus.REJECTED,
+                snapshot_at="2026-07-04T00:00:00"),
+        # legacy 无 check 事件:锚 entered_at
+        _factor("AlphaLegacyClean", FactorStatus.ACTIVE,
                 entered_at="2026-07-02T00:00:00", snapshot_at="2026-07-02T00:00:00"),
+        _factor("AlphaLegacyDrift", FactorStatus.ACTIVE,
+                entered_at="2026-07-02T00:00:00", snapshot_at="2026-07-04T00:00:00"),
+        # 无锚:无事件且 entered_at 空
+        _factor("AlphaUnanchored", FactorStatus.REJECTED,
+                snapshot_at="2026-07-04T00:00:00"),
         _factor("AlphaNoSnap", FactorStatus.ACTIVE),
     ])
+    inv.last_check_at = {"AlphaRejMeasured": "2026-07-04T00:00:00",
+                         "AlphaRejDrift": "2026-07-05T00:00:00"}
     findings = _scan("snapshot-stale", inv)
-    assert _kinds(findings) == {("AlphaIllegal", "illegal"),
-                                ("AlphaMismatch", "mismatch")}
-    illegal = next(f for f in findings if f.kind == "illegal")
-    mismatch = next(f for f in findings if f.kind == "mismatch")
-    assert illegal.fixable and not mismatch.fixable   # mismatch 归一次性迁移脚本
+    assert _kinds(findings) == {("AlphaRejDrift", "mismatch"),
+                                ("AlphaLegacyDrift", "mismatch"),
+                                ("AlphaUnanchored", "unanchored")}
+    assert not any(f.fixable for f in findings)   # 全族只报告,修正归一次性脚本
 
 
 # --------------------------------------------------------------- info-orphan
@@ -281,8 +292,9 @@ def test_dump_orphan_misconfig_tripwire():
 
 def test_registry_invariants():
     """fixer 白名单 action、FixPlan 三句话必填非空(打印的就是执行的)。"""
-    assert set(FIXABLE_IDS) == {"pool-ghost", "snapshot-stale",
-                                "artifact-orphan", "dump-orphan"}
+    # v3:snapshot-stale 退出可修集(测得快照语义下原 illegal 修复对象
+    # 变成合法形态,fixer 退役 —— 误留会删掉被拒因子的测得快照)
+    assert set(FIXABLE_IDS) == {"pool-ghost", "artifact-orphan", "dump-orphan"}
     for family in FAMILIES:
         assert family.scope in ("pg", "global", "host")
         if family.fixer is None:

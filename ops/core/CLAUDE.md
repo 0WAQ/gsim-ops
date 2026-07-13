@@ -36,10 +36,10 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 
 Metrics (ret%, shrp, mdd%, tvr%, fitness) 由 `simsummary` 算出,存 `factor_snapshot` 表(`infra/snapshot/`),按 `name` 键。
 
-**语义(2026-07-06 变更)**:这些指标是**入库时不可变快照**(`snapshot_at = factor_state.entered_at`),不是"最新表现"。因子通过 check、archive 入库前,`_persist_derived` 跑 simsummary 并把 metrics + datasources + bcorr + index 四组一次性 insert 进 factor_snapshot,之后永不更新。如需最新表现须重跑 backtest。
+**语义(v3 2026-07-13:测得快照)**:最近一次 check 测得的表现(snapshot_at = 测得时刻)。pass 与 correlation/compliance 失败都写(被拒因子在 list/approve 评审可见指标);每行不可变、新测量原子替换;仍只由 check 写,如需最新表现须重跑 backtest(无离线重算)。
 
 - **旧路径**:`ops refresh [--metrics]` 重算——**已废弃删除**(命令不存在)。快照不可刷新。
-- REJECTED 因子不写 snapshot(未入库)。
+- checkbias/checkpoint 等早期失败没测出指标,不写(NULL 诚实);correlation/compliance 失败写(v3)。
 
 **simsummary output columns** (whitespace-separated):
 ```

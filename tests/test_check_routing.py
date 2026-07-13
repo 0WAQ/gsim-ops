@@ -167,6 +167,34 @@ def test_reject_late_stage_keeps_pnl_dump(test_config, make_factor, fake_checker
     assert (config.alpha_pnl / "AlphaWbaiRejLate").exists()
 
 
+def test_reject_correlation_writes_measured_snapshot(test_config, make_factor,
+                                                     fake_checkers):
+    """v3 测得快照:correlation 失败带 CorrResult → REJECTED 且快照落库
+    (snapshot_at = 该次 check 事件的 at,指标/bcorr 来自测得值)。"""
+    from ops.core.alpha.results.correlation import CorrResult
+    from ops.core.metrics import Metrics
+
+    cfg_path, config = test_config
+    make_factor(name="AlphaWbaiRejMeasured")
+    cr = CorrResult(Metrics(ret=8.45, tvr=43.02, shrp=2.24, mdd=8.04, fitness=0.99),
+                    0.74569, "AlphaOld")
+    checkers, _ = fake_checkers(fail_stage="correlation", behavior="fail",
+                                corr_result=cr)
+    pipe = _pipeline(cfg_path, checkers)
+    ret = pipe.run_one(pipe.metadatas[0], 0, queue.Queue())
+    assert ret == "fail"
+
+    from ops.infra.repository import FactorRepository
+    factor = FactorRepository(config).get("AlphaWbaiRejMeasured")
+    assert factor.state.status == FactorStatus.REJECTED
+    assert factor.snapshot is not None          # 被拒也有测得快照(v3)
+    assert factor.snapshot.ret == 8.45
+    assert factor.snapshot.max_bcorr == 0.74569
+    # 锚定该次 check 事件的 at(doctor 新判据的正例)
+    checks = _store(config).checks("AlphaWbaiRejMeasured")
+    assert factor.snapshot.snapshot_at == checks[-1].finished_at
+
+
 def test_reject_early_stage_wipes_dump(test_config, make_factor, fake_checkers):
     """checkbias/checkpoint 失败:src 进库 + 清 dump/feature。"""
     cfg_path, config = test_config

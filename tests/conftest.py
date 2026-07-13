@@ -451,8 +451,9 @@ class _FakeChecker:
         from ops.services.check.checker.base import CheckFail, CheckSkip
         self.call_log.append(self.stage)
         if self.behavior == "fail":
-            # stage 由流水线捕获时按 current_stage 归因,exception 不携带
-            raise CheckFail(f"fake fail at {self.stage}")
+            # stage 由流水线捕获时按 current_stage 归因,exception 不携带;
+            # corr_result 挂 .result 镜像真 correlation checker(v3 测得快照)
+            raise CheckFail(f"fake fail at {self.stage}", result=self.corr_result)
         if self.behavior == "skip":
             raise CheckSkip(f"fake skip at {self.stage}")
         if self.behavior == "crash":

@@ -169,6 +169,10 @@ class FactorRepository:
             last_fail=self._state.last_fail(name),
         )
 
+    def latest_check_ats(self) -> dict[str, str]:
+        """全库 name → 最近一次 check 事件 at(doctor 测得快照对账,v3)。"""
+        return self._state.latest_check_ats()
+
     def history(self, name: str) -> list[HistoryEvent]:
         """完整生命周期事件时间线(status 详情;json dev/test 后端合成
         check 事件,生命周期 op 缺席)。"""
@@ -360,22 +364,25 @@ class FactorRepository:
     def append_check(self, name: str, check: CheckRecord) -> None:
         self._state.append_check(name, check, actor=current_actor())
 
-    def attach_snapshot(self, snapshot: FactorSnapshot) -> None:
-        """入库快照落库。snapshot_at 由此处强制 = state.entered_at(快照语义:
-        "本次入库事件的快照"),调用方不需要也不应该自己填。
+    def attach_snapshot(self, snapshot: FactorSnapshot,
+                        measured_at: str | None = None) -> None:
+        """测得快照落库(schema v3:factor_snapshot = 最近一次 check 测得的
+        表现,被拒也写)。snapshot_at = measured_at(该次 check 事件的时刻,
+        由 check 流水线传入);入库见证已全权归 entered_at/entered 事件,
+        原 entered_at 硬闸删除 —— 写快照 ≠ 入库(词汇表)。
 
-        stale 自愈:restage/--overwrite 离库时删旧快照,但迁移期存量行 / 删除
-        步骤崩掉的残留仍可能在 —— 旧行必须让位,否则 insert 撞 name UNIQUE
-        被吞,反查/报告永远读到上一版代码的指标(full-review P0-1)。
+        每次测量原子替换(原 stale 自愈,v3 起是常规路径):旧行让位,否则
+        insert 撞 name UNIQUE 被吞,读侧永远停在上一次测量(full-review P0-1)。
+        json dev/test 后端无快照表,尽力而为 no-op。
         """
-        rec = self._state.get(snapshot.name)
-        if rec is None or not rec.entered_at:
-            raise ValueError(
-                f"attach_snapshot: factor {snapshot.name} 无 entered_at "
-                "(须先 transition 到 ACTIVE 设入库时间)")
-        snap = replace(snapshot, snapshot_at=rec.entered_at)
+        if not self._is_pg:
+            return
+        if not measured_at:
+            raise ValueError(f"attach_snapshot: factor {snapshot.name} "
+                             "缺 measured_at(测得时刻,= 该次 check 事件的 at)")
+        snap = replace(snapshot, snapshot_at=measured_at)
         if self._snapshot.get(snap.name) is not None:
-            logger.warning("stale snapshot exists, replacing factor={}", snap.name)
+            logger.info("replacing snapshot with new measurement factor={}", snap.name)
             self._snapshot.delete(snap.name)
         self._snapshot.insert(snap)
 
