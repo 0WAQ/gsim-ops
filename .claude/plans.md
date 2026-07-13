@@ -269,3 +269,46 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 3. **连接数监控告警** —— 当前打满前无告警 (跟 server-topology "监控=人工" 一致)。
    - 简单版: cron 每 5min `redis-cli INFO clients` 的 `connected_clients` 超阈值 (如 40000) 发飞书。
    - 通知实现待定(原 `ops/infra/notify/feishu_send.py` 已随 notify/ 删除,2026-07-07)。
+
+
+## Compliance 判定重做(2026-07-13 立项,先测量后定策;分支 claude/compliance-redesign)
+
+**起因**:用户观察 compliance 判定有问题。走查现状(`checker/compliance_checker.py`):
+数据 = long_backtest 全历史 dump(工作区 v2 npy,逐日带符号持仓金额向量);
+判定 = 尾部 762 个文件窗口内逐日查四项(个股 max|w|/Σ|w| > 5% / 总持股 < 100 /
+多头 < 50 / 空头 < 50),**任一天任一项违规 → 整因子 REJECTED**;
+空/NaN/总额 0 的天**静默跳过**。
+
+**已确认的缺陷清单**(2026-07-13 讨论):
+1. 判定基数漂移:窗口按文件数截尾,空天再跳过 —— "检查了多少天"完全取决于
+   数据起始时间(回测固定 2015-2025,但不少数据源起始晚,前段全空);
+2. 跳过天无底线:窗口里只剩 30 天可读也照判,分母缩水不告警(用户点名认同);
+3. 零容忍:762 天 1 天边界值(5.01%)= 300 天 20% 同罪;
+4. 结构性假设多空:空头 < 50 必拒 ⇒ 纯多头因子永远过不了(硬编码产品假设);
+5. 5% 口径:分母是当日总敞口 Σ|w|,非 booksize/净值;
+6. dump_alpha 依赖继承:long_backtest 的 prepare 只声明 dump_pnl,
+   dumpAlphaFile=true 是从 checkpoint 的 prepare 继承的(隐式耦合,脆弱)。
+
+**方向(用户拍板)**:应该检查每一天,再做违规判定;**但起始日/容忍度/
+有效天数下限等一切阈值先不定** —— 没有"全库多少因子会撞线"的分布数据,
+无法评估任何政策(先测量后定策)。
+
+**摸底方案(已定)**:
+- 存**阈值无关的逐日原始统计**(每因子每交易日四列:总敞口 Σ|w| /
+  最大单股占比 / 多头持股数 / 空头持股数)—— 任何候选政策之后都是对
+  缓存的秒级查询;**不存**"当前阈值下的违规计数"(只能回答一个问题);
+- 形式:per-factor npz(~125KB,全库 ~1GB)+ 汇总 CSV(首末有效日/
+  有效天数/gap 数/maxpos 分位数/多空持股分位数)+ 无 feature 覆盖名单;
+  **先文件不进 PG**(has_pnl/dump_days 与 ops health 两个僵尸前例 ——
+  等新模型定了、确认有长期消费者再议 PG 化);
+- 数据源 = alpha_feature v2(JFS 共享一处读全库,不跨机凑 dump sidecar)。
+  格式事实已核:裸 memmap 无 npy 头(shape 按文件大小推,3900×H)、
+  delay=1 有 -1 行偏移(分布统计无影响)、全 NaN 行 = 无 dump 日;
+- 成本:~1.3TB 顺序读,一次性小时级,断点续跑(已有 npz 跳过),160 nohup。
+
+**当前状态**:`scripts/compliance_survey.py` 草稿已在分支(**未沙盘未跑**)。
+
+**下一步序列**:脚本沙盘实测 → 执行者 160 跑全库 → 分布判读贴回 →
+用户按数据定策(容忍度/下限/gap/纯多头豁免/口径)→ checker 重写 +
+对 22 条已被拒 compliance 因子做新旧影子对比(最好的回归材料)→
+顺手修缺陷 6(long_backtest 的 prepare 显式声明 dump_alpha=True)。
