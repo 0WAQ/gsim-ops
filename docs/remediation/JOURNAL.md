@@ -1609,3 +1609,13 @@ check 事件 at,legacy 锚 entered_at;原 illegal kind 作废、fixer 退役 —
 submitted_at(81 违反者,合成 submit 事件同步修正)B. 回填 738 条
 correlation 被拒的测得快照(fail_reason key=value 解析 + meta.json 补
 delay/datasources,snapshot_at = check 事件 at)。零 DDL,预计免禁写。
+
+
+**v3 生产执行收官(2026-07-13,VERIFY-SCHEMA-V3-RESULT)**:[A] 730 行
+created_at 拉正(97% 为 fguo 07-09/10 批,比先前以为的 81 大 —— 那次批量写
+波及未被拒因子)+ [B] 738 条测得快照回填(snapshot 7472→8210,fitness 日期
+脏值隔离 39)。执行期抓获两个我方脚本缺陷(fitness 脏值 / psycopg3
+autocommit 零持久化 —— 打印正确数据全回滚,执行者用"新连接查库验证持久化"
+纪律抓获),均修复后重跑成功。doctor 新判据顺带抓出 472 条历史存量
+snapshot_at 漂移(挂 legacy 清理批)。**zxu 那 28 行从空白到带指标回到
+list,发现→取证→设计→落地全线闭环。**
