@@ -311,33 +311,9 @@ def test_guards_block_declared_root_targets(test_config, seed_factor):
     assert config.pnl_manual.exists()
 
 
-def test_backfill_holds_factor_lock(test_config, seed_factor):
-    """对抗评审 major:backfill 原是全库唯一无锁状态写入方(击穿 doctor
-    TOCTOU 防线)。现在:锁被持有 → 跳过不 register;锁放开 → 正常补录。"""
-    from types import SimpleNamespace
-
-    from ops.core.factormeta import FactorMeta
-    from ops.infra.lock import factor_lock
-    from ops.infra.repository import FactorRepository
-    from ops.services.backfill.backfill import run_backfill
-
-    cfg_path, config = test_config
-    d = config.alpha_src / "AlphaWbaiLegacy"
-    d.mkdir(parents=True)
-    FactorMeta(name="AlphaWbaiLegacy", author="wbai", birthday=20240101,
-               universe="all", category="misc", delay=1, backdays=30,
-               dump_alpha=True, has_intraday_curve=False).save(d / "meta.json")
-    args = SimpleNamespace(config_path=cfg_path, dry_run=False)
-    repo = FactorRepository(config)
-
-    with factor_lock("AlphaWbaiLegacy", config):
-        run_backfill(args)
-    assert repo.get("AlphaWbaiLegacy") is None       # 锁内:跳过,零写
-
-    run_backfill(args)
-    factor = repo.get("AlphaWbaiLegacy")             # 锁放开:正常补录 ACTIVE
-    assert factor is not None and factor.state is not None
-    assert factor.state.status == FactorStatus.ACTIVE
+# test_backfill_holds_factor_lock 已随 ops backfill 退役删除(2026-07-13,
+# legacy 清理批):它钉的是"backfill 作为无锁写入方被补锁"—— 写入方本身
+# 退役后,doctor TOCTOU 防线的锁协议前提不再有豁免面。
 
 
 def test_cleanup_src_orphans_guards(test_config, seed_factor):

@@ -2,8 +2,8 @@
 
 钉住的语义:
 - 事件与业务写同事务发射(transition 的 op / append_check / delete 的 op);
-- 置 ACTIVE 自动发射 'entered'(check 归档 / approve / backfill 三径合流,
-  漏记结构上不可能);
+- 置 ACTIVE 自动发射 'entered'(check 归档 / approve 合流,漏记结构上不可能;
+  'backfill' op 保留为历史枚举 —— 命令 2026-07-13 退役,存量事件是历史事实);
 - **历史活过 rm**(无 FK,v2b 立项动机);
 - last_fail 派生 = 最新一条 passed=FALSE 的 check 事件;
 - json dev/test 后端的 last_fail 从 check_history 合成(语义一致)。
@@ -72,17 +72,21 @@ def test_register_emits_submit_event(test_config, seed_factor):
     from ops.infra.repository import FactorRepository
     _, config = test_config
     repo = FactorRepository(config)
-    repo.register(FactorIdentity(name="AlphaWbaiNew", author="wbai"),
+    repo.register(FactorIdentity(name="AlphaWbaiNew", author="wbai",
+                                 discovery_method="manual"),
                   submitted_at="2026-07-05T00:00:00", op="submit")
     assert [e.op for e in repo.history("AlphaWbaiNew")] == ["submit"]
 
 
-def test_register_active_emits_backfill_and_entered(test_config):
+def test_register_active_emits_command_op_and_entered(test_config):
+    """register 直落 ACTIVE 自动补发 'entered' 是 Repository 契约(op 泛型);
+    'backfill' 作 op 值仍合法(HISTORY_OPS 保留历史枚举),命令本身已退役。"""
     from ops.core.factor import FactorIdentity
     from ops.infra.repository import FactorRepository
     _, config = test_config
     repo = FactorRepository(config)
-    repo.register(FactorIdentity(name="AlphaWbaiLegacy", author="wbai"),
+    repo.register(FactorIdentity(name="AlphaWbaiLegacy", author="wbai",
+                                 discovery_method="manual"),
                   status=FactorStatus.ACTIVE,
                   entered_at="2026-07-05T00:00:00", op="backfill")
     ops = [e.op for e in repo.history("AlphaWbaiLegacy")]

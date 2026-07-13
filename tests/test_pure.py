@@ -188,4 +188,4 @@ def test_write_command_declarations_match_registry():
                 if p.get_default("is_write_command")}
     # setup 2026-07-11 加入:缺省补建是写(--check 经 _CheckAction 运行时撤销声明)
     assert declared == {"submit", "restage", "check", "run", "rm",
-                        "approve", "cancel", "clear", "pack", "backfill", "setup"}
+                        "approve", "cancel", "clear", "pack", "setup"}

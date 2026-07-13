@@ -175,6 +175,28 @@ def _scan_snapshot_stale(inv: Inventory) -> list[Finding]:
     return out
 
 
+# -------------------------------------------------------------- timeline-drift
+
+def _scan_timeline_drift(inv: Inventory) -> list[Finding]:
+    """词汇表不变量(v3):`created_at <= submitted_at`(首提逐字符相等;
+    backfill 存量 submitted_at=NULL 是设计内值,跳过不判)。违反 = 写路径
+    bug 信号 —— 07-10 曾有批量写把 created_at 刷到提交之后(v3 迁移一次性
+    拉正 730),本族保证再犯不静默。全族只报告:身份表修正走一次性迁移
+    脚本,doctor 不 UPDATE。ISO 同构串,字典序即时间序。"""
+    out: list[Finding] = []
+    for name, x in sorted(inv.factors.items()):
+        if x.state is None:
+            continue
+        created, submitted = x.identity.created_at, x.state.submitted_at
+        if created and submitted and created > submitted:
+            out.append(Finding(name, "timeline-drift", "created-after-submitted",
+                               WARN,
+                               f"created_at={created} > submitted_at={submitted}"
+                               "(词汇表不变量;新增违反 = 写路径 bug,"
+                               "修正走一次性迁移脚本)"))
+    return out
+
+
 # ----------------------------------------------------------------- info-orphan
 
 def _scan_info_orphan(inv: Inventory) -> list[Finding]:
@@ -238,7 +260,8 @@ def _scan_src_drift(inv: Inventory) -> list[Finding]:
         out.append(Finding(name, "src-drift", "src-orphan", WARN,
                            "alpha_src 有目录但 PG 全无记录",
                            path=str(src.root / name),
-                           action="ops backfill --dry-run(legacy 补录)或人工;"
+                           action="人工判读(ops backfill 已退役,补录无命令通道;"
+                                  "历史残渣处置见 cleanup_src_orphans.py 先例);"
                                   "v1 铁律:alpha_src 不进任何删除集"))
     return out
 
@@ -442,6 +465,8 @@ FAMILIES: tuple[DoctorFamily, ...] = (
                  _scan_snapshot_stale,
                  lambda inv: sum(1 for x in inv.factors.values()
                                  if x.snapshot is not None)),
+    DoctorFamily("timeline-drift", "created_at <= submitted_at 不变量", "pg", (),
+                 _scan_timeline_drift, _pop_factors),
     DoctorFamily("info-orphan", "factor_info ⇔ factor_state 成对", "pg", (),
                  _scan_info_orphan, _pop_factors),
     DoctorFamily("src-drift", "alpha_src 目录 ⇔ PG 在库集", "global",

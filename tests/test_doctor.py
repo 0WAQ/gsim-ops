@@ -24,17 +24,19 @@ DAY = 86400.0
 
 
 def _factor(name, status=None, dm="manual", entered_at=None, snapshot_at=None,
-            author="wbai"):
+            author="wbai", created_at=None, submitted_at=None):
     state = None
     if status is not None:
         state = FactorRecord(name=name, status=status,
                              updated_at="2026-07-05T00:00:00",
-                             entered_at=entered_at)
+                             entered_at=entered_at,
+                             submitted_at=submitted_at)
     snapshot = None
     if snapshot_at is not None:
         snapshot = FactorSnapshot(name=name, snapshot_at=snapshot_at)
     return Factor(identity=FactorIdentity(name=name, author=author,
-                                          discovery_method=dm),
+                                          discovery_method=dm,
+                                          created_at=created_at),
                   state=state, snapshot=snapshot)
 
 
@@ -130,6 +132,31 @@ def test_snapshot_stale_kinds():
                                 ("AlphaLegacyDrift", "mismatch"),
                                 ("AlphaUnanchored", "unanchored")}
     assert not any(f.fixable for f in findings)   # 全族只报告,修正归一次性脚本
+
+
+# ------------------------------------------------------------ timeline-drift
+
+def test_timeline_drift_invariant():
+    """词汇表不变量 created_at <= submitted_at(legacy 清理批顺手项):
+    只有两值俱在且 created > submitted 才报;backfill 存量 submitted_at=NULL
+    是设计内值,跳过;相等(首提逐字符相等)与正常先后合法。全族只报告。"""
+    inv = _inv(factors=[
+        _factor("AlphaViolate", FactorStatus.ACTIVE,
+                created_at="2026-07-10T02:00:00",
+                submitted_at="2026-07-08T10:00:00"),
+        _factor("AlphaEqual", FactorStatus.ACTIVE,
+                created_at="2026-07-08T10:00:00",
+                submitted_at="2026-07-08T10:00:00"),
+        _factor("AlphaNormal", FactorStatus.REJECTED,
+                created_at="2026-07-01T10:00:00",
+                submitted_at="2026-07-08T10:00:00"),
+        _factor("AlphaLegacyNull", FactorStatus.ACTIVE,
+                created_at="2026-07-06T16:38:27"),          # submitted_at=NULL
+        _factor("AlphaInfoOrphan", created_at="2026-07-10T02:00:00"),  # 无 state
+    ])
+    findings = _scan("timeline-drift", inv)
+    assert _kinds(findings) == {("AlphaViolate", "created-after-submitted")}
+    assert all(f.severity == WARN and not f.fixable for f in findings)
 
 
 # --------------------------------------------------------------- info-orphan

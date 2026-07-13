@@ -235,6 +235,15 @@ class CheckerPipeline:
                 submitted_at = meta.submitted_at or submitted_at
             except Exception:
                 pass
+        if discovery_method not in ("automated", "manual"):
+            # factor_info.discovery_method NOT NULL(legacy 清理批,2026-07-13):
+            # submit 入口早有硬校验,能走到这里的是 pre-guard 遗留/手工放置的
+            # staging 残留 —— 状态写入前显式拒绝(run_one preamble 臂接住 →
+            # error),不让 DB 约束错误当路由。重新 ops submit 补全后再检。
+            raise RuntimeError(
+                f"{factor.name} discovery_method 缺失/非法"
+                f"({discovery_method!r},须为 automated/manual)"
+                "—— 重新 ops submit 以补全身份")
         repo.register(
             FactorIdentity(
                 name=factor.name,

@@ -88,17 +88,18 @@ def test_pass_automated_routes_pnl(test_config, make_factor, fake_checkers, fake
     assert not (config.pnl_manual / "AlphaWbaiAuto").exists()
 
 
-def test_pass_missing_discovery_still_archives(test_config, make_factor, fake_checkers, fake_metrics):
+def test_missing_discovery_refused_before_state(test_config, make_factor, fake_checkers, fake_metrics):
+    """discovery_method NOT NULL(legacy 清理批,2026-07-13):无 dm 的 staging
+    残留在任何状态写入前被 _ensure_record 显式拒绝(原行为"仍入库只是不分流"
+    作废 —— 字段不允许 NULL,须重新 ops submit 补全身份)。"""
     cfg_path, config = test_config
     make_factor(name="AlphaWbaiNoDm", discovery_method=None)
     _prep_pass_artifacts(config, "AlphaWbaiNoDm")
     checkers, _ = fake_checkers(fail_stage=None)
     pipe = _pipeline(cfg_path, checkers)
-    assert pipe.run_one(pipe.metadatas[0], 0, queue.Queue()) == "pass"
-    # 仍入库 (ACTIVE),只是不分流 pnl
-    assert _store(config).get("AlphaWbaiNoDm").status == FactorStatus.ACTIVE
-    assert not (config.pnl_manual / "AlphaWbaiNoDm").exists()
-    assert not (config.pnl_automated / "AlphaWbaiNoDm").exists()
+    assert pipe.run_one(pipe.metadatas[0], 0, queue.Queue()) == "error"
+    assert _store(config).get("AlphaWbaiNoDm") is None          # 零状态写入
+    assert (config.staging / "AlphaWbaiNoDm").exists()          # 原物保留待重提
 
 
 def test_pass_bcorr_persisted(test_config, make_factor, fake_checkers, fake_metrics):
