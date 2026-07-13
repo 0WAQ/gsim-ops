@@ -14,13 +14,15 @@
 -- 建表顺序即 FK 依赖顺序: info 必须最先。
 
 -- 1. factor_info — 身份信息 (镜像 ops/infra/info/pg_store.py:_SCHEMA)
+--    discovery_method NOT NULL + 枚举收窄 automated/manual(legacy 清理批,
+--    2026-07-13 拍板:字段不允许 NULL;'backfill' 不是发现方式,存量归一)
 CREATE TABLE IF NOT EXISTS factor_info (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     author TEXT,
-    discovery_method TEXT,
+    discovery_method TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT chk_discovery CHECK (discovery_method IS NULL OR discovery_method IN ('automated', 'manual', 'backfill'))
+    CONSTRAINT chk_discovery CHECK (discovery_method IN ('automated', 'manual'))
 );
 CREATE INDEX IF NOT EXISTS idx_factor_info_author ON factor_info(author);
 CREATE INDEX IF NOT EXISTS idx_factor_info_discovery ON factor_info(discovery_method);

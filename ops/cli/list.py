@@ -75,6 +75,7 @@ _BASE_COLS = [
     ("fitness", "right", {},                lambda x: _metric(x.snapshot, "fitness")),
     ("bcorr",   "right", {},                lambda x: _bcorr(x.snapshot)),
 ]
+_STATUS_COL = ("status",     "left", {},                    lambda x: x.status.value if x.status else "?")
 _FAIL_COL   = ("fail_stage", "left", {},                    lambda x: _fail_stage(x))
 _TABLES_COL = ("tables",     "left", {"overflow": "fold"},  lambda x: _datasource(x.snapshot, "tables"))
 _FIELDS_COL = ("fields",     "left", {"overflow": "fold"},  lambda x: _datasource(x.snapshot, "fields"))
@@ -89,6 +90,9 @@ def print_table(rows: "list[Factor]", show_tables=False, show_fields=False):
 
     cols = list(_BASE_COLS)
     if has_rejected:
+        # 混排(含被拒)时显式列出 status —— 行颜色重定向到文件/管道即丢,
+        # v3 后被拒因子也有指标,不能只靠颜色区分(2026-07-13 用户拍板)
+        cols.insert(2, _STATUS_COL)
         cols.append(_FAIL_COL)
     if show_tables:
         cols.append(_TABLES_COL)

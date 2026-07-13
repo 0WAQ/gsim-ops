@@ -72,7 +72,8 @@ def test_register_emits_submit_event(test_config, seed_factor):
     from ops.infra.repository import FactorRepository
     _, config = test_config
     repo = FactorRepository(config)
-    repo.register(FactorIdentity(name="AlphaWbaiNew", author="wbai"),
+    repo.register(FactorIdentity(name="AlphaWbaiNew", author="wbai",
+                                 discovery_method="manual"),
                   submitted_at="2026-07-05T00:00:00", op="submit")
     assert [e.op for e in repo.history("AlphaWbaiNew")] == ["submit"]
 
@@ -84,7 +85,8 @@ def test_register_active_emits_command_op_and_entered(test_config):
     from ops.infra.repository import FactorRepository
     _, config = test_config
     repo = FactorRepository(config)
-    repo.register(FactorIdentity(name="AlphaWbaiLegacy", author="wbai"),
+    repo.register(FactorIdentity(name="AlphaWbaiLegacy", author="wbai",
+                                 discovery_method="manual"),
                   status=FactorStatus.ACTIVE,
                   entered_at="2026-07-05T00:00:00", op="backfill")
     ops = [e.op for e in repo.history("AlphaWbaiLegacy")]
