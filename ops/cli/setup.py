@@ -101,8 +101,8 @@ def _run_migrate(args, config, console):
     from ops.services.setup.jfs import MigrateError, actual_jfs_mount, migrate_mount
 
     # 显式查 root:sudo 自提权的判据(alpha_src 存在且 root-owned)在迁移场景
-    # 恰好失效 —— 声明位置迁移前不存在(170 实战踩坑,2026-07-11)。migrate
-    # 必写 /etc,不满足直接指引,别等到备份第一笔写才 PermissionError。
+    # 恰好失效 —— 声明位置迁移前不存在。migrate 必写 /etc,不满足直接指引,
+    # 别等到备份第一笔写才 PermissionError。
     if os.geteuid() != 0:
         console.print("[red]--migrate-mount 需要 root[/](写 /etc + systemctl);"
                       "请重跑: sudo ops setup --migrate-mount")

@@ -17,7 +17,7 @@ def md5sum(file_path: str | Path) -> str | None:
             mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
             return hashlib.md5(mm).hexdigest()
     except (OSError, ValueError):
-        # ValueError: mmap of a zero-length file. 原为裸 except(连
-        # KeyboardInterrupt 都吞,full-review 第二部分);None 由调用方
-        # (checkpoint_checker) 按 md5 缺失处理。
+        # ValueError: mmap of a zero-length file. 窄捕获别退回裸 except
+        # (会吞 KeyboardInterrupt);None 由调用方 (checkpoint_checker)
+        # 按 md5 缺失处理。
         return None

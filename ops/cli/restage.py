@@ -25,7 +25,7 @@ Example:
                         help="按 author 过滤(批量)")
     # 默认 None(而非 'active'):批量模式必须显式给 -u 和/或 -s 才会执行。
     # 若给默认值,服务层的"必须指定选择器"守卫永远不触发,裸 `ops restage -y`
-    # 会把全库 ACTIVE 因子搬出 alpha_src(full-review 第一部分 1.2 高危项)。
+    # 会把全库 ACTIVE 因子搬出 alpha_src。
     parser.add_argument("--status", "-s", default=None,
                         choices=[FactorStatus.ACTIVE.value,
                                  FactorStatus.REJECTED.value],

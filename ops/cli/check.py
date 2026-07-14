@@ -22,7 +22,7 @@ Example:
     parser.add_argument("--factor-name", "-f", type=str, default=None, help="check one factor by name")
     # --retry 已删除:解析后从未被读取(no-op)。retry 语义早已由自动路由取代 ——
     # validate/long_backtest 失败自动回 SUBMITTED 留在 staging,下次 ops check
-    # 无条件重扫(full-review 第三部分 V 表)。
+    # 无条件重扫。
     add_config_arg(parser)
 
     mark_write(parser)

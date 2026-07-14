@@ -20,8 +20,8 @@ from ops.cli.submit import add_submit_subparser
 from ops.infra.sudo import maybe_elevate
 from ops.utils.log import logger
 
-# 子命令注册表 —— main 与测试共用的单一正主(对抗评审:S16 声明集测试原先
-# 手抄这 14 个注册函数,新命令不会自动进测试,又造一面镜子)。新增子命令 =
+# 子命令注册表 —— main 与测试共用的单一正主(否则声明集测试另抄一份注册
+# 函数列表,新命令不会自动进测试,又是一面会漂的镜子)。新增子命令 =
 # 在此加一行;写共享盘的命令还须在其注册函数里 mark_write(cli/common)。
 SUBPARSER_REGISTRARS = (
     add_run_subparser,
@@ -60,7 +60,6 @@ def main():
         args = parser.parse_args()
         # JFS 集中运维: write 命令 + alpha_src root-owned 时自动 sudo 提权,
         # 否则 no-op (read-only 命令直通)。详见 ops/infra/sudo.py。
-        # (ensure_redis_password 钩子随 redis state 后端一并退役, Wave 1 F2。)
         maybe_elevate(args)
         args.func(args)
     except SystemExit:

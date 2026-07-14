@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from ops.core.state import HistoryEvent
 
 # ---------------------------------------------------------------------------
-# 渲染(2026-07-11 展示层上收:自 services/status 迁入,services 零 rich)
+# 渲染(rich 渲染只在 cli,services 零 rich)
 # ---------------------------------------------------------------------------
 
 _console = Console(width=shutil.get_terminal_size((140, 50)).columns)
@@ -42,7 +42,7 @@ def _outcome(c):
 
 
 def _print_detail(factor: "Factor", events: "list[HistoryEvent]") -> None:
-    """打印单个因子的详细状态 + 生命周期时间线(factor_history,v2b)。"""
+    """打印单个因子的详细状态 + 生命周期时间线(factor_history)。"""
     rec = factor.state
     assert rec is not None  # 调用方已分流 info 孤儿
     _console.print(Rule(f"[bold cyan]因子状态 · {rec.name}[/]", style="cyan", characters="━"))
@@ -56,8 +56,7 @@ def _print_detail(factor: "Factor", events: "list[HistoryEvent]") -> None:
     if factor.last_fail_stage:
         _console.print(_kv("last_fail", f"[red]{factor.last_fail_stage}[/] — {factor.last_fail_reason}"))
     if events:
-        # 完整生命周期时间线(submit/check/entered/approve/restage/...)——
-        # v2b 立项动机之一:详情从"检测历史"升级为全操作时间线
+        # 完整生命周期时间线(submit/check/entered/approve/restage/...)
         _console.print(_kv("timeline", f"({len(events)})"))
         for i, e in enumerate(events, 1):
             if e.op == "check":
@@ -69,8 +68,6 @@ def _print_detail(factor: "Factor", events: "list[HistoryEvent]") -> None:
             if e.actor:
                 line += f"  [dim]by {e.actor}[/]"
             _console.print(line)
-    # (v2c:json 后端 history() 合成 check 事件,时间线渲染两后端统一,
-    # 原 check_history 回落分支删除 —— record 已无该字段)
     _console.print(Rule(style="cyan", characters="━"))
 
 

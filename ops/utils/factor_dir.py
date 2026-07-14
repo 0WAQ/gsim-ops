@@ -1,8 +1,7 @@
 """因子目录搬迁的固定两件套:__pycache__ 清理 + XML @module 重写。
 
 check.to_lib / check.on_reject / restage 把因子目录搬到新位置后都要做同样
-两件事,原先 check.py 与 restage.py 各抄一份(clone-and-edit,full-review
-第二部分 §3.4)。
+两件事,集中于此,别在各调用方各抄一份。
 """
 import shutil
 from pathlib import Path

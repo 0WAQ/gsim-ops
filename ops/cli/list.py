@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from ops.core.factor import Factor, FactorSnapshot
 
 # ---------------------------------------------------------------------------
-# 渲染(2026-07-11 展示层上收:自 services/list 迁入,services 零 rich)
+# 渲染(rich 渲染只在 cli,services 零 rich)
 # ---------------------------------------------------------------------------
 
 DASH = "—"
@@ -91,7 +91,7 @@ def print_table(rows: "list[Factor]", show_tables=False, show_fields=False):
     cols = list(_BASE_COLS)
     if has_rejected:
         # 混排(含被拒)时显式列出 status —— 行颜色重定向到文件/管道即丢,
-        # v3 后被拒因子也有指标,不能只靠颜色区分(2026-07-13 用户拍板)
+        # 被拒因子也有指标,不能只靠颜色区分
         cols.insert(2, _STATUS_COL)
         cols.append(_FAIL_COL)
     if show_tables:
@@ -114,10 +114,9 @@ def print_table(rows: "list[Factor]", show_tables=False, show_fields=False):
 def _row_to_json(row: "Factor") -> dict:
     """将 Factor 转换为 JSON 字典。
 
-    ⚠ 2026-07-07 Wave 2 输出变更: has_pnl/dump_days 两个键移除 —— 它们是实时
-    物理状态,唯一来源是全库扫盘(每次 list ~25s),与"list 是 PG catalog 查询"
-    冲突。单因子的物理状态看 `ops info`(现场 stat,便宜);批量对账属后续
-    ops doctor。新增 status 键(因子集判据变更后调用方常需要)。
+    ⚠ has_pnl/dump_days 两个键不在输出里 —— 它们是实时物理状态,唯一来源是
+    全库扫盘(每次 list ~25s),与"list 是 PG catalog 查询"冲突。单因子的物理
+    状态看 `ops info`(现场 stat,便宜);批量对账属 ops doctor。
     """
     snap = row.snapshot
 
@@ -205,7 +204,7 @@ Example:
         choices=["table", "json"],
         help="Output format (default: table)",
     )
-    # --refresh 已删除 (2026-07-07 Wave 2): list 改纯 PG 查询,不再有扫盘索引缓存。
+    # --refresh 已删除:list 是纯 PG 查询,不再有扫盘索引缓存可刷新。
     parser.add_argument(
         "--show-tables",
         action="store_true",
@@ -221,9 +220,8 @@ Example:
         type=str,
         help="Filter conditions separated by commas (e.g., tables=ashareeodprices,ret>30,shrp>1.5)",
     )
-    # choices 从 metric 注册表派生(SSOT S8,core/metrics.SNAPSHOT_METRICS):
-    # 原先手抄键列表,曾多一个 "delay",接受后被服务层静默忽略。delay 若要
-    # 可排序,在注册表加一行(snapshot 表须有对应列)。
+    # choices 从 metric 注册表派生(SSOT,core/metrics.SNAPSHOT_METRICS):
+    # delay 若要可排序,在注册表加一行(snapshot 表须有对应列)。
     parser.add_argument(
         "--sort-by",
         type=str,

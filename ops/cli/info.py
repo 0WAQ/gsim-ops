@@ -9,7 +9,7 @@ from ops.cli.common import add_config_arg
 from ops.services.info import collect_info
 
 # ---------------------------------------------------------------------------
-# 渲染(2026-07-11 展示层上收:自 services/info 迁入,services 零 rich)
+# 渲染(rich 渲染只在 cli,services 零 rich)
 # ---------------------------------------------------------------------------
 
 _console = Console(width=shutil.get_terminal_size((140, 50)).columns)
