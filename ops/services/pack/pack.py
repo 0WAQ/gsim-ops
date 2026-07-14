@@ -255,9 +255,8 @@ def run_pack(args):
     else:
         candidates = _list_dump_factors(config.alpha_dump)
 
-    # 按 user/status 过滤:单条三表 JOIN(2026-07-09 阶段 3,退役 store.list()
-    # + info.list(author) 的内存交集;include_submitted=True 保持"全状态"旧语义,
-    # 显式 --status 时按其精确过滤)
+    # 按 user/status 过滤:单条三表 JOIN(include_submitted=True 保持"全状态"
+    # 语义,显式 --status 时按其精确过滤)
     if user or status:
         from ops.infra.repository import FactorRepository
         matched = FactorRepository(config).find(

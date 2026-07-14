@@ -72,7 +72,7 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
     """Submit one factor from staging into state. Returns "pass" | "skip" | "fail".
 
     New factor (no state record)     -> repo.register(info + state 原子一个事务,
-                                        version=1;原先顺序两次写,崩在中间留
+                                        version=1;顺序两次写会崩在中间留
                                         "有 info 无 state"半截因子)。
     Existing factor + overwrite=True -> transition state to SUBMITTED, version += 1
                                         (info 不变，只更新 state).
@@ -107,9 +107,8 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
               f"<Description discovery_method=...> 补全)")
         return "fail"
 
-    # birthday 合法区间(L1,2026-07-12 TRIAGE:zxu birthday=20061219 错值入库)。
-    # 只校验"给了但离谱"的值;缺省 0(未填)放行 —— parse 不校验,backfill
-    # 存量因子无此字段(与 discovery_method 的校验分工一致)。
+    # birthday 合法区间校验。只校验"给了但离谱"的值;缺省 0(未填)放行 ——
+    # parse 不校验,存量因子可能无此字段(与 discovery_method 的校验分工一致)。
     if meta.birthday and not (20150101 <= meta.birthday <= 20991231):
         error(f"  ✘  {staging_dir.name} birthday 非法: {meta.birthday}"
               "(须为 20150101-20991231 区间的 yyyymmdd,"
@@ -145,14 +144,14 @@ def submit_one(staging_dir: Path, submitted_by: str, config: Config,
                         submitted_at=submitted_at,
                         version=new_version)
         # 覆盖提交 = 旧入库快照失效(新代码 re-check 通过后 archive 写新快照)。
-        # 不删则 insert 撞 name UNIQUE 被吞,快照永远停在旧代码(full-review P0-1)。
+        # 不删则 insert 撞 name UNIQUE 被吞,快照永远停在旧代码。
         try:
             repo.discard_snapshot(meta.name)
         except Exception:
             warn(f"  ⚠  {meta.name} 旧 snapshot 删除失败(archive 时会自愈)")
         # 同理回收 check 面产物(pnl + bcorr 池副本):旧版本 pnl 留在池里,
         # 新代码重检时 correlation 对它 corr 通常极高 → 被迫"打败"旧的自己
-        # (自鬼影,PV7)。dump/feature 服务面保留(last-known-good)。
+        # (自鬼影)。dump/feature 服务面保留(last-known-good)。
         for r in repo.purge_artifacts(meta.name, ArtifactScope.CHECK):
             info(f"  ✔  已回收 {r}")
         info(f"  ✔  {meta.name} → submitted (version={new_version},覆盖新代码)")

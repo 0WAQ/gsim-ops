@@ -1,6 +1,6 @@
-"""list 查询编排 —— 零展示(2026-07-11 展示层上收:表格/JSON 渲染在
-`ops/cli/list.py`,本模块只负责解析过滤条件 + 下推查询 + 内存兜底,返回
-`list[Factor]`;解析失败抛 `FilterError`,由 cli 呈现)。"""
+"""list 查询编排 —— 零展示(表格/JSON 渲染在 `ops/cli/list.py`,本模块只负责
+解析过滤条件 + 下推查询 + 内存兜底,返回 `list[Factor]`;解析失败抛
+`FilterError`,由 cli 呈现)。"""
 import fnmatch
 import re
 
@@ -10,8 +10,8 @@ from ops.infra.config import Config
 from ops.infra.repository import FactorRepository
 
 _FILTER_PATTERN = re.compile(r"^(\w+)([><=!]+)(.+)$")
-# 可排序/过滤的 metric 键 —— 从注册表派生(SSOT S8,core/metrics.py),
-# 取值语义(bcorr=abs)也在注册表,本文件不再自带镜像。
+# 可排序/过滤的 metric 键 —— 从注册表派生(SSOT 在 core/metrics.py),
+# 取值语义(bcorr=abs)也在注册表,本文件不自带镜像。
 _SORTABLE_KEYS = frozenset(SNAPSHOT_METRICS)
 FILTER_KEYS = {"tables", "field"} | _SORTABLE_KEYS
 # 合法比较符白名单:typo(=>、=<、>< 等)能通过正则但下推白名单和内存 if 链都
@@ -108,11 +108,9 @@ def list_factors(args) -> list[Factor]:
 
     `--filter-by` 非法时抛 `FilterError`(含逐条错误信息)。
 
-    2026-07-07 Wave 2 (JOURNAL V1): 因子集判据收敛为
-    `factor_state.status != 'submitted'`(在 repo.find 里定义,PG 是唯一
-    权威)。原扫盘白名单 + derived 索引缓存路径删除 —— 缓存自三表迁移起已坏,
-    每次 list 都在付 ~25s 全库扫盘税(full-review P0-4/G6)。PG 与磁盘的漂移
-    属对账问题(后续 ops doctor),不由 list 承担。
+    因子集判据 = `factor_state.status != 'submitted'`(在 repo.find 里定义,
+    PG 是唯一权威),不扫盘。PG 与磁盘的漂移属对账问题(ops doctor),
+    不由 list 承担。
     """
     config = Config.load(args.config_path)
 
@@ -131,9 +129,9 @@ def list_factors(args) -> list[Factor]:
     sort_pd = args.sort_by if args.sort_by in _SORTABLE_KEYS else None
 
     # repo.find 单条三表 LEFT JOIN(author/field/tables/metrics/status/sort
-    # 下推;2026-07-09 退役 query_factors 的三次查 + 内存合并)。下面仍全量跑
-    # 一遍 filter/status/sort/[:n],故下推纯为预筛,结果与不下推逐位等价。
-    # limit 不下推,由此处 [:n] 在内存过滤后截断(P0-5 语义:先滤后截)。
+    # 下推)。下面仍全量跑一遍 filter/status/sort/[:n],故下推纯为预筛,
+    # 结果与不下推逐位等价。limit 不下推,由此处 [:n] 在内存过滤后截断
+    # (先滤后截)。
     rows = FactorRepository(config).find(
         author=args.user, field=field_pd, table_glob=table_pd,
         metrics=metric_pd,

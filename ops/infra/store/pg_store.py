@@ -110,7 +110,7 @@ class PostgresStateStore(StateStore):
         )
 
     def checks(self, name: str) -> "list[CheckRecord]":
-        """check 全史:从事件表组装(op='check',at 升序;v2c 自 record 剥离,
+        """check 全史:从事件表组装(op='check',at 升序;自 record 剥离,
         按需查)。CheckRecord.finished_at ← 事件 at(发射时 at=finished_at|now)。"""
         with self.pool.connection() as conn:
             rows = conn.execute(
@@ -140,9 +140,9 @@ class PostgresStateStore(StateStore):
     def put_on(conn, record: FactorRecord, stamp: bool = True) -> None:
         """在调用方给定的连接/事务上执行 put —— repository.register 用它与
         factor_info 的 upsert 合进同一个事务(原子入库)。
-        注:check 史在事件表(v2c 起 record 无 check_history 字段)。"""
-        # stamp=False preserves record.updated_at as-is (used by migration to
-        # keep the original Redis timestamp). Normal writes bump it to now.
+        注:check 史在事件表(record 无 check_history 字段)。"""
+        # stamp=False preserves record.updated_at as-is; normal writes bump it
+        # to now.
         if stamp:
             record.updated_at = _now()
         sql = (
