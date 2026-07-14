@@ -128,6 +128,26 @@ Removed subcommands: `cp`, `scp`, `compiler`, `resubmit`(并入 `submit --overwr
 
 When adding a new command that touches files, state, or remotes: default to the non-destructive path, surface the destructive variant behind a flag, and require explicit user authorization at the scope being acted on.
 
+### 注释规范(Comment Conventions)
+
+注释写**为什么**,不写**是什么**——代码本身说 what,注释只解释非显然的 why:决策理由、
+不变量、陷阱、边界、反直觉之处。语言中文,标识符/命令/术语保留英文。
+
+- **纯 why + 指针,注释不当 changelog**:只留**长期有效**的理由。历史考古(日期 /
+  批次名 / PR 号 / `full-review §X` / `S8`)**不进 inline**——git blame +
+  `docs/remediation/JOURNAL.md` 已是编年史;需溯源留一句指针(`见 JOURNAL F2`),不复述
+  来龙去脉。判据:三个月后这行注释还成立吗?讲"当时改了什么"的删,讲"为什么现在这样"的留。
+- **module docstring**:每模块开头一段——是什么 + 边界(负责 / 不负责什么)+ 关键不变量。
+  读者入口(范本 `ops/core/paths.py`、`ops/infra/repository.py`)。
+- **SSOT 锚点**:一处代码是某事实族正主、或依赖别处正主,点明(`正主在 X` / `派生自 Y`)。
+- **防回潮墓志铭**:删除的字段/命令留注释**仅当**有"别加回来"价值(解释为什么不要重蹈);
+  纯记账的删。
+- **易 stale 的具体值**:可变事实(计数 / 机器数 / 阈值)不写死在注释里,注明来源
+  (`见 config`)或只写性质/量级——写死的具体数是定时炸弹(如注释说"三机"实际已四机)。
+- **禁止**:复述代码、装饰性分隔线堆砌、无触发条件的 TODO(TODO 带条件 + 替代方向)。
+
+存量注释按本规范收敛(见 `docs/remediation/JOURNAL.md` 注释清理批)。
+
 ### Default Config (2026-06-05 上线后)
 
 `config.yaml` (project root) 是当前 default,指向 JFS (`/tank/vault/alphalib/`) +
