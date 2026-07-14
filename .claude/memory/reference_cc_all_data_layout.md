@@ -172,6 +172,6 @@ day = np.memmap(f'{ROOT}/delta/daily/20260529/20260529.npy',
 5. **形状不一致警告**:`Basedata` 等 (3995, N),`cn_equity_feature/*` (4636, N),对齐时按 idx 切。
 6. **快照切换**:回测时把 ROOT 切到 cc_2024 / cc_2025 可 reproduce 当时的状态;研究/挖掘用 cc_all。
 
-完整字段清单见 `gsim-ops/docs/cc_all_fields.csv`(9902 条)。
+完整字段清单见 `gsim-ops/docs/gsim/cc_all_fields.csv`(9902 条)。
 
 相关:[[reference-gsim-architecture]], [[reference-company-data-architecture]], [[reference-gsim-data-modules]], [[reference-gsim-xml-config]], [[reference-server-topology]], [[alpha-dump-to-feature-migration]]

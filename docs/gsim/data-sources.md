@@ -451,9 +451,9 @@ self.rev_fa = dr.getData('revenue_forecast_annual.revenue')
 ## 参考资料
 
 - 物理数据布局(memmap、形状、快照):[cc-data-layout.md](cc-data-layout.md)
-- Gsim 架构:[gsim-architecture.md](gsim-architecture.md)
-- XML 配置:[gsim-xml-config.md](gsim-xml-config.md)
-- 因子开发流程:[gsim-factor-workflow.md](gsim-factor-workflow.md)
+- Gsim 架构:[architecture.md](architecture.md)
+- XML 配置:[xml-config.md](xml-config.md)
+- 因子开发流程:[factor-workflow.md](factor-workflow.md)
 - 完整数据源配置:`/datasvc/template/config.read_cache.xml`(111 个 `<Data>` 注册项)
 - gsim 数据模块源码:`/usr/local/gsim/gsim/data/module/`
 - 自定义数据模块:`/usr/local/gsim/dm_src/`、`/usr/local/gsim/source_ref/`

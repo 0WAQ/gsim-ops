@@ -59,7 +59,7 @@ staging/AlphaXxx/ + meta.json       (SUBMITTED)
 | archive | 测得快照落库,搬入因子库 |
 
 失败路由:validate / long_backtest 失败回 SUBMITTED 留 staging 重试;
-其余阶段失败置 REJECTED。详见 `docs/gsim-factor-validation.md`。
+其余阶段失败置 REJECTED。详见 `docs/gsim/factor-validation.md`。
 
 ### 示例
 

@@ -175,7 +175,7 @@ Located at `/usr/local/gsim/`. The core backtesting engine that ops interacts wi
 - `alphalib/alpha_dump` 是**软链**,实体是 `<挂载点>.local/alpha_dump`(本地盘
   sidecar,每机一份,不进 JFS 不共享)—— dump 大文件有意留本机。
 - **`alphalib/staging` 自 2026-07-11 起是 JFS 实目录(共享)**——共享 staging +
-  队列消费部署(docs/shared-staging-queue.md):任意机器 submit 入队,170
+  队列消费部署(docs/design/shared-staging-queue.md):任意机器 submit 入队,170
   (消费机)check,任意机器看结果;"在哪台 submit 就必须在哪台 check"的绑定
   与"PG 不记因子在哪台 staging"的挂账一并消灭。历史形态(sidecar 软链)见
   JOURNAL 2026-07-11 校正条目。
@@ -230,7 +230,7 @@ AlphaXxx/
 改代码/review 第一问:**"你在问正主吗?"** 每个事实族只有一个权威来源,其余都是
 投影或缓存(full-review §8.2)。2026-07-11 起表中已无已知多真相源(原 ⚠ 行
 metric 表达式已收敛,S8);新发现的多真相源加 ⚠ 行并在
-`docs/factor-aggregate-plan.md` 记收敛计划。
+`docs/design/factor-aggregate-plan.md` 记收敛计划。
 
 | 事实族 | 正主(SSOT) | 备注 |
 |---|---|---|
@@ -275,7 +275,7 @@ metric 表达式已收敛,S8);新发现的多真相源加 ⚠ 行并在
 - 2026-07-04 `factor_lock` 迁跨机 PG advisory lock (branch 同上): 原 per-machine fcntl 挡不住跨机对同一因子的并发变更 (state 共享 PG + src/pnl 产物共享 JFS;staging 2026-07-11 起也共享 —— 多机扫同一 staging、多 worker 并发领任务,跨机锁正是防重复消费的机制)。postgres 后端走 `pg_try_advisory_lock` (专用连接, session 级, 连接断开自动释放, 无死锁残留); json dev/test 后端 fcntl(2026-07-07 起 postgres 缺 conninfo 硬错误、锁键去 library_id 维,见 JOURNAL F4/F5)。签名 `factor_lock(name, config)`。见 `ops/infra/lock.py` + memory [[project_factor_lock_cross_machine]]。
 - 2026-07-04 CLI 子命令重审 (branch 同上): submit 吸收 resubmit (`--overwrite` 覆盖已入库因子, 默认跳过); recheck 改名 restage (名副其实, 只召回 staging 不跑 check); rm 改彻底硬删 + 移除 DELETED 状态/deleted_at 列 (因子要么存在要么删除, 删除不是状态); approve 正名为"数据覆盖多样性人工豁免"。见 memory [[project_cli_command_redesign]]。
 - 2026-07-06 Postgres 双表 → 三表重构 (branch 同上): `factor_derived` + 旧 `factor_state` (含 author/submitted_by) 拆成 `factor_info` (身份) + `factor_state` (纯状态) + `factor_snapshot` (入库时快照)，全部去掉 `library_id`。**metrics/datasources/bcorr 语义从"可刷新最新表现"变为"入库时不可变快照"** (`snapshot_at = entered_at`)；`ops refresh` 命令删除。新增 `ops/infra/info/` + `ops/infra/snapshot/` store 抽象 + `ops/infra/query.py` 联合读。生产库 `ops` 迁移已执行 (migrate_to_snapshot.sql + backfill_discovery_method.py): factor_info 7594 / factor_state 7594 / factor_snapshot 7485; discovery_method automated 7259 / manual 226 / NULL 109 (未入库); 迁移中清理 108 脏因子 + 2 空壳 + 补 20 hwang 孤儿 state。旧 `derived/` 层代码当时保留 (LibraryScanner 仍用其做 index 缓存)(注: derived 层已于 2026-07-07 Wave 2 删除)。
-- 2026-07-13 schema v2/v3 + legacy 清理批收官 (PR #14-#20, 全部合 main 四机滚存): v2a/v2b/v2c 三批 (factor_history 全操作审计表、state 瘦身、TEXT[]、约束/命名归一) + v3 词汇正名 + 测得快照 (factor_snapshot = 最近一次 check 测得表现, 被拒也写) + legacy 清理批 (472 snapshot_at 漂移拉正 + compliance 22 快照补跑 + discovery_method 129 归一并 **NOT NULL 收口** + `ops backfill` 退役 + doctor 加第八族 timeline-drift + `ops list` 混排加 status 列)。生产现状 8419 因子。见 `docs/remediation/JOURNAL.md` + `docs/schema-v3.md` + `docs/legacy-cleanup.md`。
+- 2026-07-13 schema v2/v3 + legacy 清理批收官 (PR #14-#20, 全部合 main 四机滚存): v2a/v2b/v2c 三批 (factor_history 全操作审计表、state 瘦身、TEXT[]、约束/命名归一) + v3 词汇正名 + 测得快照 (factor_snapshot = 最近一次 check 测得表现, 被拒也写) + legacy 清理批 (472 snapshot_at 漂移拉正 + compliance 22 快照补跑 + discovery_method 129 归一并 **NOT NULL 收口** + `ops backfill` 退役 + doctor 加第八族 timeline-drift + `ops list` 混排加 status 列)。生产现状 8419 因子。见 `docs/remediation/JOURNAL.md` + `docs/design/schema-v3.md` + `docs/design/legacy-cleanup.md`。
 
 **仍在路上**:
 - Phase D: alpha_src 接入 Git on JFS,改造 `ops submit/restage` 走 `git add/commit`(串行化复用现有 `factor_lock`,已是跨机 PG advisory lock)

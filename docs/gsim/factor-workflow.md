@@ -73,7 +73,7 @@ class AlphaWbaiReversal(AlphaBase):
 
 > 模板示例使用了 `yq_212_5min` 这类自定义 Level2 数据源，在 `config.read_cache.xml` 默认是注释状态。仿写时若用到此类数据，务必在自己的 Config XML 的 `<Modules>` 内手工注册对应 `<Data>`（参考 `Config.Wbai.Reversal.xml` L19）。
 
-`AlphaBase` 的完整接口见 [gsim-architecture.md](gsim-architecture.md#alphabase因子基类)。
+`AlphaBase` 的完整接口见 [architecture.md](architecture.md#alphabase因子基类)。
 
 ### 2.2 数据访问
 
@@ -96,7 +96,7 @@ def generate(self, di):
     bar = self.close_m5[di - self.delay, 48, valid_idx]
 ```
 
-完整数据源列表见 [gsim-data-sources.md](gsim-data-sources.md)。
+完整数据源列表见 [data-sources.md](data-sources.md)。
 
 ### 2.3 命名规范
 
@@ -133,13 +133,13 @@ class AlphaExample(AlphaBase):
         self.alpha = some_calculate(self.prev)
 ```
 
-**为什么需要**: 生产环境可能随时重启。`run_cp.py` 会在 `endIndex - checkpointDays` 时保存 checkpoint，重启后从 checkpoint 恢复继续执行。详见 [gsim-factor-validation.md](gsim-factor-validation.md#2-checkpoint断点恢复检测)。
+**为什么需要**: 生产环境可能随时重启。`run_cp.py` 会在 `endIndex - checkpointDays` 时保存 checkpoint，重启后从 checkpoint 恢复继续执行。详见 [factor-validation.md](factor-validation.md#2-checkpoint断点恢复检测)。
 
 ## 三、因子回测
 
 ### 3.1 配置文件
 
-参考 `/datasvc/template/AlphaWbaiReversal/Config.Wbai.Reversal.xml`，完整配置说明见 [gsim-xml-config.md](gsim-xml-config.md)。
+参考 `/datasvc/template/AlphaWbaiReversal/Config.Wbai.Reversal.xml`，完整配置说明见 [xml-config.md](xml-config.md)。
 
 最小模板：
 
@@ -343,7 +343,7 @@ uv run ops submit -u wbai -s 20260401 -f AlphaWbaiReversal
 
 ## 七、因子入库检测
 
-提交后，因子进入 `ops check` 的验证管道。完整流程见 [gsim-factor-validation.md](gsim-factor-validation.md)。
+提交后，因子进入 `ops check` 的验证管道。完整流程见 [factor-validation.md](factor-validation.md)。
 
 ### 7.1 入库标准摘要
 
@@ -430,11 +430,11 @@ uv run ops submit -u wbai -s 20260401 -f AlphaWbaiReversal --overwrite
 - **alpha_dump**: 日频小文件（`yyyy/mm/yyyymmdd{v1,v2}.npy`），gsim 遗留格式
 - **alpha_feature**: 聚合大文件，每个因子一个 `.npy`，推荐使用
 
-2026-05-28 起 gsim 新增 `AlphaLoadFeat`（FeatureReader），支持从 `alpha_feature` 加载因子。详见 [gsim-changelog.md](gsim-changelog.md)。
+2026-05-28 起 gsim 新增 `AlphaLoadFeat`（FeatureReader），支持从 `alpha_feature` 加载因子。详见 [changelog.md](changelog.md)。
 
 ### 10.2 因子后处理
 
-常用 Operation（详见 [gsim-xml-config.md](gsim-xml-config.md#operations后处理链)）：
+常用 Operation（详见 [xml-config.md](xml-config.md#operations后处理链)）：
 
 ```xml
 <Operations>
@@ -445,7 +445,7 @@ uv run ops submit -u wbai -s 20260401 -f AlphaWbaiReversal --overwrite
 </Operations>
 ```
 
-可用 operator 完整列表见 [gsim-architecture.md](gsim-architecture.md#operator-模块)。
+可用 operator 完整列表见 [architecture.md](architecture.md#operator-模块)。
 
 ### 10.3 多种回测模式
 
@@ -455,4 +455,4 @@ uv run ops submit -u wbai -s 20260401 -f AlphaWbaiReversal --overwrite
 - `mode=2`: StatsBenchLayer（分层，需 `thres`）
 - `mode=3`: Long Only
 
-各模式 XML 示例见 [gsim-xml-config.md](gsim-xml-config.md#stats-模块列表)。
+各模式 XML 示例见 [xml-config.md](xml-config.md#stats-模块列表)。

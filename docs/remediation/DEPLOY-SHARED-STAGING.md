@@ -1,6 +1,6 @@
 # 共享 staging + 170 消费机部署手册(v2,2026-07-11 重写)
 
-**目标**:落地 `docs/shared-staging-queue.md` —— staging 从本机 sidecar 迁 JFS
+**目标**:落地 `docs/design/shared-staging-queue.md` —— staging 从本机 sidecar 迁 JFS
 共享,之后任意机器 submit,170 跑 check,任意机器看结果。
 
 **v2 变更**:原 v1(e314695)写于 170 迁移和 ops setup 之前。现状已变:

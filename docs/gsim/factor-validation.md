@@ -407,8 +407,8 @@ def checkpointLoad(self, fh):
 
 ## 参考资料
 
-- Gsim 架构：[gsim-architecture.md](gsim-architecture.md)
-- XML 配置：[gsim-xml-config.md](gsim-xml-config.md)
-- 因子开发流程：[gsim-factor-workflow.md](gsim-factor-workflow.md)
-- 数据源参考：[gsim-data-sources.md](gsim-data-sources.md)
+- Gsim 架构：[architecture.md](architecture.md)
+- XML 配置：[xml-config.md](xml-config.md)
+- 因子开发流程：[factor-workflow.md](factor-workflow.md)
+- 数据源参考：[data-sources.md](data-sources.md)
 - ops check 实现：`ops/services/check/`

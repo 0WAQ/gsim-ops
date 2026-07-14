@@ -157,7 +157,7 @@ qr **不交**: .npy / 训练代码 / 数据。
 
 ## 已完成的工作 (tmp/combo_v0.1_20260605/, gitignore 不进库)
 
-- spec 草案: `docs/combo-calling-convention.md` (已 commit 48ab3dd)
+- spec 草案: `docs/design/combo/calling-convention.md` (已 commit 48ab3dd)
 - 把 lhw v0.1 改造为 MLflow Projects 形态 (MLproject + python_env.yaml + combo.meta.json + predict/backtest 目录)
 - **验证: mlflow run backtest 与 lhw 自跑 bit-exact 一致** (5年×3mode, pnl sha256 逐一相同)
 - **验证: predict 用 cc_2025 跑到 2025 out-of-sample 成功** (CPU, 短窗口)

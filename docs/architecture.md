@@ -1,15 +1,15 @@
 # ops 架构总览
 
 自顶向下讲清整个系统怎么搭的。**这是地图不是深挖**:每节讲"是什么、为什么这么设计",
-细节链接到权威副本(`CLAUDE.md` 各节 / `docs/schema-v2·v3.md` / `docs/factor-aggregate-plan.md`
+细节链接到权威副本(`CLAUDE.md` 各节 / `docs/schema-v2·v3.md` / `docs/design/factor-aggregate-plan.md`
 / 各模块 `CLAUDE.md`)——不复制真相源。
 
 ## 两类读者
 
 - **维护者 / 工程师**:通读全篇。
 - **QR 研究员**:读 §1(全景)+ §3(生命周期与命令)+ §4(验证流水线)即可了解"因子提交后
-  经历了什么";动手写因子看 [`docs/gsim-factor-workflow.md`](gsim-factor-workflow.md) +
-  [`docs/README.md`](README.md)。
+  经历了什么";动手写因子看 [gsim/factor-workflow.md](gsim/factor-workflow.md) +
+  [gsim/README.md](gsim/README.md)。
 
 ---
 
@@ -78,7 +78,7 @@ stateDiagram-v2
   REJECTED --> [*]: rm
 ```
 
-**词汇表**(schema v3 正名,`docs/schema-v3.md`):**在册**(有记录含被拒,`status != submitted`
+**词汇表**(schema v3 正名,`docs/design/schema-v3.md`):**在册**(有记录含被拒,`status != submitted`
 = `ops list` 因子集)/ **在库**(ACTIVE,combo·bcorr 消费范围)/ **入库**(变为在库那一刻,
 = entered 事件)/ **已入库**(至少入库过,`entered_at` 非空)。删除不是状态——因子要么存在
 要么被 rm 删掉,无墓碑。

@@ -9,7 +9,7 @@ Deferred / not-yet-started plans. See `CLAUDE.md` for current architecture.
 > 迁移不算完成**,不得据此开启下一段迁移。(Waves 0-4 整改即按此纪律执行并收官。)
 
 **排期中的大工程**:Factor 聚合(领域模型立正主,full-review 路线图 Wave 5)——
-施工图 `docs/factor-aggregate-plan.md`(目标模型 / 三阶段迁移 / import-linter 契约基线)。
+施工图 `docs/design/factor-aggregate-plan.md`(目标模型 / 三阶段迁移 / import-linter 契约基线)。
 
 ## Architecture Refactor (已基本落地 — 保留作历史设计记录)
 

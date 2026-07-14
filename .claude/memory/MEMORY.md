@@ -25,7 +25,7 @@
 - [NFS cc Migration SOP](reference_nfs_cc_migration_sop.md) — 跨 ZFS pool 替换 cc 副本 + 客户端 remount + NFSv4 idmapping; 详细 SOP 在 docs/ops/nfs-cc-migration.md
 - [INCIDENT: Redis maxclients](project_incident_redis_maxclients.md) — 2026-06-23: redis-jfs:6380 连接打满 (512 核 × juicefs 连接池, 非泄漏); ss -K 踢连接 + maxclients 50000 持久化 /etc/redis-jfs/redis.conf; 根因 (池上限/state 拆库) 待治; 诊断脚本 scripts/redis-*.sh
 - [JFS Client env-name Gotcha](project_jfs_client_env_name_gotcha.md) — 新接 JFS client 后 ops 报 redis AuthenticationError: join 写 alphalib.env, 但 config.yaml 要 alphalib-jfs.env; 接完补一份同密码文件
-- [Combo Test Pipeline](project-combo-test-pipeline.md) — combo 测试接口规范定型: QR 交 predict+models+config.<stats>.xml, ops 用最新数据代测; 占位符注入消除硬编码, 主产物固定 combo.npy, predict/backtest 逻辑分离, warmup 坑; 文档 docs/combo-*.md, 待实现 ops combo 子命令
+- [Combo Test Pipeline](project-combo-test-pipeline.md) — combo 测试接口规范定型: QR 交 predict+models+config.<stats>.xml, ops 用最新数据代测; 占位符注入消除硬编码, 主产物固定 combo.npy, predict/backtest 逻辑分离, warmup 坑; 文档 docs/design/combo/*.md, 待实现 ops combo 子命令
 - [Factor Library Storage Architecture](project_factor_library_storage_architecture.md) — 存储长期方向 (2026-07-03): 三层分离, JFS 收窄不拆, Postgres 当真相源, Redis 降级缓存; 2026-07-06 双表→三表 (factor_info/state/snapshot); 2026-07-11~13 v2b factor_history 审计表 + v3 测得快照 (被拒也写) + legacy 批 discovery_method NOT NULL + backfill 退役 + doctor 八族
 - [uv tool env deps](project_uv_tool_env_deps.md) — 生产 ops 走 uv tool 独立环境, 加依赖要 uv tool install --reinstall 否则 ModuleNotFoundError
 - [Firewall 1D Instrument Vector](project_firewall_1d_instrument_vector.md) — DataFirewall 按 getData tag 白名单 (STATIC_TAGS={'ipodate'}) 排除框架级静态票维数据, 不注入 firewall; 2026-07-02 修 ipodate 误报 (否决了 ndim 一刀切)

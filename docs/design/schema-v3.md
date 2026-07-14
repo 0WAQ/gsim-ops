@@ -95,7 +95,7 @@ compliance 22 条可选人工补跑;snapshot_at = 对应 check 事件的 at。
 > **落地(2026-07-13,PR #19)**:472 snapshot_at 漂移拉正 + compliance 22 快照补跑 +
 > discovery_method 129 归一并 **NOT NULL 收口**('backfill'/NULL 退役,值按 pnl 池
 > 位置 + 人工名单判)+ `ops backfill` **退役删除** + doctor 加第八族 timeline-drift
-> (created_at <= submitted_at 不变量)。设计/执行见 `docs/legacy-cleanup.md` +
+> (created_at <= submitted_at 不变量)。设计/执行见 `docs/design/legacy-cleanup.md` +
 > `docs/remediation/VERIFY-LEGACY-CLEANUP{,-RESULT}.md`。
 
 ## 五、明确不做(定案,防回潮)

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ops.infra.config import Config
 
-# 共享 staging(docs/shared-staging-queue.md,2026-07-11 翻 True 与部署同批):
+# 共享 staging(docs/design/shared-staging-queue.md,2026-07-11 翻 True 与部署同批):
 # staging 的应然 = JFS 实目录(全局共享,多机 submit / 170 集中 check 的数据面)。
 # 物理切换步骤见 DEPLOY-SHARED-STAGING.md 阶段 1;本分支合 main 前须窗口执行完毕。
 STAGING_IS_SHARED = True

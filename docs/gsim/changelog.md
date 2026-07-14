@@ -128,7 +128,7 @@ class AlphaLoadFeat(AlphaBase):
 
 ## 参考资料
 
-- Gsim 架构：[gsim-architecture.md](gsim-architecture.md)
-- XML 配置（含 FeatureReader 节）：[gsim-xml-config.md](gsim-xml-config.md#featurereaderalphaloadfeat)
+- Gsim 架构：[architecture.md](architecture.md)
+- XML 配置（含 FeatureReader 节）：[xml-config.md](xml-config.md#featurereaderalphaloadfeat)
 - ops pack 实现：`ops/services/pack/`
 - ~~ops sync 设计：`ops/services/sync/`~~(命令与服务已于 2026-07-07 退役删除,路径已不存在)
