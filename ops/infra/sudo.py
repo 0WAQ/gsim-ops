@@ -24,7 +24,7 @@ import sys
 # 写命令集是声明派生,不手抄:每个写子命令在注册处 `mark_write(parser)`
 # 声明(ops/cli/common.py),落在 args.is_write_command 上,本模块只消费。
 # 单一定义 —— 新增写命令漏声明会在 JFS 环境首次写时 EACCES 响亮暴露,而非
-# 静默绕过提权。别退回手抄集合:那是多真相源,曾漏掉 `run` 命令。
+# 静默绕过提权。别退回手抄集合(多真相源,漏声明即静默绕过提权)。
 
 # 这些环境变量在 sudo 提权时必须保留 (sudo 默认 strip 用户 env)。
 _PRESERVE_ENV = [
