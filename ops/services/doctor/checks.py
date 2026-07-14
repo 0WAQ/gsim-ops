@@ -383,9 +383,8 @@ def _artifact_path_ok(finding, path) -> bool:
 _ARTIFACT_FIXER = Fixer(
     plan=FixPlan(
         action="unlink",
-        target="alpha_feature/ 下两类:①PG 全无记录的孤儿 <name>.vN.npy"
-               "(v1.1 放闸,2026-07-12 基线判读后);②点开头 `.*.npy.tmp` 且 "
-               "mtime>24h 的 pack 崩溃残渣",
+        target="alpha_feature/ 下两类:①PG 全无记录的孤儿 <name>.vN.npy;"
+               "②点开头 `.*.npy.tmp` 且 mtime>24h 的 pack 崩溃残渣",
         keeps="不碰任何 PG 有记录因子的 feature、不碰 alien 不合式文件(只报告)、"
               "不碰 alpha_pnl 孤儿(无判读材料,仍只报告)、不碰 PG",
     ),
