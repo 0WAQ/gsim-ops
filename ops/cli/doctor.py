@@ -43,14 +43,10 @@ def add_doctor_subparser(subparsers: argparse._SubParsersAction):
 Example:
     ops doctor                        # 全族只读对账报告(零 sudo、零写)
     ops doctor --family pool-ghost    # 只看指定族(可重复)
-    ops doctor --fix snapshot-stale   # 修复指定族(先扫描,逐族确认后执行)
-    ops doctor --format json          # 全量明细 JSON(人读表格转 stderr)
+    ops doctor --fix snapshot-stale   # 修复指定族(逐族确认后执行)
 
-检查族: {', '.join(FAMILY_IDS)}
-可修复: {', '.join(FIXABLE_IDS)}(其余 report-only,报告内附转介命令)
-scope=host 的族(dump-orphan)只看本机 sidecar —— 各机各跑。
-退出码: 0=无 FAIL 级漂移;1=有(--fix 后按余量);2=用法错误/PG 不可达。
-族注册表: ops/services/doctor/checks.py(新增族 = 加一行)。
+可修复: {', '.join(FIXABLE_IDS)}(其余 report-only)。
+退出码: 0=无 FAIL;1=有;2=用法错误/PG 不可达。
 """,
     )
     parser.add_argument("--family", action="append", choices=list(FAMILY_IDS),

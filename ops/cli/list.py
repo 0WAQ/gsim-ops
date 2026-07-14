@@ -173,13 +173,12 @@ def add_list_subparser(subparser: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparser.add_parser(
         "list",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="List factors in the library",
+        help="列出因子库中的因子",
         epilog="""\
 Example:
-    ops list              # List all factors
-    ops list -u wbai      # List factors by author
-    ops list --sort-by shrp  # Sort by Sharpe ratio
-    ops list --format json
+    ops list -u wbai                        # 按作者过滤
+    ops list --sort-by shrp -n 10           # 按夏普排序取前 10
+    ops list --filter-by "ret>30,tables=ashare*"   # 按指标/数据源过滤
 """,
     )
 

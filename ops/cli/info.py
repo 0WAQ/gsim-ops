@@ -87,7 +87,7 @@ def add_info_subparser(subparser: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparser.add_parser(
         "info",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="Show factor details",
+        help="显示单个因子详情",
         epilog="""\
 Example:
     ops info AlphaWbaiMomentum

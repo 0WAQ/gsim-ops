@@ -10,11 +10,12 @@ def add_submit_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "submit",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="从 dropbox 提交因子到 staging",
         epilog="""\
 Example:
-    ops submit -u wbai -s 20260101 -e 20260101
-    ops submit -u wbai -s 20260101 -f AlphaWbaiXxx
-    ops submit -u wbai -s 20260101 --overwrite   # 已入库因子改提新代码 (version+1)
+    ops submit -u wbai -s 20260101              # 某日全部因子
+    ops submit -u wbai -s 20260101 -f AlphaWbaiXxx    # 单个因子
+    ops submit -u wbai -s 20260101 --overwrite  # 已入库改提新代码 (version+1)
 """,
     )
 

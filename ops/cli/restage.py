@@ -9,21 +9,12 @@ def add_restage_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "restage",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="把已入库因子召回 staging,等待重跑 check(原代码不变)",
+        help="召回已入库因子到 staging 重跑 check(原代码不变)",
         epilog="""\
 Example:
-    ops restage AlphaWbaiFoo                  # 单因子,询问确认
-    ops restage AlphaWbaiFoo -y               # 跳过确认
-    ops restage AlphaWbaiFoo --purge          # 同时清除 dump + feature(pnl 保留)
-    ops restage -u wbai                       # 批量:wbai 所有 active 因子
-    ops restage -u wbai -s rejected           # 批量:wbai 所有 rejected 因子
-
-来源状态:
-  active   ← alpha_src/<name>/
-  rejected ← alpha_src/<name>/
-
-默认仅搬源 + 翻状态,alpha_dump / alpha_feature / alpha_pnl 保留。
-搬回 staging 后需 ops check 才真正重跑;version 不变。
+    ops restage AlphaWbaiFoo                 # 单因子,询问确认
+    ops restage AlphaWbaiFoo --purge         # 同时清 dump + feature(pnl 保留)
+    ops restage -u wbai -s rejected          # 批量:wbai 所有 rejected 因子
 """,
     )
 

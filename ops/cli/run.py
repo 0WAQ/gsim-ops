@@ -8,11 +8,12 @@ def add_run_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "run",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="在因子库中跑回测",
         epilog="""\
 Example:
-    ops run -f AlphaWbaiFoo                        # run one factor (full history)
-    ops run -f AlphaWbaiFoo -s 20250101 -e 20250131   # custom date range
-    ops run -u wbai                                # run all factors by user
+    ops run -f AlphaWbaiFoo                     # 单因子,全历史
+    ops run -f AlphaWbaiFoo -s 20250101 -e 20250131   # 指定区间
+    ops run -u wbai                             # 跑某作者全部因子
 """,
     )
 

@@ -9,18 +9,12 @@ def add_cancel_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "cancel",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="撤回未入库的因子(staging 里的 submitted)",
+        help="撤回未入库的 submitted 因子",
         epilog="""\
 Example:
-    ops cancel AlphaWbaiFoo            # 单因子,询问确认
-    ops cancel AlphaWbaiFoo -y         # 跳过确认
-    ops cancel AlphaWbaiFoo --force    # 同时允许 CHECKING(清崩溃残留)
-    ops cancel -u wbai                 # 批量:wbai 所有 submitted 因子
-    ops cancel -u wbai -y              # 批量,跳过确认
-
-适用状态: submitted(--force 也允许 checking)。
-清理: 删 staging/<name>/ + 硬删 state record。
-因子从未 ACTIVE 过,不留 tombstone(区别于 ops rm)。
+    ops cancel AlphaWbaiFoo           # 单因子,询问确认
+    ops cancel AlphaWbaiFoo --force   # 同时允许 CHECKING(清崩溃残留)
+    ops cancel -u wbai                # 批量:wbai 所有 submitted 因子
 """,
     )
 

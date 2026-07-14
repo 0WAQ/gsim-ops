@@ -133,12 +133,12 @@ def add_status_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "status",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="查询因子生命周期状态",
         epilog="""\
 Example:
-    ops status                       # all factors
-    ops status AlphaWbaiReversal     # one factor (with check history)
-    ops status -u wbai               # filter by author
-    ops status -s/--status active    # filter by lifecycle status
+    ops status AlphaWbaiReversal     # 单因子(含检测历史)
+    ops status -u wbai               # 按作者过滤
+    ops status -s active             # 按状态过滤
 """,
     )
 

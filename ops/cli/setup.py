@@ -30,22 +30,12 @@ def add_setup_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "setup",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="拉平本机 alphalib 部署(幂等补建;--check 只读体检)",
+        help="拉平本机 alphalib 部署(--check 只读体检)",
         epilog="""\
 Example:
-    ops setup                  # 按声明拉平本机:补建缺失的目录/软链/权限组(幂等)
-    ops setup --check          # 只看不动:✔/✘/⚠ 清单 + 退出码(验收/巡检)
-    ops setup --migrate-mount  # 声明变更收敛:JFS 挂载点迁到 hosts 声明位置
-
-像 uv sync 之于 python 项目:部署声明在 config.yaml(hosts 块按 hostname
-匹配挂载点),一条命令让本机就绪,之后 ops 开箱即用。
-FAIL = 存储部署错误(任何节点必须绿);WARN = 角色相关(worker 无 dropbox、
-纯投递机无 gsim 属正常)。退出码:有 FAIL → 1。
-补建铁律:缺省 setup 只创建缺失,绝不改动已存在的东西(顶层权限对齐除外,
-照 scripts/juicefs-poc/02-layout.sh 模型);**声明变更的收敛动作全部藏在显式
-flag 后**(--migrate-mount:重渲染 unit + 重挂 + 搬 sidecar,失败自动回滚,
-旧址报告不删)。JFS 首次接入仍归 join.sh。
-项目注册表:ops/services/setup/checks.py(新增检查 = 加一行)。
+    ops setup                  # 按声明补建缺失的目录/软链/权限组(幂等)
+    ops setup --check          # 只读体检:✔/✘/⚠ 清单 + 退出码
+    ops setup --migrate-mount  # JFS 挂载点迁到 hosts 声明位置
 """,
     )
     parser.add_argument("--check", action=_CheckAction,

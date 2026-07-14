@@ -9,18 +9,12 @@ def add_clear_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "clear",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="清理 staging 里的孤儿目录(state 无 record)",
+        help="清理 staging 孤儿目录(state 无 record)",
         epilog="""\
 Example:
-    ops clear AlphaLhwFoo         # 单孤儿,询问确认
-    ops clear                     # 扫全部孤儿,询问确认
-    ops clear -u lhw              # 仅 lhw 推断作者的孤儿
-    ops clear -u lhw -y           # 跳过确认
-
-孤儿 = staging/<name>/ 存在 但 state 无 record。
-来源: ops submit 中 parse_factor 失败留下的残骸。
-
-state 中有 record 的(SUBMITTED / CHECKING)请用 ops cancel。
+    ops clear                    # 扫全部孤儿,询问确认
+    ops clear AlphaLhwFoo        # 单孤儿
+    ops clear -u lhw -y          # 仅 lhw 推断作者的孤儿,跳过确认
 """,
     )
 

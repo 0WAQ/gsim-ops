@@ -9,11 +9,12 @@ def add_check_subparser(subparser: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparser.add_parser(
         "check",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="对 staging 因子跑验证流水线",
         epilog="""\
 Example:
-    ops check                       # check all factors in staging/
-    ops check -u wbai               # filter by submitted_by
-    ops check -f AlphaWbaiReversal  # check one factor by name
+    ops check                       # 检测 staging 全部因子
+    ops check -u wbai               # 按作者过滤
+    ops check -f AlphaWbaiReversal  # 检测单个因子
 """,
     )
 

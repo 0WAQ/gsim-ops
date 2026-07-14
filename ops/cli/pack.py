@@ -8,16 +8,12 @@ def add_pack_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "pack",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="聚合 alpha_dump 为 alpha_feature 矩阵",
         epilog="""\
 Example:
     ops pack                         # 增量打包未处理的因子
-    ops pack --dry-run               # 预览待打包因子
-    ops pack --force                 # 强制重写全部
     ops pack --factor AlphaXxx       # 只打包指定因子
-    ops pack -u wbai                 # 只打包 wbai 的因子
-    ops pack -u wbai -s active       # 只打包 wbai 的 active 因子
-    ops pack --workers 16            # 并行度
-    ops pack --no-verify             # 跳过抽样校验
+    ops pack --force                 # 强制重写全部
 """,
     )
 
