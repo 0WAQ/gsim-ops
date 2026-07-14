@@ -1,4 +1,4 @@
-"""三表 schema 引导 —— DDL 的唯一代码入口(2026-07-09 滚出 store __init__)。
+"""三表 schema 引导 —— DDL 的唯一代码入口(已滚出 store __init__)。
 
 原先三个 PG store 各自在 `__init__` 里 ensure_schema:构造带副作用,且 FK 依赖
 序靠"恰好 info 先被构造"维持(空库上先建 factor_state 会因内联 FK 引用

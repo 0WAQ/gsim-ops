@@ -1,6 +1,6 @@
 """factor_snapshot 表的 store 抽象(数据形态已迁 core)。
 
-数据类 2026-07-09 迁 `ops/core/factor.py::FactorSnapshot`(Factor 聚合的快照
+数据类已迁 `ops/core/factor.py::FactorSnapshot`(Factor 聚合的快照
 切面;core 不能 import infra,聚合切面必须住 core)。此处 re-import 保住
 `from ops.infra.snapshot import FactorSnapshot` 的存量路径。语义不变:入库时
 不可变快照,只有 insert(check 通过时)和 delete(离库时),没有 update。
@@ -34,7 +34,7 @@ class SnapshotStore(ABC):
         """删除因子快照(rm / restage / overwrite 离库时)。
 
         返回 True 表示行存在且已删除(与 StateStore/InfoStore 的 delete 契约
-        对齐,full-review D3 —— 同一动词一种返回约定)。"""
+        对齐 —— 同一动词一种返回约定)。"""
 
     @abstractmethod
     def list(

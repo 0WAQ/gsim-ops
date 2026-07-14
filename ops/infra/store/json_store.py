@@ -54,7 +54,7 @@ class JsonStateStore(StateStore):
                 fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
     def _read_raw(self) -> dict[str, dict]:
-        """原始 dict 形态。check_history 键由 store 管理(v2c:FactorRecord
+        """原始 dict 形态。check_history 键由 store 管理(FactorRecord
         已剥离该字段,from_dict 会丢弃它 —— 写回时必须从 raw 保留)。"""
         return json.loads(self.path.read_text() or "{}")
 
@@ -94,8 +94,8 @@ class JsonStateStore(StateStore):
             self._atomic_write(raw)
 
     def list(self, status: FactorStatus | None = None) -> list[FactorRecord]:
-        # author 过滤已删:FactorRecord 无 author 字段,原实现 r.author 直接
-        # AttributeError(坏回退的一部分,full-review P0-2)。author 走 InfoStore。
+        # author 过滤已删:FactorRecord 无 author 字段,r.author 直接
+        # AttributeError。author 走 InfoStore。
         with self._locked():
             out = list(self._read_records().values())
         if status is not None:
@@ -106,7 +106,7 @@ class JsonStateStore(StateStore):
                    expect: FactorStatus | None = None,
                    op: str | None = None, actor: str | None = None,
                    **updates) -> FactorRecord:
-        # op/actor 接受并忽略:dev/test 后端无事件表(schema v2b),审计走 PG
+        # op/actor 接受并忽略:dev/test 后端无事件表,审计走 PG
         with self._locked():
             raw = self._read_raw()
             if name not in raw:

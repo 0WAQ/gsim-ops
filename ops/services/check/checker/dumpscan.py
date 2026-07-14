@@ -1,16 +1,15 @@
 """check 工作区 alpha_dump 目录的扫描函数(compliance / checkpoint 两个
 checker 共用)。
 
-2026-07-11 自 core/alpha/metadata.py 迁出:AlphaMetadata 是领域类型,不该带
-盘面 I/O(full-review "core 的文件 I/O",与 Factor 聚合同一条分层原则);
-扫的又是 check 期工作区(gsim dump 输出),消费方只有本包 —— 落地在此。
+不放 core/alpha/metadata.py:AlphaMetadata 是领域类型,不该带盘面 I/O
+(与 Factor 聚合同一条分层原则);扫的又是 check 期工作区(gsim dump 输出),
+消费方只有本包 —— 落地在此。
 
 gsim dump 盘面布局:<alpha_dir>/<YYYY>/<MM>/<yyyymmdd>.*v{1,2}.npy。
 (同一布局的另两份走查在 core/library.py 的 _count_dump_days /
-_get_dump_date_range —— 那边扫的是入库后的 alpha_dump(doctor 对账域),
-收敛归未来 ops doctor 工程,此处不动。)
+_get_dump_date_range —— 那边扫的是入库后的 alpha_dump(doctor 对账域),此处不动。)
 
-原实现的裸 `except Exception` 吞错已去掉:目录不存在返回空/None 是正常语义
+不裸 `except Exception` 吞错:目录不存在返回空/None 是正常语义
 (glob 天然如此),真正的 OSError 应该冒泡进流水线的 unexpected 臂
 (revert SUBMITTED + 完整日志),而不是静默当"没有文件"。
 """
@@ -32,10 +31,10 @@ def v2npy_files(alpha_dir: Path) -> list[Path]:
 def last_v2npy_file(alpha_dir: Path) -> Path | None:
     """最新月份目录里时序最末的 v2 dump 文件;该月没有 v2 → None。
 
-    **有意不回退更早月份**(评审确认,2026-07-11):checkpoint 用本函数比对
-    断点续跑前后"本次运行刚写出"的同一份 dump,回退会把陈旧残留卷进比较 ——
-    None → CheckSkip(revert SUBMITTED 重试)是正确的保守路由。也因此只 glob
-    最新年/最新月,不物化整棵树。"""
+    **有意不回退更早月份**:checkpoint 用本函数比对断点续跑前后"本次运行刚
+    写出"的同一份 dump,回退会把陈旧残留卷进比较 —— None → CheckSkip
+    (revert SUBMITTED 重试)是正确的保守路由。也因此只 glob 最新年/最新月,
+    不物化整棵树。"""
     years = _digit_dirs(alpha_dir, "[0-9][0-9][0-9][0-9]", reverse=True)
     if not years:
         return None

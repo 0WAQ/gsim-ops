@@ -7,10 +7,10 @@ SUBMITTED,让下一次 ops check 捡起重跑 7 阶段流水线。version 不变
 - ACTIVE   (默认): 源 = alpha_src/<name>/
 - REJECTED        : 源 = alpha_src/<name>/(REJECTED src 与 ACTIVE 同库)
 
-产物按两个面处理(2026-07-08 PV7):
+产物按两个面处理:
 - **check 面**(alpha_pnl + bcorr 池副本 + snapshot):离库即失效,**一律回收**
   —— 旧 pnl 留在池里是"自鬼影"(重检时对自己旧 pnl corr≈1,高相关分支要求
-  打败几乎相同的自己 → 必拒),与"离库删 snapshot"(R1)同构;
+  打败几乎相同的自己 → 必拒),与"离库删 snapshot"同构;
 - **服务面**(alpha_dump / alpha_feature):语义 = 最后一次入库版本的
   last-known-good,生产 combo 在重检窗口内继续消费,**默认保留**;
   --purge = 立即下架(同步清除);REJECTED 召回无服务价值,一律自动清。
@@ -43,8 +43,7 @@ def _locate_source(rec: FactorRecord, repo: FactorRepository) -> Path | None:
 def _resolve_targets(args, repo: FactorRepository) -> list[Factor]:
     name: str | None = args.factor_name
 
-    # 与 approve/cancel/clear 对齐:name 与 -u 互斥(原先静默忽略 -u,是
-    # clone-and-edit 漂移;full-review 第二部分 §3.4)。
+    # 与 approve/cancel/clear 对齐:name 与 -u 互斥(并存会静默忽略 -u)。
     if name and args.user:
         error("  ✘ factor_name 与 -u 互斥")
         return []
@@ -70,8 +69,7 @@ def _resolve_targets(args, repo: FactorRepository) -> list[Factor]:
         error(f"  ✘ --status 仅支持: {', '.join(s.value for s in _SUPPORTED_STATUSES)}")
         return []
 
-    # 单条三表 JOIN(author + status 一并下推;原先 info.list + state.list
-    # 两次查 + 内存交集)
+    # 单条三表 JOIN(author + status 一并下推)
     factors = repo.find(author=args.user, status=status_enum)
     return factors  # find 已按 name 排序
 
@@ -107,8 +105,8 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config,
         )
 
     # 先 move,再 transition:崩在中间留 orphan(reconcile 已下线),必要时人工
-    # 处理。搬运 + @module 重指收编 repo.recall(2026-07-10;存在性/占用校验在
-    # 其内,move 不是 copy —— 召回后 staging 是唯一副本)。
+    # 处理。搬运 + @module 重指收编 repo.recall(存在性/占用校验在其内,move
+    # 不是 copy —— 召回后 staging 是唯一副本)。
     prev_status = rec.status.value
     repo.recall(name)
 
@@ -119,7 +117,7 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config,
             info(f"    ✔ 已删除 {r}")
 
     # check 面(pnl + bcorr 池副本):离库即失效,一律回收 —— 否则重检时
-    # correlation 拿新 pnl 对池里自己的旧 pnl(corr≈1)必拒(自鬼影,PV7)
+    # correlation 拿新 pnl 对池里自己的旧 pnl(corr≈1)必拒(自鬼影)
     for r in repo.purge_artifacts(name, ArtifactScope.CHECK):
         info(f"    ✔ 已回收 {r}")
 
@@ -127,8 +125,8 @@ def _restage_one(rec: FactorRecord, src: Path, config: Config,
     repo.transition(name, FactorStatus.SUBMITTED, expect=rec.status, op="restage")
 
     # 离库 → 旧快照失效。快照语义是"入库事件的不可变快照",re-check 通过后 archive
-    # 会写新快照;不删则 insert 撞 name UNIQUE 被吞,反查/报告永远停在旧代码的指标
-    # (full-review P0-1)。删失败不阻断(archive 侧有 stale 自愈兜底)。
+    # 会写新快照;不删则 insert 撞 name UNIQUE 被吞,反查/报告永远停在旧代码的指标。
+    # 删失败不阻断(archive 侧有 stale 自愈兜底)。
     try:
         repo.discard_snapshot(name)
     except Exception as e:

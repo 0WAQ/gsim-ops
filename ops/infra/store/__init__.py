@@ -17,9 +17,8 @@ def default_store(config: Config) -> StateStore:
     - postgres: 生产真相源 (factor_state 表)。
     - json: 单机 dev/test 后端 (fcntl 锁 + 原子写) —— **不是生产回退**。
 
-    2026-07-07 Wave 1: redis 后端删除。它自 2026-07-06 三表拆分起就与
-    FactorRecord 不兼容 (读写已删的 author/submitted_by, 每次 put 必
-    AttributeError), 作为"紧急回退"是假保险 (full-review P0-2/G1)。
+    redis 后端已删除:三表拆分后它与 FactorRecord 不兼容 (读写已删的
+    author/submitted_by, 每次 put 必 AttributeError), 作为"紧急回退"是假保险。
     Redis-sentinel 实例本身是 JFS metadata 后端, 与 ops 无关, 不受影响。
     """
     backend = (getattr(config, "state_backend", None) or "json").lower()

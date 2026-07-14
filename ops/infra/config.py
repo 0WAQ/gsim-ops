@@ -24,7 +24,7 @@ def get_default_config_path() -> Path:
     3. {project_root}/config.yaml
 
     config.yaml = 生产默认 (JFS 路径 + Postgres state)。没有回退配置 ——
-    config.prod-legacy.yaml 已于 2026-07-07 Wave 1 删除 (假保险)。
+    config.prod-legacy.yaml 已删除 (假保险)。
     """
     # 1. Environment variable
     env_config = os.environ.get("OPS_CONFIG")
@@ -104,32 +104,30 @@ class Config:
         self.timeout: int = config["mode"]["timeout"]
 
         # library_id: ~/.cache/ops/lib/ 下的命名空间键。历史上住在 sync 段;
-        # sync 栈已于 2026-07-07 退役 (Wave 1, JOURNAL F1),仅存此键
-        # (G-wave 时迁到顶层)。
+        # sync 栈已退役 (JOURNAL F1),仅存此键。
         sync_cfg: dict[str, Any] = config.get("sync") or {}
         self.library_id: str = sync_cfg.get("library_id") or self.alpha_src.parent.name
 
         # state backend: postgres (生产真相源) | json (单机 dev/test)。
-        # 2026-07-07 Wave 1: redis 后端删除 —— 三表拆分后它与 FactorRecord 不
-        # 兼容,作为"紧急回退"是假保险 (full-review P0-2/G1)。承载它的
-        # redis-sentinel 实例是 JFS metadata 后端,与 ops 无关,不受影响。
+        # redis 后端已删除 —— 三表拆分后它与 FactorRecord 不兼容,作为"紧急
+        # 回退"是假保险。承载它的 redis-sentinel 实例是 JFS metadata 后端,
+        # 与 ops 无关,不受影响。
         state_cfg: dict[str, Any] = config.get("state") or {}
         self.state_backend: str = state_cfg.get("backend") or "json"
 
-        # state.postgres backend (single source of truth, migrated from redis
-        # 2026-07-04). Password resolution:
+        # state.postgres backend (single source of truth). Password resolution:
         # postgres.password (literal) > password_env > password_file.
         state_pg_cfg: dict[str, Any] = state_cfg.get("postgres") or {}
         self.state_postgres_conninfo: str | None = self._build_pg_conninfo(state_pg_cfg)
 
-        # 锁命名空间注入口(I2,2026-07-11)—— **仅测试用**。生产一律走 lock.py
-        # 的固定缺省 'ops:factor_lock':S18 的教训就是锁键随 config 漂移会让跨机
-        # 互斥无声失效,生产 config 绝不能设置本键。测试夹具把它设成本 session
-        # 的 PG schema 名,使并行 pytest 进程的 advisory lock 互不干扰
-        # (advisory lock 是库级作用域,schema 隔离挡不住它)。
+        # 锁命名空间注入口 —— **仅测试用**。生产一律走 lock.py 的固定缺省
+        # 'ops:factor_lock':锁键随 config 漂移会让跨机互斥无声失效,生产
+        # config 绝不能设置本键。测试夹具把它设成本 session 的 PG schema 名,
+        # 使并行 pytest 进程的 advisory lock 互不干扰(advisory lock 是库级
+        # 作用域,schema 隔离挡不住它)。
         self.lock_namespace: str | None = state_cfg.get("lock_namespace")
 
-        # (derived 层配置随僵尸层删除, 2026-07-07 Wave 2, JOURNAL V2:
+        # (derived 层配置随僵尸层删除, JOURNAL V2:
         #  metrics/datasources/bcorr 在 factor_snapshot,index 缓存不复存在。)
 
     @staticmethod
@@ -170,9 +168,9 @@ class Config:
         ]
         if pwd:
             parts.append(f"password={pwd}")
-        # options 透传(I2,2026-07-11):libpq 命令行选项,如
-        # `-csearch_path=t_xxx`(测试的 per-session schema 隔离用)。
-        # 值不能含空格(conninfo 不做引号转义);生产 config 不设置本键。
+        # options 透传:libpq 命令行选项,如 `-csearch_path=t_xxx`(测试的
+        # per-session schema 隔离用)。值不能含空格(conninfo 不做引号转义);
+        # 生产 config 不设置本键。
         opts = pg_cfg.get("options")
         if opts:
             parts.append(f"options={opts}")
@@ -184,16 +182,15 @@ class Config:
     ) -> tuple[dict[str, Any], bool | None, list[str]]:
         """Resolve ${var_name} references in config values.
 
-        变量优先级(2026-07-11 hosts 声明,ops setup 配套):
+        变量优先级:
         **OPS_* 环境变量 > hosts[本机 hostname] > vars 基础值**。
         hosts 块按 hostname 精确匹配,覆盖 vars 同名项 —— 每台机器的挂载点
         差异进配置,同一份 config.yaml 四机零环境变量可用。
 
         返回 (resolved_raw, host_matched, env_overrides):host_matched 为
         None(无 hosts 块)/ False(有块未命中)/ True(命中);env_overrides
-        是生效的 OPS_* 覆盖键列表 —— 供 `ops setup` 显性提示(2026-07-11
-        实证的坑:170 残留旧 OPS_ALPHALIB_ROOT 静默压掉 hosts 声明,
-        迁移目标解析错;env 优先是刻意的逃生口,但必须可见)。
+        是生效的 OPS_* 覆盖键列表 —— 供 `ops setup` 显性提示(env 优先是刻意
+        的逃生口,但必须可见:残留旧 OPS_* 会静默压掉 hosts 声明)。
         """
         vars_block = raw.pop("vars", {})
         hosts_block = raw.pop("hosts", None)

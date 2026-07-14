@@ -4,12 +4,12 @@
   - alpha_src/<name>/           源码目录 (唯一代码副本)
   - staging/<name>/             在途副本 (restage/overwrite 召回的因子在此;不清则
     记录级联删除后必成孤儿,且 ops check 按 staging 目录扫描会自动补建记录**复活**
-    刚删的因子 —— 2026-07-09 评审发现,JOURNAL U3)
+    刚删的因子 —— 见 JOURNAL U3)
   - alpha_pnl/<name>            回测 PNL (单文件)
   - alpha_dump/<name>/          日频目标持仓目录
   - alpha_feature/<name>.*.npy  聚合 feature
   - pnl_automated|pnl_manual/<name>  bcorr 分流池副本 (to_lib 写入;不清则已删
-    因子的 pnl 永远留在对比池里参与后续因子的 bcorr,生产验证 L3-7 实测泄漏)
+    因子的 pnl 永远留在对比池里参与后续因子的 bcorr)
   - factor_info PG 行           身份信息 (级联删除 state + snapshot)
 
 没有软删/墓碑:因子被 rm 后即不存在 (要恢复只能重新 ops submit)。
@@ -28,8 +28,8 @@ def run_rm(args) -> None:
     config: Config = Config.load(args.config_path)
     repo = FactorRepository(config)
 
-    # 存在性判据 = factor_info(三表之根;repo.get 的 None 语义)。原先"问
-    # state"会漏掉有 info 无 state 的异常孤儿 —— 那正是 rm 该能清走的东西。
+    # 存在性判据 = factor_info(三表之根;repo.get 的 None 语义)。问 state 会
+    # 漏掉有 info 无 state 的异常孤儿 —— 那正是 rm 该能清走的东西。
     factor = repo.get(name)
     if factor is None:
         error(f"  ✘ 因子 {name} 不存在(factor_info 无记录)")
@@ -68,7 +68,7 @@ def run_rm(args) -> None:
 
             # 在途副本:restage/overwrite 召回的因子代码在 staging。记录删除后
             # 该目录必成孤儿,且 ops check 按 staging 扫描会自动补建记录,把刚
-            # 删的因子复活重新入库 —— rm 的"全落点"语义必须含它(JOURNAL U3)。
+            # 删的因子复活重新入库 —— rm 的"全落点"语义必须含它(见 JOURNAL U3)。
             if repo.unstage(name):
                 info(f"  ✔ 已删除 staging/{name}/")
 

@@ -23,8 +23,8 @@ from ops.utils.printer import banner, bottom, error, highlight, info, warn
 
 
 def _eligible(f: Factor) -> bool:
-    # 语义 API:谓词在 Factor 聚合上(v2b 起需要 state + last_fail 两个切面 ——
-    # "最近失败"是 factor_history 的派生事实,FactorRecord 已无 last_fail_*)
+    # 语义 API:谓词在 Factor 聚合上(需要 state + last_fail 两个切面 ——
+    # "最近失败"是 factor_history 的派生事实,FactorRecord 无 last_fail_*)
     return f.correlation_rejected()
 
 
@@ -52,8 +52,7 @@ def _resolve_targets(args, repo: FactorRepository) -> tuple[list[Factor], list[t
         error("  ✘ 必须指定 factor_name 或 -u")
         return [], []
 
-    # 批量模式:单条三表 JOIN(author + REJECTED 一并下推;原先 info.list +
-    # state.list 两次查 + 内存交集)
+    # 批量模式:单条三表 JOIN(author + REJECTED 一并下推)
     factors = repo.find(author=args.user, status=FactorStatus.REJECTED)
     targets: list[Factor] = []
     skipped: list[tuple[Factor, str]] = []
@@ -83,11 +82,11 @@ def _approve_one(f: Factor, repo: FactorRepository) -> None:
 
     now = _now()
     # CAS: 只允许 REJECTED → ACTIVE(FOR UPDATE 行锁内校验;expect 不符抛
-    # StateConflict,由批量骨架按'跳过'处理)。原 transition 无 from-status
-    # 守卫,任何状态都能被翻成 ACTIVE(full-review 第三部分 §3.2)。
+    # StateConflict,由批量骨架按'跳过'处理)。无 from-status 守卫的 transition
+    # 会让任何状态都能被翻成 ACTIVE。
     # 事件:op='approve'(豁免决定,含 actor)+ 自动 'entered'(入库统一标记)
-    # —— 原先伪造一条 passed=True 的 CheckRecord 留痕,v2b 起审计有真名分,
-    # check 时间线不再混入非 check 事件。
+    # —— 审计有真名分,不伪造 passed=True 的 CheckRecord,check 时间线不混入
+    # 非 check 事件。
     repo.transition(
         name,
         FactorStatus.ACTIVE,
@@ -120,7 +119,7 @@ def run_approve(args) -> BatchResult | None:
 
     def _action(name: str) -> None:
         # 锁内复验(TOCTOU):确认挂起期间因子可能已被 restage 召回 / rm 删除。
-        # repo.get(全景,含 last_fail 派生)—— 资格谓词 v2b 起需要两个切面
+        # repo.get(全景,含 last_fail 派生)—— 资格谓词需要两个切面
         fresh = repo.get(name)
         if fresh is None or fresh.state is None:
             raise SkipFactor("记录已不存在")
