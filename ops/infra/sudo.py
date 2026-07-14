@@ -21,14 +21,12 @@ import os
 import shutil
 import sys
 
-# 写命令集不再手抄(S16 收编,2026-07-10 阶段 3 第二批):每个写子命令在
-# 注册处 `mark_write(parser)` 声明(ops/cli/common.py),parse 后落在
-# args.is_write_command 上,本模块只消费该声明 —— 单一定义,新增写命令
-# 漏声明会在 JFS 环境首次写时 EACCES 响亮暴露(而非静默绕过提权)。
-# (原 WRITE_COMMANDS 手抄集合是多真相源;`run` 曾缺席名单,full-review 1.2。)
+# 写命令集是声明派生,不手抄:每个写子命令在注册处 `mark_write(parser)`
+# 声明(ops/cli/common.py),落在 args.is_write_command 上,本模块只消费。
+# 单一定义 —— 新增写命令漏声明会在 JFS 环境首次写时 EACCES 响亮暴露,而非
+# 静默绕过提权。别退回手抄集合(多真相源,漏声明即静默绕过提权)。
 
 # 这些环境变量在 sudo 提权时必须保留 (sudo 默认 strip 用户 env)。
-# (OPS_STATE_REDIS_PASSWORD 随 redis state 后端退役移除, Wave 1 F2。)
 _PRESERVE_ENV = [
     "OPS_CONFIG",
     # OPS_* prefix vars consumed by Config._resolve_vars
@@ -75,8 +73,8 @@ def maybe_elevate(args) -> None:
 
     ops_bin = shutil.which("ops") or sys.argv[0]
     env_list = ",".join(_PRESERVE_ENV)
-    # 只用 --preserve-env=<白名单>,不加 -E:-E 会保留整个用户环境,让精心
-    # 维护的白名单形同虚设 (full-review 第一部分 sudo.py:154 项, 2026-07-07 修)。
+    # 只用 --preserve-env=<白名单>,不加 -E:-E 会保留整个用户环境,让白名单
+    # 形同虚设。
     sudo_argv = [
         "sudo",
         f"--preserve-env={env_list}",

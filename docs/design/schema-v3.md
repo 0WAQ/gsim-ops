@@ -84,13 +84,19 @@ compliance 22 条可选人工补跑;snapshot_at = 对应 check 事件的 at。
   (现 81 个 fguo,07-10 凌晨成因不明的批量写;用户拍板:不追,直接改);
 - 迁移合成 submit 事件的 at 同步修正(81 条 timeline 倒挂随上条消解)。
 
-## 四、独立排期(不在本批)
+## 四、独立排期(不在本批)—— ✅ 已于 2026-07-13 legacy 清理批全部落地
 
 - **legacy 老因子档案清理批**(用户点名"找个时间一起解决"):
   created_at/submitted_at 全量对账、`discovery_method='backfill'` 存量正名、
   各类 NULL 盘点(submitted_at/author='unknown' 等);
 - **`ops backfill` 护栏/退役**:bootstrap 已完成,正常流程不再产生补录;
   现状留着反而是 src 孤儿复活风险(doctor v1 警告过)。
+
+> **落地(2026-07-13,PR #19)**:472 snapshot_at 漂移拉正 + compliance 22 快照补跑 +
+> discovery_method 129 归一并 **NOT NULL 收口**('backfill'/NULL 退役,值按 pnl 池
+> 位置 + 人工名单判)+ `ops backfill` **退役删除** + doctor 加第八族 timeline-drift
+> (created_at <= submitted_at 不变量)。设计/执行见 `docs/design/legacy-cleanup.md` +
+> `docs/remediation/VERIFY-LEGACY-CLEANUP{,-RESULT}.md`。
 
 ## 五、明确不做(定案,防回潮)
 
@@ -108,7 +114,7 @@ compliance 22 条可选人工补跑;snapshot_at = 对应 check 事件的 at。
 - created_at := submitted_at 数据修正(81 违反者,成因不追);
 - legacy 老因子档案清理独立成批("找个时间一起解决")。
 
-仍待拍板:`ops list` 混排时加 status 列(可选顺手项,实施时一并定)。
+~~仍待拍板:`ops list` 混排时加 status 列~~ ✅ **已拍板并实施**(2026-07-13 legacy 批):结果集含被拒因子时表格显式插入 status 列(与 fail_stage 列同触发;纯 ACTIVE 列表不加)。
 
 ## 七、实施顺序
 

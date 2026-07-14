@@ -1,9 +1,8 @@
 """gsim XML 配置读写的唯一入口。
 
 写格式统一为 `xmltodict.unparse(pretty=True, encoding="utf-8", full_document=False)`:
-此前 7 处调用点(check / restage / run / submit.normalize / checkbias_checker /
-xml_prepare)各手抄一份 unparse 参数,任何一处漏 `full_document=False` 就会给
-XML 加 `<?xml?>` 声明头,格式静默漂移 —— 属 full-review S 组"同一事实多处手抄"。
+别在调用点各手抄一份 unparse 参数 —— 漏 `full_document=False` 就会给 XML 加
+`<?xml?>` 声明头,格式静默漂移。
 """
 from pathlib import Path
 

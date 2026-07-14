@@ -8,7 +8,7 @@ from ops.utils.xmlio import load_xml
 from .key import AlphaKey
 
 if TYPE_CHECKING:
-    # 仅类型引用:core 不得运行期依赖 infra(import-linter C1)。Config 实例
+    # 仅类型引用:core 不得运行期依赖 infra(import-linter)。Config 实例
     # 由调用方传入,这里只消费其路径属性。
     from ops.infra.config import Config
 
@@ -48,5 +48,5 @@ class AlphaMetadata:
             if old and old.startswith("/datasvc/data/cc/"):
                 item["@niodatapath"] = nio_data_path + "/" + old[len("/datasvc/data/cc/"):]
 
-    # alpha_dump 工作区扫描(get_v2npy_files / get_last_v*npy_file)2026-07-11
-    # 迁出至 services/check/checker/dumpscan.py:领域类型不带盘面 I/O。
+    # alpha_dump 工作区扫描迁出至 services/check/checker/dumpscan.py:
+    # 领域类型不带盘面 I/O。

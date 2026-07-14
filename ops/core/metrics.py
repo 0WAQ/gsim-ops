@@ -52,7 +52,7 @@ class MetricSpec:
     absolute: bool = False
 
 
-# metric 事实族的唯一定义(SSOT S8):键集 + 每键的取值语义。
+# metric 事实族的唯一定义(SSOT):键集 + 每键的取值语义。
 # 三个消费方全部由此派生,不再各抄一份:
 #   - SQL 下推表达式:infra/snapshot/pg_store._prefixed_metric_expr
 #   - 内存取值(过滤/排序兜底):下方 metric_value,services/list 用

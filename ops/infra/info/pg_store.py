@@ -1,8 +1,7 @@
 """PostgreSQL 实现 factor_info store.
 
-DDL 不在本类执行(2026-07-09 滚出 __init__,factor-aggregate-plan 阶段 2):
-schema 归 `ops/infra/schema.py::ensure_schemas`(FK 依赖序引导)+ 生产的
-scripts/postgres 迁移;store 构造零副作用。
+DDL 不在本类执行:schema 归 `ops/infra/schema.py::ensure_schemas`(FK 依赖序
+引导)+ 生产的 scripts/postgres 迁移;store 构造零副作用。
 """
 from ops.infra.pg import get_pool, ts_in, ts_out
 from ops.utils.clock import now_iso
@@ -41,9 +40,9 @@ class PostgresInfoStore(InfoStore):
                 name=row[0],
                 author=row[1],
                 discovery_method=row[2],
-                # ts_out 与 repository._row_to_factor 同一套边界转换:原先此处
-                # 直接 isoformat 带 +08:00 后缀,repo.get 与 repo.find 拿到的
-                # identity.created_at 格式不一致(收官核对项,2026-07-11)。
+                # ts_out 与 repository._row_to_factor 同一套边界转换,保证
+                # repo.get 与 repo.find 拿到的 identity.created_at 格式一致
+                # (直接 isoformat 会带 +08:00 后缀,两条读路径不一致)。
                 created_at=ts_out(row[3]),
             )
 

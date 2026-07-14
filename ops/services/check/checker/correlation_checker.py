@@ -72,7 +72,7 @@ class CorrelationChecker(Checker):
         if corrs is None:
             raise CheckSkip("bcorr 运行失败")
         # 排除自己:restage/--overwrite 若有旧 pnl 残留在池里,自相关≈1 会把
-        # 重检因子挡死("打败几乎相同的自己"不可能)。离库回收(PV7)是主修,
+        # 重检因子挡死("打败几乎相同的自己"不可能)。离库回收是主修,
         # 此处是防删除失败残留的双保险 —— 因子永远不该和自己比相关性。
         corrs = [(n, c) for n, c in corrs if n != factor.name]
         if not corrs:
@@ -86,8 +86,8 @@ class CorrelationChecker(Checker):
         # 3. 判断是否满足要求
         violations = self._gate_violations(metrics, factor.delay)
         if violations:
-            # 业绩门槛失败:reason 文本格式不变,result 携带测得值
-            # (bcorr 此时已算出,corrs[-1] 是排序后的最大值)—— schema v3
+            # 业绩门槛失败:result 携带测得值
+            # (bcorr 此时已算出,corrs[-1] 是排序后的最大值)
             max_f, max_c = corrs[-1]
             raise CheckFail(f"{'; '.join(violations)} | {metrics}",
                             result=CorrResult(metrics, max_c, max_f))
@@ -111,7 +111,7 @@ class CorrelationChecker(Checker):
 
             # 未打败
             if not self._check_beat(metrics, competitor_metrices):
-                # reason = str(CorrResult)(文本不变),result 同对象(v3)
+                # reason = str(CorrResult),result 同对象
                 _cr = CorrResult(
                     metrics,
                     max_corr, max_corr_factor,

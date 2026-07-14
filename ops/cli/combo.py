@@ -9,17 +9,14 @@ def add_combo_subparser(subparser: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparser.add_parser(
         "combo",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="combo 端到端代测(predict + backtest)",
         epilog="""\
 Example:
-    # 模型型 (有 predict/): predict 留 warmup 从 12-01, 回测 12-10~12-31, 只跑 simple
+    # 模型型 (有 predict/): 留 warmup, 只跑 simple
     ops combo run path/to/CombolhwEqualV23 --start 20241210 --end 20241231 \\
         --predict-start 20241201 --stats simple
-
     # 纯线性 (无 predict/): 直接回测全段
-    ops combo run path/to/ComboLinear --start 20240102 --end 20241231 --stats simple
-
-    # 全部 stats
-    ops combo run path/to/combo --start 20250102 --end 20251231
+    ops combo run path/to/ComboLinear --start 20240102 --end 20241231
 """,
     )
     sub = parser.add_subparsers(title="combo command", dest="combo_cmd", required=True)

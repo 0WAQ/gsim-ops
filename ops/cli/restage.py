@@ -9,21 +9,12 @@ def add_restage_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "restage",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="把已入库因子召回 staging,等待重跑 check(原代码不变)",
+        help="召回已入库因子到 staging 重跑 check(原代码不变)",
         epilog="""\
 Example:
-    ops restage AlphaWbaiFoo                  # 单因子,询问确认
-    ops restage AlphaWbaiFoo -y               # 跳过确认
-    ops restage AlphaWbaiFoo --purge          # 同时清除 dump + feature(pnl 保留)
-    ops restage -u wbai                       # 批量:wbai 所有 active 因子
-    ops restage -u wbai -s rejected           # 批量:wbai 所有 rejected 因子
-
-来源状态:
-  active   ← alpha_src/<name>/
-  rejected ← alpha_src/<name>/
-
-默认仅搬源 + 翻状态,alpha_dump / alpha_feature / alpha_pnl 保留。
-搬回 staging 后需 ops check 才真正重跑;version 不变。
+    ops restage AlphaWbaiFoo                 # 单因子,询问确认
+    ops restage AlphaWbaiFoo --purge         # 同时清 dump + feature(pnl 保留)
+    ops restage -u wbai -s rejected          # 批量:wbai 所有 rejected 因子
 """,
     )
 
@@ -34,7 +25,7 @@ Example:
                         help="按 author 过滤(批量)")
     # 默认 None(而非 'active'):批量模式必须显式给 -u 和/或 -s 才会执行。
     # 若给默认值,服务层的"必须指定选择器"守卫永远不触发,裸 `ops restage -y`
-    # 会把全库 ACTIVE 因子搬出 alpha_src(full-review 第一部分 1.2 高危项)。
+    # 会把全库 ACTIVE 因子搬出 alpha_src。
     parser.add_argument("--status", "-s", default=None,
                         choices=[FactorStatus.ACTIVE.value,
                                  FactorStatus.REJECTED.value],

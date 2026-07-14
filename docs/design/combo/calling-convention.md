@@ -3,7 +3,7 @@
 > v0.2 (2026-06): 接口经 `tmp/combo_test/` (后改名 `tmp/CombolhwEqualRawV23/`) 逐步最小化重建 + 实跑验证后定型。
 > 取代 v0.1 的 MLflow Projects 路线 (MLproject/python_env.yaml/分目录) —— 那套实践中未走通
 > (`mlflow run --env-manager local` 因 torch 不在 ops venv 失败, 实际一直直接用 gsim venv 跑)。
-> 验证过程见 `tmp/combo-test-log.md`, 架构推导见 `docs/combo-architecture-decision.md`。
+> 验证过程见 `tmp/combo-test-log.md`, 架构推导见 `docs/design/combo/architecture-decision.md`。
 
 ## 背景
 

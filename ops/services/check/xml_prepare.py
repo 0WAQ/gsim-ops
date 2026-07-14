@@ -1,11 +1,11 @@
 """Stage 开跑前的 XML 改写:回测窗口 + dump 开关。
 
 每个 prepare_* 只声明"这个 stage 需要什么窗口、开什么 dump",落盘走统一的
-`_apply`。**prepare 失败直接抛**(2026-07-07 起):此前每个函数整段
-`except Exception: ...` 吞错,XML 缺键 / 写盘失败时 stage 会拿着上一个 stage
-的窗口继续跑 —— validate 可能跑成全历史(30min+),checkbias 可能在错误区间
-做前视检查,结果全不可信。现在异常由流水线 unexpected-error 臂接住
-(revert SUBMITTED + 完整日志),响亮失败取代静默错跑。
+`_apply`。**prepare 失败直接抛**,不 `except Exception` 吞错:XML 缺键 /
+写盘失败若被吞,stage 会拿着上一个 stage 的窗口继续跑 —— validate 可能跑成
+全历史(30min+),checkbias 可能在错误区间做前视检查,结果全不可信。异常由
+流水线 unexpected-error 臂接住(revert SUBMITTED + 完整日志),响亮失败取代
+静默错跑。
 
 prepare 与 stage 的绑定在 `stages.py` 的 PIPELINE 表(按引用绑定,非按名字)。
 """
@@ -83,8 +83,7 @@ def prepare_for_archive(factor: AlphaMetadata) -> None:
     """归档前"拆雷":pnl/dump 输出目录改指 /tmp,防手动重跑入库 XML 砸生产。
 
     @module 不在这里写 —— to_lib 搬完目录后 rewrite_module_path 是唯一权威
-    (原先这里写死 /mnt/storage/alphalib 旧库路径、随后立刻被 rewrite 覆盖,
-    属无效写入,已删)。
+    (在此写会被随后的 rewrite 覆盖,属无效写入)。
     """
     gsim = factor.xml_config["gsim"]
     gsim["Portfolio"]["Stats"]["@pnlDir"] = f"{ARCHIVED_XML_SCRATCH}/alpha_pnl"

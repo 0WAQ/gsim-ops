@@ -1,17 +1,17 @@
 """JFS 客户端挂载点迁移编排(`ops setup --migrate-mount`)。
 
-场景:已 join 的客户端要换挂载点(声明 B ≠ 实挂 A;170 /ext4 → /nvme125,
-2026-07-11)。迁移 = 改配置重挂,不搬卷内数据 —— staging/dump 共享软链是
-相对 target,自动适配新挂载点。
+场景:已 join 的客户端要换挂载点(声明 B ≠ 实挂 A;如 170 /ext4 → /nvme125)。
+迁移 = 改配置重挂,不搬卷内数据 —— staging/dump 共享软链是相对 target,
+自动适配新挂载点。
 
-实现输入来自 DISCOVER-170-ENV-RESULT(2026-07-11 实测):
+实现输入(采集自现役客户端实证):
 - `/etc/systemd/system/juicefs-<name>.service` 的 ExecStart **硬编码**挂载点/
   cache/meta(EnvironmentFile 变量未被引用)→ 迁移必须重渲染 unit;
 - `/etc/juicefs-poc.env` 六键是路径声明(JFS_MOUNT/CACHE_DIR/LOCAL_DIR/
   META_URL/REDIS_LOCAL/CACHE_SIZE_MB),未知键原样保留。
 
-**unit 模板正主自此在本模块**(`render_unit`,golden test 用 170 现役 unit
-原文钉住;scripts/juicefs-poc/04-systemd.sh 保留 bootstrap 用途,头注指向此处)。
+**unit 模板正主在本模块**(`render_unit`,golden test 用现役 unit 原文钉住;
+scripts/juicefs-poc/04-systemd.sh 保留 bootstrap 用途,头注指向此处)。
 
 红线:只动本机(env / unit / sidecar / 兼容软链),不碰 JFS 卷内数据、
 metadata、MinIO;旧址(旧挂载点目录、旧 cache、空 sidecar)**报告不删**;

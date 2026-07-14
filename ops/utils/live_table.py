@@ -185,8 +185,7 @@ class LiveDriver:
             # Prefer in-flight rows, but FALL BACK to a pending row —— worker
             # 在第一个 stage_start 之前崩掉(SIGKILL/OOM,或 run_one 泛捕获
             # 之外的极端路径)时全表 PENDING,若只匹配 in-flight,done 事件
-            # 永不合成,主循环 remaining 永不归零 → 整条命令挂死画面冻结
-            # (对抗评审确认,HEAD 既有)。
+            # 永不合成,主循环 remaining 永不归零 → 整条命令挂死画面冻结。
             candidates = [r for r in self.rows.values()
                           if r.name not in seen_done and not r.is_done()]
             target = next((r for r in candidates if r.is_in_flight()),

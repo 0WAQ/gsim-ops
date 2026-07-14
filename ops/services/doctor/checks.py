@@ -3,16 +3,15 @@
 每族一个 `DoctorFamily`(scan 纯函数判定,fixer 可选)。新增族 = 表里加一行,
 与 check 流水线 PIPELINE / setup CHECKS 同款模式。severity 在 kind 级。
 
-**v1 立场**(2026-07-12 立项,设计面板 + 双评审综合):缺省纯只读;修复只上
-三类低爆炸半径动作(池鬼影 unlink / 非法快照 discard / 本机 dump 孤儿 rmtree
-+ pack tmp 残渣 unlink),其余 report-only + 转介既有命令 —— doctor 不复制
-clear/cancel/rm 的第二套删除逻辑,**绝不造数据、绝不碰 ACTIVE 因子产物、
-绝不碰 alpha_src**。
+**立场**:缺省纯只读;修复只上三类低爆炸半径动作(池鬼影 unlink / 非法快照
+discard / 本机 dump 孤儿 rmtree + pack tmp 残渣 unlink),其余 report-only +
+转介既有命令 —— doctor 不复制 clear/cancel/rm 的第二套删除逻辑,**绝不造
+数据、绝不碰 ACTIVE 因子产物、绝不碰 alpha_src**。
 
-**显式拒收(防回潮,health 教训)**:
+**显式拒收(防回潮)**:
 - "ACTIVE 缺 dump"检查:dump 产在消费机(170),本机看不到 ≠ 不存在 ——
-  在 160 跑会对几乎全部 ACTIVE 因子误报,这正是原 ops health 结构性误报的
-  根源。整条不做,直到 PG 记录产物所在 host(挂账 #11)。
+  在 160 跑会对几乎全部 ACTIVE 因子误报。整条不做,直到 PG 记录产物所在
+  host(挂账)。
 - dump 日期缺口:需 25s 深扫 + 交易日历,且无修复原语、无具名消费方。
 - 任何"补数据"类 fix(补池副本/补 state/伪造快照):approve 豁免因子合法
   无池副本、info 孤儿修复方向有歧义 —— doctor 只删漂移物和指路。
@@ -30,7 +29,7 @@ from ops.core.state import FactorStatus
 from .findings import FAIL, WARN, FamilySkip, Finding, FixPlan, Inventory
 
 # pack 原子写残渣:.<name>.v2.npy.tmp(pack.py `.{target.name}.tmp`);
-# 超过该龄期仍在 = worker 崩溃遗留(在跑的 pack 不会留这么久),INCIDENT-144。
+# 超过该龄期仍在 = worker 崩溃遗留(在跑的 pack 不会留这么久)。
 PACK_TMP_MAX_AGE_S = 24 * 3600
 
 
@@ -70,8 +69,7 @@ class DoctorFamily:
 def classify_pool(factor, pool_kind: str) -> tuple[str, str]:
     """(verdict, reason);verdict ∈ {'ok', 'ghost', 'wrong-pool'}。
 
-    移植自 scripts/reconcile_bcorr_pools.py(claude/ops-rotate-and-reconcile,
-    2026-07-11 生产实跑 622 鬼影清零零误删)—— 判定表不改语义。
+    移植自 scripts/reconcile_bcorr_pools.py —— 判定表不改语义。
     政策(repo.purge_artifacts CHECK 面):池里有副本 ⇔ 因子 ACTIVE 在库。
     """
     if factor is None:
@@ -153,10 +151,9 @@ _POOL_FIXER = Fixer(
 # --------------------------------------------------------------- snapshot-stale
 
 def _scan_snapshot_stale(inv: Inventory) -> list[Finding]:
-    """schema v3(测得快照):snapshot = 最近一次 check 测得的表现,被拒也写。
-    原 illegal kind("非 ACTIVE 却有快照")整个作废 —— 那正是 v3 的合法形态。
-    新判据:snapshot_at 必须锚定最近一次 check 事件的 at(与 factor_history
-    交叉对账);无任何 check 事件的 legacy 快照(backfill 存量)锚 entered_at。
+    """测得快照:snapshot = 最近一次 check 测得的表现,被拒也写。
+    判据:snapshot_at 必须锚定最近一次 check 事件的 at(与 factor_history
+    交叉对账);无任何 check 事件的 legacy 快照锚 entered_at。
     全族只报告 —— 时间戳修正走一次性脚本,doctor 不 UPDATE 快照。"""
     out: list[Finding] = []
     for name, x in sorted(inv.factors.items()):
@@ -178,11 +175,10 @@ def _scan_snapshot_stale(inv: Inventory) -> list[Finding]:
 # -------------------------------------------------------------- timeline-drift
 
 def _scan_timeline_drift(inv: Inventory) -> list[Finding]:
-    """词汇表不变量(v3):`created_at <= submitted_at`(首提逐字符相等;
-    backfill 存量 submitted_at=NULL 是设计内值,跳过不判)。违反 = 写路径
-    bug 信号 —— 07-10 曾有批量写把 created_at 刷到提交之后(v3 迁移一次性
-    拉正 730),本族保证再犯不静默。全族只报告:身份表修正走一次性迁移
-    脚本,doctor 不 UPDATE。ISO 同构串,字典序即时间序。"""
+    """词汇表不变量:`created_at <= submitted_at`(首提逐字符相等;
+    submitted_at=NULL 是设计内值,跳过不判)。违反 = 写路径 bug 信号,
+    本族保证再犯不静默。全族只报告:身份表修正走一次性迁移脚本,
+    doctor 不 UPDATE。ISO 同构串,字典序即时间序。"""
     out: list[Finding] = []
     for name, x in sorted(inv.factors.items()):
         if x.state is None:
@@ -204,7 +200,7 @@ def _scan_info_orphan(inv: Inventory) -> list[Finding]:
     lookup = [("src", inv.areas.get("alpha_src")),
               ("staging", inv.areas.get("staging")),
               ("pnl", inv.areas.get("alpha_pnl"))]
-    # 盲区(对抗评审 2026-07-12):区不可读时"看不见产物"≠"没有产物",
+    # 盲区:区不可读时"看不见产物"≠"没有产物",
     # 绝不能在盲区下生成删除转介 —— rm 会连 alpha_src 一起级联删。
     blind = [label for label, a in lookup if a is None or a.error]
     for name, x in sorted(inv.factors.items()):
@@ -241,9 +237,9 @@ def _scan_src_drift(inv: Inventory) -> list[Finding]:
         # active + rejected 都归档进 alpha_src(check.on_reject 同样归档)
         if x.state is not None and x.state.status in _IN_LIB and name not in dir_names:
             if name in staging_names:
-                # 交叉核对 staging(对抗评审 2026-07-12):recall 是 move 不是
-                # copy —— restage 崩在 move 后 transition 前,唯一副本就在
-                # staging,不是"源码丢失",别把人指去 dropbox 反查。
+                # 交叉核对 staging:recall 是 move 不是 copy —— restage 崩在
+                # move 后 transition 前,唯一副本就在 staging,不是"源码丢失",
+                # 别把人指去 dropbox 反查。
                 out.append(Finding(name, "src-drift", "lib-missing-staged", WARN,
                                    f"PG {x.state.status.value} 但源码在 staging/"
                                    f"{name}/(crash 中断的 restage / 搬运中)",
@@ -307,8 +303,8 @@ def _scan_artifact_orphan(inv: Inventory) -> list[Finding]:
     feature = inv.areas["alpha_feature"]
     for e in sorted(pnl.entries, key=lambda x: x.name):
         if e.is_dir:
-            # "pnl 是单文件"是布局 SSOT;目录形态是远古残留(archive 曾专门
-            # 兜过,Errno 20/R4)—— 报 alien 不静默吞(对抗评审 2026-07-12)
+            # "pnl 是单文件"是布局 SSOT;目录形态是远古残留 —— 报 alien
+            # 不静默吞
             out.append(Finding(e.name, "artifact-orphan", "alien", WARN,
                                "alpha_pnl 下目录形态,非单文件 pnl(远古残留,人工确认)",
                                path=str(pnl.root / e.name)))
@@ -344,8 +340,7 @@ def _scan_artifact_orphan(inv: Inventory) -> list[Finding]:
                                "alpha_feature 下不合式文件(人工确认)",
                                path=str(feature.root / e.name)))
         elif name not in inv.factors:
-            # v1.1 放闸(2026-07-12,首轮基线判读完成:62 条名单全过目,
-            # DOCTOR-V11-TRIAGE):PG 全无记录的孤儿 feature 可修
+            # 放闸:PG 全无记录的孤儿 feature 可修
             out.append(Finding(name, "artifact-orphan", "feature-orphan", WARN,
                                "alpha_feature 有文件但 PG 全无记录",
                                fixable=True, path=str(feature.root / e.name),
@@ -388,9 +383,8 @@ def _artifact_path_ok(finding, path) -> bool:
 _ARTIFACT_FIXER = Fixer(
     plan=FixPlan(
         action="unlink",
-        target="alpha_feature/ 下两类:①PG 全无记录的孤儿 <name>.vN.npy"
-               "(v1.1 放闸,2026-07-12 基线判读后);②点开头 `.*.npy.tmp` 且 "
-               "mtime>24h 的 pack 崩溃残渣",
+        target="alpha_feature/ 下两类:①PG 全无记录的孤儿 <name>.vN.npy;"
+               "②点开头 `.*.npy.tmp` 且 mtime>24h 的 pack 崩溃残渣",
         keeps="不碰任何 PG 有记录因子的 feature、不碰 alien 不合式文件(只报告)、"
               "不碰 alpha_pnl 孤儿(无判读材料,仍只报告)、不碰 PG",
     ),
@@ -406,7 +400,7 @@ _ARTIFACT_FIXER = Fixer(
 def _scan_dump_orphan(inv: Inventory) -> list[Finding]:
     out: list[Finding] = []
     dump = inv.areas["dump_local"]
-    # 错配绊线(对抗评审 2026-07-12):alpha_dump 指错一级(config 少写 /
+    # 错配绊线:alpha_dump 指错一级(config 少写 /
     # sidecar 软链错指)时,扫到的是 alphalib 根 —— 条目名会撞库区名
     # (alpha_src/staging/…),它们全都"PG 无因子记录",若不拦会整批判成
     # fixable 孤儿。区内出现任何库区名条目 = 疑似指错,整族弃权零发现。

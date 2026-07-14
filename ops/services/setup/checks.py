@@ -4,9 +4,9 @@
 加一行,与 check 流水线的 PIPELINE 同款模式。**应然形态与部署变更同批改**
 (见 STAGING_IS_SHARED)。
 
-v1 范围(2026-07-11 立项;用户:像 uv 管 python 项目一样管 alphalib 部署):
-存储布局 + 权限模型 + 环境可达性 + PG。JFS 挂载本身不管(归
-scripts/juicefs-poc/join.sh);数据对账(盘 ↔ PG)留给未来 ops doctor。
+范围:存储布局 + 权限模型 + 环境可达性 + PG(像 uv 管 python 项目一样管
+alphalib 部署)。JFS 挂载本身不管(归 scripts/juicefs-poc/join.sh);
+数据对账(盘 ↔ PG)留给 ops doctor。
 
 fix 原则:**只补建缺失(mkdir / symlink / groupadd),绝不改动已存在的东西**
 —— 存在但形态错误(软链指错 / gid 被占)只报告并给手工指引,防补建变破坏。
@@ -25,9 +25,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ops.infra.config import Config
 
-# 共享 staging(docs/shared-staging-queue.md,2026-07-11 翻 True 与部署同批):
-# staging 的应然 = JFS 实目录(全局共享,多机 submit / 170 集中 check 的数据面)。
-# 物理切换步骤见 DEPLOY-SHARED-STAGING.md 阶段 1;本分支合 main 前须窗口执行完毕。
+# 共享 staging(见 docs/design/shared-staging-queue.md):staging 的应然 = JFS
+# 实目录(全局共享,多机 submit / 170 集中 check 的数据面)。物理切换步骤见
+# DEPLOY-SHARED-STAGING.md。
 STAGING_IS_SHARED = True
 
 OK, FAIL, WARN, SKIP = "ok", "fail", "warn", "skip"
@@ -102,7 +102,7 @@ def _check_mount(ctx: Ctx) -> tuple[bool, str]:
     if found is not None and found[0] == ctx.root:
         return True, f"{ctx.root} (fuse.juicefs)"
     if found is not None:
-        # 声明与实挂不一致 —— 部署变更场景(2026-07-11,170 /ext4→/nvme125)
+        # 声明与实挂不一致 —— 部署变更场景(如 170 /ext4→/nvme125)
         return False, (f"JFS 卷 '{found[1]}' 挂在 {found[0]},声明是 {ctx.root};"
                        "跑 `ops setup --migrate-mount` 迁移")
     return False, "本机无 JuiceFS 挂载(首次接入先跑 scripts/juicefs-poc/join.sh)"
@@ -169,7 +169,7 @@ def _fix_sidecar_link(ctx: Ctx, mount_path: Path) -> None:
     want = ctx.sidecar / mount_path.name
     want.mkdir(parents=True, exist_ok=True)
     if not mount_path.exists() and not mount_path.is_symlink():
-        # 相对 target(../<root>.local/<name>):与 2026-06-08 部署一致
+        # 相对 target(../<root>.local/<name>):与部署约定一致
         mount_path.symlink_to(Path("..") / ctx.sidecar.name / mount_path.name)
 
 

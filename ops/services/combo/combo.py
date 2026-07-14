@@ -4,7 +4,7 @@
 无状态: 不进 alpha state/锁; 产物全落 <combo_dir>/runs/。
 形态自动判定: 有 predict/ = 模型型 (跑 predict→backtest); 无 = 纯线性 (直接 backtest)。
 
-详见 docs/combo-calling-convention.md。
+详见 docs/design/combo/calling-convention.md。
 """
 from pathlib import Path
 

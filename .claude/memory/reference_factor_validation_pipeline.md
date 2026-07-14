@@ -50,7 +50,9 @@ class AlphaExample(AlphaBase):
 - 多头最小持股数量: `min_long_stocks` ≥ 50
 - 空头最小持股数量: `min_short_stocks` ≥ 50
 
-代码: `ops/services/check/checker/compliance_checker.py`。**不检查多/空比例**, 只检查个数 + 单股最大占比。
+代码: `ops/services/check/checker/compliance_checker.py`。**不检查多/空比例**, 只检查个数 + 单股最大占比。现行判定窗口 = 尾部 762 个 dump 文件, 空/NaN 天静默跳过, 窗口内任一天任一项违规即整因子 REJECTED。
+
+**⚠ 判定重做在路线图**(2026-07-13 立项, `.claude/plans.md` "Compliance 判定重做"):现行"尾窗按文件数截 + 空天静默跳过"使判定基数随数据起始时间漂移。用户拍板方向 = 检查每一天再判违规;**但阈值/起始日/容忍度全部先不定**——无全库分布数据无法评估政策(先测量后定策)。摸底脚本 `scripts/compliance_survey.py`(阈值无关逐日统计,未跑)。checker 未改前上述行为仍为当前生产事实。
 
 ## 回测区间
 

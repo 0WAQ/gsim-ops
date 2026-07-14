@@ -89,11 +89,11 @@ def _execute_locked(finding: Finding, fixer: Fixer, config, repo) -> tuple[str, 
                       (config.alpha_src, config.alpha_pnl, config.staging))
     if _within(real, forbidden):
         return BLOCKED, f"目标 {real} 落在禁区(alpha_src/alpha_pnl/staging)"
-    # 禁区 b(等值型,对抗评审 2026-07-12):目标绝不许**就是**(或包含)任何
-    # config 声明的数据根 —— 合法目标永远在允许根的下一级。包含型放不进
-    # feature/双池(pack-tmp/pool-ghost 的合法目标就在其下),等值型没有此
-    # 冲突,专拦"allowed_roots 与扫描源同一 config 键派生"时的错配自引用
-    # (如 alpha_dump 指错一级,白名单必然包含目标,唯此闸能拦)。
+    # 禁区 b(等值型):目标绝不许**就是**(或包含)任何 config 声明的数据根
+    # —— 合法目标永远在允许根的下一级。包含型放不进 feature/双池
+    # (pack-tmp/pool-ghost 的合法目标就在其下),等值型没有此冲突,专拦
+    # "allowed_roots 与扫描源同一 config 键派生"时的错配自引用(如 alpha_dump
+    # 指错一级,白名单必然包含目标,唯此闸能拦)。
     declared = []
     for attr in ("alpha_src", "alpha_pnl", "staging", "alpha_feature",
                  "alpha_dump", "pnl_automated", "pnl_manual", "dropbox_path",

@@ -1,12 +1,10 @@
 """PostgreSQL 实现 factor_snapshot store.
 
-DDL 不在本类执行(2026-07-09 滚出 __init__):schema 归
-`ops/infra/schema.py::ensure_schemas` + 生产 scripts/postgres 迁移。
-_ts_in/_ts_out 正主收敛到 ops/infra/pg.py(与 state store 的镜像合并)。
+DDL 不在本类执行:schema 归 `ops/infra/schema.py::ensure_schemas` + 生产
+scripts/postgres 迁移。_ts_in/_ts_out 正主收敛到 ops/infra/pg.py。
 
-fields/tables 是 TEXT[](schema v2b;原 JSONB 是三表迁移时从 derived 层原样
-搬来的偷懒类型):psycopg 原生 list 适配零包裹、GIN(array_ops)吃 `@>` 包含
-查询、glob 经 unnest+LIKE —— 下推语义与 JSONB 版逐条等价。
+fields/tables 是 TEXT[]:psycopg 原生 list 适配零包裹、GIN(array_ops)吃
+`@>` 包含查询、glob 经 unnest+LIKE。
 """
 from ops.core.metrics import SNAPSHOT_METRICS
 from ops.infra.pg import get_pool
@@ -50,8 +48,7 @@ def _prefixed_metric_expr(key: str, prefix: str) -> str | None:
     """metric 键 → 带列前缀的 SQL 表达式(prefix 形如 "n.",JOIN 场景用)。
 
     键集与取值语义(bcorr = abs(max_bcorr))从 core/metrics.SNAPSHOT_METRICS
-    派生 —— S8 收敛:原 _METRIC_EXPR 手抄映射与 list.py 内存取值是同一事实的
-    两份拷贝,现在 SQL / 内存两半都长自注册表。"""
+    派生 —— SQL 表达式与 list.py 的内存取值都长自注册表,别在此处另抄一份。"""
     spec = SNAPSHOT_METRICS.get(key)
     if spec is None:
         return None
@@ -62,12 +59,10 @@ def _prefixed_metric_expr(key: str, prefix: str) -> str | None:
 def _glob_to_like(glob: str) -> str | None:
     """fnmatch glob → LIKE pattern;LIKE 表达不了时返回 None(跳过下推)。
 
-    原实现只 `replace("*", "%")`:glob 值里的 `_`/`%` 变成 LIKE 通配(预筛
-    变宽,内存 fnmatch 兜底可收窄,无害但脏),而 `?`/`[seq]` 变成 LIKE
-    字面量 —— **预筛比 fnmatch 更窄,行在 SQL 层被丢、内存兜底永远看不到**,
-    打破"下推纯为预筛"契约(full-review S9,对抗评审在 find 共享此函数时
-    确认)。现在:转义 `\\ % _` → `*`→`%`、`?`→`_`;含 `[`(字符类,LIKE
-    无法表达)整体放弃下推,交给内存 fnmatch。
+    下推纯为预筛:LIKE 结果集只许 ⊇ fnmatch 精确语义,不许更窄(否则行在
+    SQL 层被丢、内存 fnmatch 兜底永远看不到)。故须转义 glob 里的 `\\ % _`
+    (不转义会变成 LIKE 通配或字面量,预筛可能更窄);`*`→`%`、`?`→`_`;
+    含 `[`(字符类,LIKE 无法表达)整体放弃下推,交给内存 fnmatch。
     """
     if "[" in glob:
         return None
@@ -192,7 +187,7 @@ class PostgresSnapshotStore(SnapshotStore):
         if order_expr:
             order_by_sql = f"ORDER BY {order_expr} DESC NULLS LAST"
 
-        # LIMIT 参数化(原 f-string 拼接是注入面/负数崩溃点,full-review 第三部分)
+        # LIMIT 参数化:原 f-string 拼接是注入面/负数崩溃点
         limit_sql = ""
         if limit:
             limit_sql = "LIMIT %s"

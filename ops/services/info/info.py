@@ -1,5 +1,4 @@
-"""info 查询编排 —— 零展示(2026-07-11 展示层上收:Tree 渲染在
-`ops/cli/info.py`,本模块只采集数据)。"""
+"""info 查询编排 —— 零展示(Tree 渲染在 `ops/cli/info.py`,本模块只采集数据)。"""
 from dataclasses import dataclass
 
 from ops.core.factor import Factor
@@ -19,9 +18,9 @@ class InfoData:
 
 
 def collect_info(args) -> InfoData | None:
-    """采集单因子详情。None = factor_info 无记录(存在性判据 = PG,三表的根;
-    2026-07-07 Wave 2 前用"alpha_src 目录存在"判定 —— 与 status/rm/cancel 的
-    state 判据不一致,同一因子可能 status 里存在、info 里 not found,S5)。"""
+    """采集单因子详情。None = factor_info 无记录(存在性判据 = PG,三表的根 ——
+    用"alpha_src 目录存在"判定会与 status/rm/cancel 的 state 判据不一致,
+    同一因子可能 status 里存在、info 里 not found)。"""
     name = args.factor_name
     config = Config.load(args.config_path)
 

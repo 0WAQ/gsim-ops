@@ -66,7 +66,7 @@ Fail: mark REJECTED (src 归档到 alpha_src)
 (restage/`--overwrite`/rm 走 `repo.purge_artifacts(name, ArtifactScope.CHECK)`),此处是防删除失败
 残留再造"自鬼影"(自相关≈1 → 被迫打败几乎相同的自己 → 必拒)的双保险。
 
-**bcorr 按因子来源分池** (`discovery_method`):bcorr 只在同类因子间比较,人工因子和机器因子互不撞车。`resolve_bcorr_pools(config, discovery_method)` (`infra/gsim/runner.py`) 决定对比池:`automated` → `pnl_automated/`,`manual` → `pnl_manual/`,来源未知 (legacy 因子 meta/XML 无此字段) 回退全库 (`pnl_prod_path` + `pnl_alphalib`,即分类前旧行为)。高相关时"打败竞品"的竞品业绩 (`_get_prod_factor_metrics`) 也从同类池取。`discovery_method` 由 `AlphaMetadata` 从 XML `<Description @discovery_method>` 读入(现存 `factor_info` 表)。`run_bcorr(pnl, config, pools=None)` 缺省 pools 时走全库统计。
+**bcorr 按因子来源分池** (`discovery_method`):bcorr 只在同类因子间比较,人工因子和机器因子互不撞车。`resolve_bcorr_pools(config, discovery_method)` (`infra/gsim/runner.py`) 决定对比池:`automated` → `pnl_automated/`,`manual` → `pnl_manual/`,来源未知回退全库 (`pnl_prod_path` + `pnl_alphalib`)。**注**:2026-07-13 起 `_ensure_record` 对无 dm 的因子在状态写入前整单拒绝(discovery_method NOT NULL),check 路径上 dm 恒为 automated/manual —— "回退全库"这支现在只是 `resolve_bcorr_pools` 的防御兜底,正常 check 走不到。高相关时"打败竞品"的竞品业绩 (`_get_prod_factor_metrics`) 也从同类池取。`discovery_method` 由 `AlphaMetadata` 从 XML `<Description @discovery_method>` 读入(现存 `factor_info` 表)。`run_bcorr(pnl, config, pools=None)` 缺省 pools 时走全库统计。
 
 **Failure semantics**(路由策略由 Stage 表的 `retryable` 声明):
 - validate / long_backtest fail(retryable)→ revert to SUBMITTED, factor stays in staging (environmental/config issue,下次 ops check 自动重扫)

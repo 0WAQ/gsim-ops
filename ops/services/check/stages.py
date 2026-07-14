@@ -1,10 +1,8 @@
-"""Check 流水线的 Stage 表 —— stage 身份的唯一事实源(full-review S11 / craft B2)。
+"""Check 流水线的 Stage 表 —— stage 身份的唯一事实源。
 
-此前一个 stage 的身份散在 ≥5 处、靠注释 "Must match" 手工同步:STAGES 元组、
-_RETRYABLE_STAGES、on_reject 内嵌的 _LATE_STAGES、12 个异常子类各自硬编码的
-stage 字符串、_run_one_locked 里 6 段复制粘贴的运行块。新增/改动 stage 要改
-5 处,漏 1 处即静默路由错误。现在:**新增 stage = 在 PIPELINE 加一行**,
-顺序、重试策略、产物保留策略、prepare、checker 工厂全部随行声明,其余派生。
+一个 stage 的身份(顺序、重试策略、产物保留策略、prepare、checker 工厂)若
+散在多处手工同步,新增/改动 stage 漏一处即静默路由错误。现在:**新增 stage
+= 在 PIPELINE 加一行**,其余全部随行派生。
 """
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -12,9 +10,9 @@ from dataclasses import dataclass
 from ops.core.alpha.metadata import AlphaMetadata
 
 # CORRELATION 是唯一有生命周期语义的 stage 名(approve 的放行判据),定义在
-# core/state.py(2026-07-09 迁,消 approve→check 跨包边);PIPELINE 的
-# correlation 行引用它 —— 单一定义,顺序/路由 SSOT 仍是本表。此处 re-export
-# 保住 check 包内 `from .stages import CORRELATION` 的存量路径。
+# core/state.py(消 approve→check 跨包边);PIPELINE 的 correlation 行引用它
+# —— 单一定义,顺序/路由 SSOT 仍是本表。此处 re-export 保住 check 包内
+# `from .stages import CORRELATION` 的存量路径。
 from ops.core.state import CORRELATION
 from ops.infra.config import Config
 

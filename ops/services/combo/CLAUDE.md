@@ -18,7 +18,7 @@
 - **warmup**：`--predict-start` 应早于 `--start` ≥1 交易日，否则回测首日信号空（simple 静默空仓 / 优化器崩）。
 - **未作 `mark_write` 写性声明(cli/common,S16)**：写的是 combo 自己的 `runs/`，非 root-owned alpha_src，无需 sudo 提权。
 
-## 第一版不含 (见 docs/combo-calling-convention.md "未来扩展")
+## 第一版不含 (见 docs/design/combo/calling-convention.md "未来扩展")
 
 - train 阶段 / 滚动训练（`combo run` 预留了子命令结构，日后加 `combo train`）
 - `H` 动态计算（现靠 ProdNpyLoad 默认 3900 = cc_2025；cc 变长再加）
@@ -26,4 +26,4 @@
 
 ## 规范
 
-`docs/combo-calling-convention.md`（接口）/ `combo-submit-guide.md`（给 qr）/ `combo-train-spec.md`（train 接口）。
+`docs/design/combo/calling-convention.md`（接口）/ `combo-submit-guide.md`（给 qr）/ `combo-train-spec.md`（train 接口）。

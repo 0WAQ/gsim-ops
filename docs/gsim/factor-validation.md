@@ -170,9 +170,9 @@ XML 中通过 `Constants` 控制：
 
 **实现**: `ops/services/check/checker/correlation_checker.py`
 
-**标准**: 最大相关性 ≤ 0.7
+**标准**: 最大相关性 `abs(max_bcorr) < 0.7`(严格小于;≥0.7 并非一律拒 —— 若新因子在 fitness/ret/shrp 中打败竞品 ≥2 项仍可放行,见 `correlation_checker.py`)。此 stage 同时校验业绩门槛(ret ≥ / shrp > / tvr ≤,阈值见下表)。
 
-**检测方法**: 使用 `/usr/local/gsim/dataops/bcorr` 计算新因子 PNL 与因子库中所有 PNL 的相关性。
+**检测方法**: 使用 `/usr/local/gsim/dataops/bcorr` 计算新因子 PNL 与对比池的相关性。对比池按 `discovery_method` 分池(automated/manual 各比各的,`resolve_bcorr_pools`),避免人工因子与机器因子互相撞车。
 
 **手动相关性测试**:
 
@@ -190,7 +190,7 @@ XML 中通过 `Constants` 控制：
 
 **操作**:
 - 运行 `simsummary` 提取指标（ret/shrp/dd/tvr/fitness）
-- 指标写入 PG `factor_snapshot`（入库时不可变快照，`snapshot_at = entered_at`）
+- 指标写入 PG `factor_snapshot`（**测得快照**,schema v3:= 最近一次 check 测得的表现,`snapshot_at` = 测得时刻。pass 因子在此写;correlation/compliance 被拒的因子也在失败路径写快照 —— 故被拒因子在 `ops list` 也能看到指标。快照不可离线重算,需最新表现须重跑 backtest）
 - 将因子源代码、Config、Readme 移动到 `alpha_src/`
 - 将 PNL 文件移动到 `alpha_pnl/`
 - 将 alpha_dump 移动到 `alpha_dump/`
@@ -250,7 +250,7 @@ XML 中通过 `Constants` 控制：
 
 未通过的因子:
 - **src** 归档到 `alpha_src/<name>/`(与 ACTIVE 同库,状态靠 state 区分)
-- **失败阶段 / 原因** 记在 state 的 `last_fail_stage` / `last_fail_reason` + `check_history`
+- **失败阶段 / 原因** 记在 `factor_history` 全操作审计表(schema v2b,2026-07-12:原 state 的 `last_fail_stage`/`last_fail_reason`/`check_history` 三列已删;"最近失败"由 `Factor.last_fail` 从事件表派生,`ops list` 的 fail_stage 列即读它)
 - compliance/correlation 这类 late-stage 失败额外保留 pnl + dump(数据完整,有分析价值);
   checkbias/checkpoint 失败清掉 dump/feature(短期数据不完整)
 
@@ -407,8 +407,8 @@ def checkpointLoad(self, fh):
 
 ## 参考资料
 
-- Gsim 架构：[gsim-architecture.md](gsim-architecture.md)
-- XML 配置：[gsim-xml-config.md](gsim-xml-config.md)
-- 因子开发流程：[gsim-factor-workflow.md](gsim-factor-workflow.md)
-- 数据源参考：[gsim-data-sources.md](gsim-data-sources.md)
+- Gsim 架构：[architecture.md](architecture.md)
+- XML 配置：[xml-config.md](xml-config.md)
+- 因子开发流程：[factor-workflow.md](factor-workflow.md)
+- 数据源参考：[data-sources.md](data-sources.md)
 - ops check 实现：`ops/services/check/`

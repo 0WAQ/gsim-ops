@@ -2,7 +2,7 @@
 
 `ops check` 跑完落一份结构化 JSON 到 docs/reports/check/,给 QR 发失败原因用,
 也方便随仓库一起提交归档。完整 fail_reason(不截断)从 factor_history 的
-check 事件读(store.checks,v2c),不用 UI rows 里被截断的 note。
+check 事件读(store.checks),不用 UI rows 里被截断的 note。
 
 一次 run 一份,不 rotation。数据本身可再生(PG state + factor_snapshot),但报告随
 仓库版本化保留,方便回溯与转发。
@@ -37,8 +37,8 @@ def write_check_report(config: Config, config_path: Path,
     """把本次 check 涉及因子的终态汇总成 JSON,返回文件路径。
 
     rows 是 parent 持有、LiveDriver 原地 mutate 过的 dict,已含 outcome_kind。
-    每因子完整 check 记录从 store.checks(name)[-1] 读(本次刚 append;v2c
-    起 record 不背全史)。
+    每因子完整 check 记录从 store.checks(name)[-1] 读(本次刚 append;record
+    不背全史)。
     pass 因子附 metrics。
     """
     store = default_store(config)

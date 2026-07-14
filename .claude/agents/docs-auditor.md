@@ -33,7 +33,7 @@ The caller gives you one of:
 - **"changed" / a diff** — the caller passes `git diff` output or a change summary.
   Audit only docs touching the changed code. Use the diff to find the blast radius:
   changed `ops/services/rm/` → check rm's CLAUDE.md, the top-level command table/
-  examples, docs/factor-state-machine.md, and any memory naming `rm`.
+  examples, docs/components/commands.md, and any memory naming `rm`.
 
 If unsure of scope, default to auditing what the caller named plus its obvious
 cross-references. State what you audited.

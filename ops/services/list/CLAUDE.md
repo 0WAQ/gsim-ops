@@ -4,7 +4,7 @@
 
 Data sources (tables and fields a factor reads via `dr.getData()`) are extracted by AST-parsing the factor `.py` and resolved to table names through an npy index. 入库时算出并存进 `factor_snapshot` 表(`infra/snapshot/`),按 `name` 键(datasources 组:fields/tables)。**入库时不可变快照**,非最新。
 
-**Resolution pipeline**(`ops/core/datasource.py`,2026-07-09 自本包迁入 —— submit/check/backfill 共用的领域纯函数):
+**Resolution pipeline**(`ops/core/datasource.py`,2026-07-09 自本包迁入 —— submit/check 共用的领域纯函数):
 1. AST walk finds `*.getData(string_literal)` calls → `fields` list
 2. `build_npy_index(nio_data_path)` scans `/datasvc/data/cc/` to build `{npy_stem → table_dir}`
 3. `resolve_tables(fields, index)` maps each field to its parent directory
@@ -43,3 +43,8 @@ Repeated keys AND together: `--filter-by "ret>20,ret<=30"`.
 本包**零展示**:`list_factors(args) -> list[Factor]` 只做解析/下推/内存兜底。
 表格(rich Table)/JSON 渲染在 `ops/cli/list.py`(C9 契约钉住:services 不得
 直引 rich);过滤错误经 `FilterError.errors` 传给 cli 呈现。
+
+**status 列**(2026-07-13 legacy 清理批):结果集含被拒因子时,表格在 author
+后显式插入 `status` 列(与 `fail_stage` 列同触发)—— ACTIVE/REJECTED 混排
+只靠行颜色区分不够(颜色重定向到文件/管道即丢,且 v3 后被拒因子也有指标)。
+纯 ACTIVE 列表不加此列避免噪音;JSON 输出本就有 `status` 键。

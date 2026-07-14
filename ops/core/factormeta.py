@@ -1,10 +1,8 @@
 """FactorMeta —— 因子的 meta.json 身份证格式 + 从因子目录解析它的领域函数。
 
-2026-07-09(factor-aggregate-plan 阶段 2):`parse_factor` / `infer_author_from_dir`
-自 `ops/services/submit/parser.py` 迁入 —— 解析"一个因子目录 → FactorMeta"是领域
-能力,backfill/clear 跨包借用 submit.parser 构成 2 条 C3 违例边。归宿与 FactorMeta
-本体同模块:产物与其构造器一处安放。Config 仅作类型引用(core 不运行期依赖 infra,
-运行期只取 config.nio_data_path 属性)。
+`parse_factor` / `infer_author_from_dir` 与 FactorMeta 本体同模块:解析
+"一个因子目录 → FactorMeta"是领域能力,产物与其构造器一处安放。Config 仅作
+类型引用(core 不运行期依赖 infra,运行期只取 config.nio_data_path 属性)。
 """
 from __future__ import annotations
 
@@ -61,7 +59,7 @@ class FactorMeta:
 
 
 # ---------------------------------------------------------------------------
-# 因子目录 → FactorMeta 解析(原 services/submit/parser.py,2026-07-09 迁入)
+# 因子目录 → FactorMeta 解析
 # ---------------------------------------------------------------------------
 
 INTRADAY_HINTS = ("Interval", "intraday", "tick", "5m", "1m", "15m", "30m")
@@ -207,8 +205,8 @@ def parse_factor(
     else:
         xml_author = desc.get("author", "")
         if xml_author and xml_author.lower() not in _GENERIC_AUTHORS:
-            # 小写归一(L1,2026-07-12 TRIAGE):XML author 原文直取曾造成同一人
-            # 大小写分裂(Fguo/fguo 各成一桶);目录推断路径本就产出小写
+            # 小写归一:XML author 原文直取会让同一人大小写分裂(Fguo/fguo 各
+            # 成一桶);目录推断路径本就产出小写
             author = xml_author.lower()
         else:
             author = "unknown"

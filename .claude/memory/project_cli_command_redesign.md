@@ -26,3 +26,11 @@ metadata:
 - ~~**derived 写入路径不对称**(最早那条线,未动):index/datasources/bcorr 只在 ops list/refresh 旁路生产,不在因子产出那一刻;backfill/run 不落 metrics。rm 已成为 DerivedStore.delete 首个调用者。~~ **(2026-07-06 三表重构解决:metrics/datasources/bcorr 改为 check archive 阶段一次性写 factor_snapshot,不再旁路生产;`ops refresh` 删除;metrics 语义变为入库时不可变快照。derived 层降为僵尸层,仅 LibraryScanner index 缓存仍用。详见 [[project_factor_library_storage_architecture]])**
 
 **背景关联**:讨论中捋清了因子入库全流程的两个 PG 表写入图(见对话),关键发现:派生 4 组(index/metrics/datasources/bcorr)写入路径高度不对称、大多寄生在 ops list 旁路而非因子产出那一刻;DerivedStore.delete() 全库无调用者 → cancel 硬删 state 却留 derived 残行。参见 [[project_factor_command_semantics]] [[project_factor_state_machine]] [[project_factor_library_storage_architecture]]。
+
+**2026-07-13 命令面收敛更新**(开放项多数已拍板落地):
+- **`ops doctor` 已落地**(v1,8 族对账:池鬼影/stale 快照/时间线不变量/info 孤儿/src·staging 漂移/产物孤儿/本机 dump 孤儿)——缺省纯只读报告,`--fix <族>` 逐族确认修复(五道闸删除管道)。原"clear/cancel --force 是否归入统一 doctor"的设想:doctor **不复制**第二套删除逻辑,只报告并转介既有命令。
+- **`ops health` 已删除**(2026-07-07 Wave 2:--fix 写没人读的僵尸表;对账职能已由 doctor 落地)。
+- **`ops sync` / `ops refresh` 已删除**(sync=S3 模型被 JFS 取代;refresh=三表重构后快照不可重算)。
+- **`ops backfill` 已退役删除**(2026-07-13 legacy 清理批:bootstrap 使命完成,留着 = src 孤儿整批复活成 ACTIVE 的风险;`HISTORY_OPS`/DB `chk_op` 保留 'backfill' 枚举值 —— 存量事件是历史事实)。
+- **`ops status` 尚未折叠**(仍与 list -s / info 部分重叠,单因子 history 独占)。
+详见根 `CLAUDE.md` 子命令表 + Removed subcommands 段。

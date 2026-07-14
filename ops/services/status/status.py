@@ -1,9 +1,8 @@
-"""status 查询编排 —— 零展示(2026-07-11 展示层上收:详情/表格渲染在
-`ops/cli/status.py`,本模块只做数据访问)。
+"""status 查询编排 —— 零展示(详情/表格渲染在 `ops/cli/status.py`,本模块
+只做数据访问)。
 
-2026-07-09 阶段 3 塌缩:repo.get / repo.find(include_submitted=True ——
-status 的语义是"任何记录",单条三表 JOIN 退役原 store.list + info_store.list
-的内存合并)。"""
+repo.get / repo.find(include_submitted=True —— status 的语义是"任何记录",
+单条三表 JOIN 取代 store.list + info_store.list 的内存合并)。"""
 from ops.core.factor import Factor
 from ops.core.state import HistoryEvent
 from ops.infra.config import Config
@@ -18,7 +17,7 @@ def query_one(args) -> Factor | None:
 
 
 def query_events(args) -> list[HistoryEvent]:
-    """单因子生命周期事件时间线(factor_history,v2b)。json dev/test 后端
+    """单因子生命周期事件时间线(factor_history)。json dev/test 后端
     返回 [](cli 回落 check_history 渲染)。"""
     config = Config.load(args.config_path)
     return FactorRepository(config).history(args.name)

@@ -9,23 +9,12 @@ def add_approve_subparser(subparsers: argparse._SubParsersAction):
     parser: argparse.ArgumentParser = subparsers.add_parser(
         "approve",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="人工豁免:为数据覆盖多样性放行 correlation-rejected 因子,REJECTED → ACTIVE",
+        help="多样性豁免:放行 correlation-rejected 因子(REJECTED → ACTIVE)",
         epilog="""\
 Example:
     ops approve AlphaWbaiFoo          # 单因子,询问确认
-    ops approve AlphaWbaiFoo -y       # 跳过确认
     ops approve -u wbai               # 批量:wbai 所有 correlation-rejected 因子
     ops approve -u wbai -y            # 批量,跳过确认
-
-用途:自动流水线只认业绩 + 低相关,不看数据使用覆盖。approve 是人工闸,
-放行"业绩/相关性不占优、但扩了库内稀缺数据覆盖"的因子(配合
-`ops list --filter-by field=X / tables=X` 反查覆盖缺口)。
-
-仅适用于 last_fail_stage == correlation 的 REJECTED 因子;
-其他失败阶段是质量/正确性问题,不允许 approve。
-
-不重跑任何 check 阶段(dump/pnl/feature 在 correlation 失败时已保留),
-仅 state 翻 ACTIVE。
 """,
     )
 

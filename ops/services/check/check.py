@@ -123,7 +123,7 @@ class CheckerPipeline:
 
     def _persist_derived(self, factor: AlphaMetadata, metrics, corr_result,
                          measured_at: str) -> None:
-        """把本次 check 测得的表现写入 factor_snapshot(**测得快照**,schema v3:
+        """把本次 check 测得的表现写入 factor_snapshot(**测得快照**:
         最近一次 check 测得的表现 —— pass 与 correlation/compliance 失败都写,
         入库见证已全权归 entered_at/entered 事件)。
 
@@ -172,8 +172,7 @@ class CheckerPipeline:
 
     def to_lib(self, factor: AlphaMetadata):
         """归档入库:搬运 + @module 重指 + pnl 分流全部收编 repo.archive
-        (2026-07-10 阶段 3 第二批;身份兜底断言随迁 —— 第一道闸仍在 run_one
-        入口)。"""
+        (身份兜底断言在 repo.archive;第一道闸在 run_one 入口)。"""
         self._repo().archive(
             factor.name,
             src_dir=factor.dir,
@@ -236,10 +235,10 @@ class CheckerPipeline:
             except Exception:
                 pass
         if discovery_method not in ("automated", "manual"):
-            # factor_info.discovery_method NOT NULL(legacy 清理批,2026-07-13):
-            # submit 入口早有硬校验,能走到这里的是 pre-guard 遗留/手工放置的
-            # staging 残留 —— 状态写入前显式拒绝(run_one preamble 臂接住 →
-            # error),不让 DB 约束错误当路由。重新 ops submit 补全后再检。
+            # factor_info.discovery_method NOT NULL:submit 入口早有硬校验,能走到
+            # 这里的是 pre-guard 遗留/手工放置的 staging 残留 —— 状态写入前显式拒绝
+            # (run_one preamble 臂接住 → error),不让 DB 约束错误当路由。
+            # 重新 ops submit 补全后再检。
             raise RuntimeError(
                 f"{factor.name} discovery_method 缺失/非法"
                 f"({discovery_method!r},须为 automated/manual)"
@@ -283,10 +282,10 @@ class CheckerPipeline:
             q.put(("done", factor.name, "locked", "🔒 已被另一个进程占用", "yellow"))
             return "locked"
         except Exception as e:
-            # 前置段兜底(对抗评审):_run_one_locked 的 try 只包 stage 循环,
+            # 前置段兜底:_run_one_locked 的 try 只包 stage 循环,
             # 之前的 _ensure_record/transition(以及锁连接本身)在 PG 不可达 /
             # 空库时抛的异常会直接穿透 ProcessPool —— 父进程的 LiveDriver 无法
-            # 把崩溃的 future 映射回因子名(全表 PENDING 时旧版直接挂死)。
+            # 把崩溃的 future 映射回因子名。
             # worker 是唯一知道自己因子名的地方,在此归因并保证 done 事件必发。
             logger.exception("check preamble crashed factor={}", factor.key)
             q.put(("done", factor.name, "error",
@@ -305,7 +304,7 @@ class CheckerPipeline:
         # checkpoint 无人善后(CheckpointChecker.clean 只清它之前的),restage
         # 重检时 checkbias 的 gsim 会 load 上一轮全历史窗口的残留,
         # StatsSimpleV6.checkpointLoad 直接崩 io.UnsupportedOperation
-        # (生产验证 L3-6 发现,JOURNAL PV5)。本轮内 checkbias → checkpoint
+        # (见 JOURNAL PV5)。本轮内 checkbias → checkpoint
         # 的断点续跑不受影响 —— 那些 checkpoint 在本次 wipe 之后才写。
         shutil.rmtree(factor.checkpoint_dir, ignore_errors=True)
 
@@ -351,7 +350,7 @@ class CheckerPipeline:
             repo.transition(factor.name, FactorStatus.ACTIVE, entered_at=now)
 
             # 再写入测得快照(measured_at = 同一个 now → 对 pass 因子
-            # snapshot_at 仍与 entered_at 逐字符相等,v3 前后无差)
+            # snapshot_at 仍与 entered_at 逐字符相等)
             self._persist_derived(factor, metrics, corr_result, measured_at=now)
 
             # 最后移动文件到 alpha_src
@@ -364,7 +363,7 @@ class CheckerPipeline:
         except CheckSkip as e:
             # stage 归因:CheckSkip/CheckFail 只可能从 checker.check() 抛出,
             # 此时 current_stage 恒为所在 stage(exception 自己不携带 stage,
-            # 12 个硬编码 stage 字符串的子类已删,见 checker/base.py)。
+            # 见 checker/base.py)。
             stage_name = current_stage or "archive"
             if current_stage:
                 _emit_stage_done(current_stage, Status.SKIPPED)
@@ -404,7 +403,7 @@ class CheckerPipeline:
                                factor.key, stage_name, str(e))
                 # Factor quality failure — REJECTED (src → alpha_src)
                 now = now_iso()
-                # 测得快照(schema v3):correlation 失败自带测得值(CheckFail
+                # 测得快照:correlation 失败自带测得值(CheckFail
                 # .result = CorrResult);compliance 失败 long_backtest 已跑完,
                 # 补一次 simsummary(轻)。必须在 on_reject 搬运前采集
                 # (datasources 依赖 staging 里的 py_file)。快照失败不阻断拒绝。
@@ -425,8 +424,8 @@ class CheckerPipeline:
                 check.passed = False
                 check.failed_stage = stage_name
                 check.fail_reason = str(e)
-                # 失败事实随 check 事件入 factor_history(state 的 rejected_at/
-                # last_fail_* 三列已删,v2b;读侧走 Factor.last_fail 派生)
+                # 失败事实随 check 事件入 factor_history(读侧走 Factor.last_fail
+                # 派生)
                 repo.append_check(factor.name, check)
                 repo.transition(factor.name, FactorStatus.REJECTED)
                 q.put(("done", factor.name, "fail",

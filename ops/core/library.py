@@ -1,10 +1,7 @@
 """Factor library scanner — 磁盘视角的对账工具。
 
-2026-07-07 Wave 2 (JOURNAL V1/V2): 本类退出所有命令的热路径 —— list 的因子集
-判据改为 factor_state (PG),info 的存在性判据改为 factor_info (PG)。derived
-索引缓存整层删除(它自三表迁移起已坏:derived_meta 丢了 library_id 列,
-get_meta 每次 UndefinedColumn 被吞 → 缓存永久失效,每次 list 白付 ~25s 扫盘,
-full-review P0-4)。
+本类不在任何命令的热路径上:list 的因子集判据是 factor_state (PG),info 的
+存在性判据是 factor_info (PG)。
 
 保留本类的唯一用途:**未来 ops doctor 的磁盘对账**(回答"盘上有什么、和 PG
 漂移了没有")+ info 的单因子现场 stat。scan() 现在是纯磁盘遍历,无缓存。
@@ -22,7 +19,7 @@ from typing import TYPE_CHECKING
 from ops.core.paths import META_FILENAME, FactorPaths
 
 if TYPE_CHECKING:
-    # 仅类型引用:core 不得运行期依赖 infra(import-linter C1)。Config 实例由
+    # 仅类型引用:core 不得运行期依赖 infra(import-linter)。Config 实例由
     # 调用方构造后传入。
     from ops.infra.config import Config
 
@@ -33,9 +30,8 @@ class ScannedFactor:
 
     This is the *scan* product -- what a directory walk produces. Paths are
     reconstructed from the live Config, never persisted (they depend on the
-    node's mount root). 2026-07-09 更名(原名 FactorInfo 与 infra/info 的表模型
-    同名撞车,full-review D4):`author_guess` 来自目录名正则,是**猜测**,
-    权威身份在 factor_info 表。"""
+    node's mount root). `author_guess` 来自目录名正则,是**猜测**,权威身份在
+    factor_info 表。"""
     name: str
     author_guess: str
     src_path: Path

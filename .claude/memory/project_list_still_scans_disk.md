@@ -7,6 +7,8 @@ metadata:
   originSessionId: 02290df3-9b26-41b7-8e6f-757fdf6c2227
 ---
 
+> **✅ 已解决(2026-07-07 Wave 2)**:list 因子集判据已改纯 PG `factor_state.status != 'submitted'`(定义处 `repo.find`),`scan()` 退出热路径;derived 僵尸层(`ops/infra/derived/` + LibraryScanner 索引缓存)整层删除;json `has_pnl`/`dump_days` 键移除。下方是当时的问题分析与方向(与最终落地一致),留作设计原委。
+
 **严重待办(2026-07-07 记)**:`ops list` 的因子集合仍靠 `LibraryScanner.scan()` 扫盘界定(`ops/services/list/list.py:run_list`),这抵消了把因子目录迁 Postgres 的意义。
 
 背景:修 PG 遗留 #1(删 `factor_snapshot.has_pnl/dump_days`)时,list 原来靠 `has_pnl IS NOT NULL` 界定"在库因子集"的路径失效。当时图省事,复用 `run_list` 里本就有的 `scan()` 调用,拿扫盘结果的因子名做白名单(`scanned_names = {f.name for f in scanned}`,内存过滤 `x.info.name in scanned_names`)。这是 **stopgap**,问题严重:

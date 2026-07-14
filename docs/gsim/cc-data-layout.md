@@ -2,7 +2,7 @@
 
 面向因子挖掘 / 数据探索的视角,描述 `/datasvc/data/` 下数据的物理形态、形状、填充进度、时间快照机制,以及不经过 gsim 直接用 `np.memmap` 读取的方法。
 
-如果你在 gsim 框架内开发因子(`dr.getData('xxx')`),请看 [gsim-data-sources.md](gsim-data-sources.md);本文档面向"绕开 gsim 直接做 ML / 因子挖掘"的场景。
+如果你在 gsim 框架内开发因子(`dr.getData('xxx')`),请看 [data-sources.md](data-sources.md);本文档面向"绕开 gsim 直接做 ML / 因子挖掘"的场景。
 
 ## 数据分层
 
@@ -376,6 +376,6 @@ def last_filled_idx(arr):
 
 ## 与 gsim 框架的关系
 
-- 在 gsim 框架内开发因子:用 `dr.getData('source.field')`,XML 注册数据源,见 [gsim-data-sources.md](gsim-data-sources.md)。
+- 在 gsim 框架内开发因子:用 `dr.getData('source.field')`,XML 注册数据源,见 [data-sources.md](data-sources.md)。
 - 跳过 gsim 直接 ML / 探索:用本文档的 `np.memmap` 方式直读,**绕过 `.meta` 限制可以拿到最新数据**,但要自己保证不偷未来。
 - 两者读的是同一份物理文件,数据语义完全一致。

@@ -1,70 +1,80 @@
-# ops tools
+# ops
 
-Gsim Operations CLI for alpha factor validation and management.
+Gsim alpha 因子的验证、回测与生命周期管理 CLI。
 
-## Installation
+## 安装
 
 ```bash
 uv sync
-```
-
-## Usage
-
-```bash
 uv run ops --help
-uv run ops submit --help
-uv run ops check --help
-uv run ops status --help
-uv run ops list --help
-uv run ops info --help
-uv run ops backfill --help
 ```
 
-## Subcommands
+## 命令
 
-| Command | Description |
-|---------|-------------|
-| `submit`  | Submit factors from dropbox to staging, generate `meta.json`, mark state=SUBMITTED |
-| `check`   | 6-stage validation pipeline (runs in staging, archives to library or recycle) |
-| `status`  | Query factor lifecycle state (submitted/active/rejected/...) |
-| `list`    | List factors in library (filter, sort, metrics, datasources) |
-| `info`    | Show factor details (metadata, metrics, data sources) |
-| `backfill`| One-shot: generate `meta.json` + ACTIVE state for existing factors in `alpha_src/` |
+| 命令 | 说明 |
+|---|---|
+| `submit`  | 从 dropbox 提交因子到 staging |
+| `check`   | 对 staging 因子跑 7 阶段验证流水线 |
+| `run`     | 在因子库中跑回测 |
+| `list`    | 列出因子库中的因子(过滤/排序/指标/数据源) |
+| `info`    | 显示单个因子详情 |
+| `status`  | 查询因子生命周期状态 |
+| `pack`    | 聚合 alpha_dump 为 alpha_feature 矩阵 |
+| `restage` | 召回已入库因子到 staging 重跑 check |
+| `approve` | 多样性豁免:放行 correlation-rejected 因子 |
+| `cancel`  | 撤回未入库的 submitted 因子 |
+| `clear`   | 清理 staging 孤儿目录(state 无 record) |
+| `rm`      | 彻底删除因子(不可逆) |
+| `combo`   | combo 端到端代测(predict + backtest) |
+| `setup`   | 拉平本机 alphalib 部署 |
+| `doctor`  | 盘 ↔ Postgres 数据对账(只读;`--fix` 修复) |
 
-## Factor Workflow
+## 因子生命周期
 
 ```
-dropbox/{user}/{date}/AlphaXxx/   (QR-owned, read-only source)
-    │  ops submit
+dropbox/{user}/{date}/AlphaXxx/     (QR 所有,只读)
+    │  submit
     ▼
-staging/AlphaXxx/  +  meta.json   (state=SUBMITTED, flat layout)
-    │  ops check
-    ├── pass ──► alpha_src/AlphaXxx/                  (state=ACTIVE)
-    └── fail ──► recycle/{user}/{stage}/AlphaXxx/     (state=REJECTED)
+staging/AlphaXxx/ + meta.json       (SUBMITTED)
+    │  check(7 阶段)
+    ├─ pass ─► alpha_src/AlphaXxx/   (ACTIVE)
+    └─ fail ─► alpha_src/AlphaXxx/   (REJECTED)
 ```
 
-State is tracked in `~/.cache/ops/factor_state.json` (JSON store, fcntl-locked).
-`meta.json` lives inside each factor directory and serves as the factor's identity card.
+生命周期状态存 Postgres(`factor_info` / `factor_state` / `factor_snapshot` /
+`factor_history` 四表);`meta.json` 随因子目录走,是其身份证。
 
-### Validation Pipeline (ops check)
+### 验证流水线(ops check)
 
-1. **Checkbias** — Short backtest with DataFirewall (AST-injected) to detect forward-looking bias
-2. **Checkpoint** — Breakpoint validation (5 days)
-3. **Long Backtest** — Full historical (20150101-20251231)
-4. **Compliance** — Position limits (max 5% per stock, min 50 long/short, 100 total)
-5. **Correlation** — Factor correlation < 0.7 against existing library
-6. **Archive** — Save metrics, move to library
+`validate → checkbias → checkpoint → long_backtest → compliance → correlation → archive`
 
-### Examples
+| 阶段 | 作用 |
+|---|---|
+| validate | 最小回测,验证代码/配置能跑 |
+| checkbias | 短回测 + AST 注入 DataFirewall,检前视偏差 |
+| checkpoint | 断点续跑稳定性 |
+| long_backtest | 全历史回测(2015–2025) |
+| compliance | 仓位约束(个股 ≤5%,多/空 ≥50,总 ≥100) |
+| correlation | 业绩门槛(ret/shrp/tvr)+ bcorr <0.7(否则须打败竞品) |
+| archive | 测得快照落库,搬入因子库 |
+
+失败路由:validate / long_backtest 失败回 SUBMITTED 留 staging 重试;
+其余阶段失败置 REJECTED。详见 `docs/gsim/factor-validation.md`。
+
+### 示例
 
 ```bash
-uv run ops submit -u wbai -s 20260401                      # Submit a day's factors
-uv run ops submit -u wbai -s 20260401 -f AlphaWbaiReversal # Submit one factor
-uv run ops check                                           # Check everything in staging
-uv run ops status AlphaWbaiReversal                        # Query one factor's state
-uv run ops status -u wbai --status submitted               # Filter by author/state
-uv run ops backfill --dry-run                              # Preview backfill on alpha_src/
-uv run ops list --sort-by shrp -n 10                       # Top 10 by Sharpe
-uv run ops list --filter-by "ret>30,tables=ashare*"        # Filter by metrics/tables
-uv run ops info AlphaXxx                                   # Factor details
+ops submit -u wbai -s 20260401                 # 提交某日全部因子
+ops check                                      # 检测 staging 全部因子
+ops list --sort-by shrp -n 10                  # 按夏普排序取前 10
+ops list --filter-by "ret>30,tables=ashare*"   # 按指标/数据源过滤
+ops status AlphaWbaiReversal                   # 查单个因子状态
+ops doctor                                     # 盘 ↔ PG 对账
 ```
+
+## 文档
+
+- `docs/architecture.md` — **项目架构总览**(分层/生命周期/存储/拓扑,先读这个)
+- `CLAUDE.md` — 命令、SSOT、拓扑、技术债(维护者参考)
+- `docs/` — gsim 框架 + 因子开发(研究员)、schema/设计文档
+- `.claude/plans.md` — 路线图

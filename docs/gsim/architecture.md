@@ -109,7 +109,7 @@ class AlphaBase(Serializable, metaclass=ABCMeta):
 | `AlphaLoad` | `module/alpha_load.py` | 从 `alpha_dump`（小文件）加载 |
 | `AlphaLoadFeat` | `module/alpha_load_feature.py` | 从 `alpha_feature`（聚合大文件）加载，**即 FeatureReader** |
 
-`AlphaLoadFeat` 是 alpha_dump → alpha_feature 迁移的核心，详见 [gsim-changelog.md](gsim-changelog.md)。
+`AlphaLoadFeat` 是 alpha_dump → alpha_feature 迁移的核心，详见 [changelog.md](changelog.md)。
 
 ### Stats 模块
 
@@ -172,7 +172,7 @@ class AlphaBase(Serializable, metaclass=ABCMeta):
 
 ### Data 模块
 
-`gsim/data/module/__init__.py` 导出 50+ 个 Dmgr 类。详细列表见 [gsim-data-sources.md](gsim-data-sources.md)。
+`gsim/data/module/__init__.py` 导出 50+ 个 Dmgr 类。详细列表见 [data-sources.md](data-sources.md)。
 
 按类别概览：
 - **Universe 类**: `UmgrAll`, `UmgrTrd`（基础），`umgr_full.py`/`umgr_gim.py`（扩展），`source_ref/umgr_index.py`（指数），`source_ref/umgr_topliquid.py`（流动性 TOP）
@@ -235,7 +235,7 @@ def generate(self, di):
     bar = self.close_m5[di - self.delay, 48, valid_idx]
 ```
 
-完整数据源列表见 [gsim-data-sources.md](gsim-data-sources.md)。
+完整数据源列表见 [data-sources.md](data-sources.md)。
 
 ## 性能关键模块
 
@@ -259,10 +259,10 @@ def generate(self, di):
 
 ## 参考资料
 
-- XML 配置详细说明：[gsim-xml-config.md](gsim-xml-config.md)
-- 因子开发流程：[gsim-factor-workflow.md](gsim-factor-workflow.md)
-- 因子入库检测：[gsim-factor-validation.md](gsim-factor-validation.md)
-- 数据源参考：[gsim-data-sources.md](gsim-data-sources.md)
-- 更新日志：[gsim-changelog.md](gsim-changelog.md)
+- XML 配置详细说明：[xml-config.md](xml-config.md)
+- 因子开发流程：[factor-workflow.md](factor-workflow.md)
+- 因子入库检测：[factor-validation.md](factor-validation.md)
+- 数据源参考：[data-sources.md](data-sources.md)
+- 更新日志：[changelog.md](changelog.md)
 
 > 本文档基于 `/usr/local/gsim` 的实际代码整理，但 gsim 持续演进，模块列表可能滞后。实际开发时，以 `gsim/*/__init__.py` 中的导入声明为准。

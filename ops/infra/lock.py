@@ -15,8 +15,8 @@ A factor flowing through submit → check → archive touches multiple resources
   the one strongly-consistent store all three see). Session-level means the
   lock is released automatically when the connection drops (process death /
   SIGKILL / power loss), so there is no stuck-lock residue.
-  **conninfo 缺失是硬错误**:2026-07-07 (Wave 1, JOURNAL F4) 前这里会静默降级
-  成单机 fcntl —— 跨机互斥无声消失,比报错危险得多。
+  **conninfo 缺失是硬错误**:静默降级成单机 fcntl 会让跨机互斥无声消失,
+  比报错危险得多(JOURNAL F4)。
 - **json** (单机 dev/test): per-machine `fcntl` file lock under
   `~/.cache/ops/locks/{name}.lock`。单机语义下正确;它不是生产回退。
 
@@ -24,13 +24,10 @@ Acquisition is **non-blocking** on both backends: if another holder has the
 lock, the caller gets `FactorLocked` immediately (log a warning and skip,
 don't queue).
 
-**锁键 (2026-07-07 修, JOURNAL F5)**: `(hashtext('ops:factor_lock'),
-hashtext(name))` —— classid 是固定命名空间常量。原实现用
-`hashtext(config.library_id)` 作 classid,而 library_id 曾随 config 文件不同
-(alphalib vs alphalib-juicefs):两个进程锁的不是同一把锁,跨机互斥在混用
-config 的窗口期失效 (full-review S18)。单库世界里锁键不该有 library 维度。
-升级注意:新旧键不同,滚动升级期间新旧版本 ops 互不互斥 —— 部署时确保无
-in-flight check。
+**锁键**: `(hashtext('ops:factor_lock'), hashtext(name))` —— classid 是固定
+命名空间常量。别用 `hashtext(config.library_id)` 作 classid:library_id 随
+config 文件不同,两个进程会锁不是同一把锁,跨机互斥在混用 config 时失效
+(JOURNAL F5)。单库世界里锁键不该有 library 维度。
 """
 import fcntl
 from contextlib import contextmanager
@@ -42,10 +39,10 @@ LOCK_DIR = Path.home() / ".cache" / "ops" / "locks"
 
 # advisory lock 的固定 classid 命名空间(server 端 hashtext('ops:factor_lock'))。
 # 所有 ops 进程共享同一命名空间 —— 锁键只由因子名决定。
-# **生产不可注入**(S18 教训:锁键随 config 漂移 = 跨机互斥无声失效)。唯一的
-# 合法覆盖方是测试:config.lock_namespace(state.lock_namespace)注入本 pytest
-# session 的 PG schema 名 —— advisory lock 是库级作用域,per-session schema
-# 隔离挡不住它,并行测试进程必须各锁各的命名空间(I2,2026-07-11)。
+# **生产不可注入**(锁键随 config 漂移 = 跨机互斥无声失效)。唯一的合法覆盖方
+# 是测试:config.lock_namespace(state.lock_namespace)注入本 pytest session
+# 的 PG schema 名 —— advisory lock 是库级作用域,per-session schema 隔离挡不住
+# 它,并行测试进程必须各锁各的命名空间。
 _LOCK_NAMESPACE = "ops:factor_lock"
 
 

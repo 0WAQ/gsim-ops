@@ -1,24 +1,20 @@
 """Postgres state 后端 —— 因子生命周期真相源.
 
-从 Redis 迁入 (2026-07-04)。2026-07-06 重构: 去掉 library_id (永远单库) + author
-(移到 factor_info), 主键改为自增 id + name UNIQUE。
+schema: 去掉 library_id (永远单库) + author (移到 factor_info), 主键是自增
+id + name UNIQUE。
 
-实现 StateStore ABC,与 PostgresSnapshotStore 同范式 (psycopg3 ConnectionPool +
-幂等 _init_schema)。
-
-原子性: Redis 的 WATCH/MULTI/EXEC 乐观锁在 PG 里用事务 + `SELECT ... FOR UPDATE`
-行级锁替代 —— transition/append_check 在一个事务内锁住目标行读改写,天然串行,
-不需要应用层重试循环。
+原子性: 事务 + `SELECT ... FOR UPDATE` 行级锁 —— transition/append_check 在一个
+事务内锁住目标行读改写,天然串行,不需要应用层重试循环。
 
 时间戳: FactorRecord 的时间戳字段是 ISO string (datetime.now().isoformat,naive
 local)。PG 列是 TIMESTAMPTZ。转换只在本 store 读写边界发生:写时 string 直接入
 (psycopg 解析),读时 datetime -> .isoformat(timespec="seconds") 转回 string 喂给
 FactorRecord。
 
-schema v2b (2026-07-12): check_history JSONB 与 rejected_at/last_fail_stage/
-last_fail_reason 三列退役,事实迁 factor_history 全操作审计表(本模块持有其
-DDL 与发射函数 emit_on)。"一次操作是一条记录",且历史活过 ops rm(无 FK)。
-get() 的 check_history 从事件表组装;"最近失败"走 last_fail() 派生查询。
+factor_history 全操作审计表(本模块持有其 DDL 与发射函数 emit_on):
+check_history JSONB 与 rejected_at/last_fail_stage/last_fail_reason 三列退役,
+事实迁此表。"一次操作是一条记录",且历史活过 ops rm(无 FK)。get() 的
+check_history 从事件表组装;"最近失败"走 last_fail() 派生查询。
 """
 from typing import Any
 
@@ -68,8 +64,7 @@ _EVENT_COLS = "name, op, at, actor, started_at, passed, failed_stage, fail_reaso
 
 from ops.utils.clock import now_iso as _now  # 单一真相源, 见 utils/clock.py
 
-# _ts_in/_ts_out 正主已收敛到 ops/infra/pg.py(ts_in/ts_out),此处只留别名 ——
-# 与 snapshot/pg_store 的镜像自 2026-07-09 合并(repository 是第三个消费者)。
+# _ts_in/_ts_out 正主已收敛到 ops/infra/pg.py(ts_in/ts_out),此处只留别名。
 
 
 def emit_on(conn, event: HistoryEvent) -> None:
@@ -99,8 +94,8 @@ def _row_to_event(row) -> HistoryEvent:
 
 class PostgresStateStore(StateStore):
     def __init__(self, conninfo: str):
-        """构造零副作用:DDL 归 ops/infra/schema.py::ensure_schemas(2026-07-09
-        滚出 __init__)+ 生产 scripts/postgres 迁移。"""
+        """构造零副作用:DDL 归 ops/infra/schema.py::ensure_schemas + 生产
+        scripts/postgres 迁移。"""
         self.pool = get_pool(conninfo)
 
     def _row_to_record(self, row) -> FactorRecord:
@@ -115,7 +110,7 @@ class PostgresStateStore(StateStore):
         )
 
     def checks(self, name: str) -> "list[CheckRecord]":
-        """check 全史:从事件表组装(op='check',at 升序;v2c 自 record 剥离,
+        """check 全史:从事件表组装(op='check',at 升序;自 record 剥离,
         按需查)。CheckRecord.finished_at ← 事件 at(发射时 at=finished_at|now)。"""
         with self.pool.connection() as conn:
             rows = conn.execute(
@@ -145,9 +140,9 @@ class PostgresStateStore(StateStore):
     def put_on(conn, record: FactorRecord, stamp: bool = True) -> None:
         """在调用方给定的连接/事务上执行 put —— repository.register 用它与
         factor_info 的 upsert 合进同一个事务(原子入库)。
-        注:check 史在事件表(v2c 起 record 无 check_history 字段)。"""
-        # stamp=False preserves record.updated_at as-is (used by migration to
-        # keep the original Redis timestamp). Normal writes bump it to now.
+        注:check 史在事件表(record 无 check_history 字段)。"""
+        # stamp=False preserves record.updated_at as-is; normal writes bump it
+        # to now.
         if stamp:
             record.updated_at = _now()
         sql = (

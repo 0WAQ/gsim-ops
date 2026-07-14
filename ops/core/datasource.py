@@ -1,8 +1,7 @@
 """数据源解析 —— submit/check/backfill 共用的领域能力(纯函数)。
 
-2026-07-09 自 `ops/services/list/datasource.py` 迁入(factor-aggregate-plan 阶段 2):
-原先住在 list 包下是历史遗留,submit/backfill/check 跨包借用构成 4 条 C3 违例边
-(service 包相互独立契约)。datasources 的唯一落库点是 check archive 时的
+放 core 而非某个 service 包:多条写路径共用,住在 list 包下会让别的 service
+跨包借用(service 包相互独立)。datasources 的唯一落库点是 check archive 时的
 factor_snapshot(入库时不可变快照)。
 
 - `parse_datasources`:AST 走查因子 .py 里的 `*.getData("xxx")` 字面量 → fields

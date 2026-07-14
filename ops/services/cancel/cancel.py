@@ -13,7 +13,7 @@
 
 不动: alpha_src / alpha_pnl / alpha_dump / alpha_feature —— 正因如此,资格判定
 拒绝任何在 alpha_src 有归档的因子(entered_at 非空的曾 ACTIVE、或曾 REJECTED 后
-重提的):对它们只删记录会留下孤儿产物,须走 ops rm(2026-07-09 生产实测,JOURNAL U3)。
+重提的):对它们只删记录会留下孤儿产物,须走 ops rm(见 JOURNAL U3)。
 
 批量模式 (-u) apt 风格交互;-y 跳过确认。
 """
@@ -41,8 +41,7 @@ def _ineligible_reason(rec: FactorRecord, force: bool, repo: FactorRepository) -
         # cancel 的前提"SUBMITTED 无产物"只对纯新提交成立。曾被 check 归档过的
         # 因子(如 REJECTED 后 submit --overwrite 召回)在 alpha_src 有归档,
         # late-stage 拒绝还留有 pnl/dump —— 只删记录会把这些产物变成任何命令都
-        # 够不到的孤儿(2026-07-09 生产实测:143 个孤儿目录即此路径产生,
-        # JOURNAL U3)。拒绝并指引 ops rm(全落点删除)。
+        # 够不到的孤儿(见 JOURNAL U3)。拒绝并指引 ops rm(全落点删除)。
         return "alpha_src 有归档产物(曾被 check 归档),cancel 会留孤儿;用 ops rm"
     return None
 
@@ -67,9 +66,9 @@ def _resolve_targets(args, repo: FactorRepository) -> tuple[list[Factor], list[t
             return [], []
         if rec.entered_at:
             # 曾入库因子被 restage 召回后也是 SUBMITTED,但源码唯一副本在 staging
-            # (restage 是 move 不是 copy)。cancel 的 rmtree 会毁掉唯一源码
-            # (full-review 第一部分 1.2 / 第三部分 §3.1:"SUBMITTED(新)"与
-            # "SUBMITTED(曾入库)"是被压成一个状态的两个状态,entered_at 即判据)。
+            # (restage 是 move 不是 copy)。cancel 的 rmtree 会毁掉唯一源码 ——
+            # "SUBMITTED(新)"与"SUBMITTED(曾入库)"是被压成一个状态的两个状态,
+            # entered_at 即判据。
             error(f"  ✘ {name} 曾入库(entered_at={rec.entered_at}),staging 里可能是"
                   f"唯一源码副本,拒绝 cancel;要彻底删除用 ops rm,要重新入库跑 ops check")
             return [], []
@@ -86,8 +85,7 @@ def _resolve_targets(args, repo: FactorRepository) -> tuple[list[Factor], list[t
         error("  ✘ 必须指定 factor_name 或 -u")
         return [], []
 
-    # 批量模式:单条三表 JOIN,全状态(资格谓词把非 eligible 的归 Skipped 段;
-    # 原先 info.list + state.list() 两次查 + 内存交集)
+    # 批量模式:单条三表 JOIN,全状态(资格谓词把非 eligible 的归 Skipped 段)
     factors = repo.find(author=args.user, include_submitted=True)
     targets: list[Factor] = []
     skipped: list[tuple[Factor, str]] = []
@@ -129,10 +127,10 @@ def _cancel_one(name: str, repo: FactorRepository) -> None:
     else:
         warn(f"    ⚠ staging/{name}/ 不存在(可能已被外部清理)")
 
-    # repo.delete = 删 factor_info,FK 级联带走 state(原先分两步"先 state 再
-    # info",顺序反了会泄漏孤儿 info 行,full-review P0-6 同族;级联一步消灭
-    # 中间态)。resolve 阶段的 entered_at 守卫保证走到这里的因子从未入库,
-    # 身份行可安全移除;重新 submit 会重建。
+    # repo.delete = 删 factor_info,FK 级联带走 state(分两步"先 state 再 info"
+    # 顺序反了会泄漏孤儿 info 行;级联一步消灭中间态)。resolve 阶段的
+    # entered_at 守卫保证走到这里的因子从未入库,身份行可安全移除;
+    # 重新 submit 会重建。
     if repo.delete(name, op="cancel"):
         info(f"    ✔ 已删除 factor_info + 级联 state record {name}")
     else:

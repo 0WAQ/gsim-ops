@@ -108,7 +108,7 @@ Gsim 使用 XML 配置文件驱动回测，schema 定义在 `/usr/local/gsim/gsi
     dataPath="/datasvc/rawdata/rawdata_citics/Interval5m/"/>
 ```
 
-完整数据源参考 [gsim-data-sources.md](gsim-data-sources.md)。
+完整数据源参考 [data-sources.md](data-sources.md)。
 
 ### Alpha 模块（注册）
 
@@ -176,7 +176,7 @@ Gsim 使用 XML 配置文件驱动回测，schema 定义在 `/usr/local/gsim/gsi
 
 ### Stats 模块列表
 
-完整 12 个 Stats 模块见 [gsim-architecture.md](gsim-architecture.md#stats-模块)，常用配置：
+完整 12 个 Stats 模块见 [architecture.md](architecture.md#stats-模块)，常用配置：
 
 **默认基础统计**（来自 `/datasvc/template/config.read_cache.xml`）:
 ```xml
@@ -340,7 +340,7 @@ Schema 中 `<Description>` 的所有属性都是 `use="required"`：
 
 文件路径模式：`{featDir}/{alphaId}.{ver}.npy`。
 
-详见 [gsim-changelog.md](gsim-changelog.md)。
+详见 [changelog.md](changelog.md)。
 
 ## 高级特性
 

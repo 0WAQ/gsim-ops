@@ -1,11 +1,11 @@
-"""共享 PG 连接池:每进程按 conninfo 去重 + 退出收尾(full-review D2)。
+"""共享 PG 连接池:每进程按 conninfo 去重 + 退出收尾。
 
 **为什么存在**(两个真实故障合治):
 
 1. **退出刷屏**:`ConnectionPool(open=True)` 与其后台 worker 线程互相引用成环,
    refcount 归不了零 → 池活到解释器关闭 → GC 触发 `__del__` → join 线程在关闭
    上下文抛 `cannot join current thread`(无害但每条命令 × 每个未关的池刷一次)。
-2. **连接打爆**(生产 P0):`default_*_store()` 原先每调一次 `ConnectionPool(...)`
+2. **连接打爆**(生产):`default_*_store()` 原先每调一次 `ConnectionPool(...)`
    新建一个池(min_size=1 立刻占 1 条连接)。`ops check` 在 `run_one` 里**每因子**
    建 state/info/snapshot 三个池,一个 worker 处理 K 个因子就攒 3K 个池、3K 条连接,
    到进程退出才释放;20 个 fork worker 一拥而上,秒破 PG 默认 `max_connections=100`
@@ -21,8 +21,8 @@ check worker 的连接占用从 3K 降到 1。`ensure_schema` 保证每个 (池,
 在子进程清空缓存,丢弃继承自父进程的池对象(其 worker 线程不随 fork 存活)。
 `atexit` 只关本进程建的池。
 
-注:这是 full-review D2「每进程一个池注册表」的落地。仍未做的:`default_*_store`
-之外零散的直接建池点(已无);DDL 滚出 store `__init__`(现由 ensure_schema 兜)。
+注:`default_*_store` 之外零散的直接建池点已无;DDL 已滚出 store `__init__`
+(现由 ensure_schema 兜)。
 """
 from __future__ import annotations
 
@@ -108,8 +108,8 @@ os.register_at_fork(after_in_child=_reset_after_fork)
 
 
 # ---------------------------------------------------------------------------
-# ISO string <-> TIMESTAMPTZ 边界转换(2026-07-09 自 store/snapshot 两个
-# pg_store 的同名私有函数收敛至此 —— 第三个消费者 repository 出现后不再镜像)
+# ISO string <-> TIMESTAMPTZ 边界转换(正主:原 store/snapshot 两个 pg_store
+# 各自镜像同名私有函数,收敛至此)
 # ---------------------------------------------------------------------------
 
 def probe(conninfo: str, *, statements: tuple[str, ...] = (),
