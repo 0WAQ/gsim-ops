@@ -1,20 +1,20 @@
-"""因子盘面布局的唯一正主(SSOT S4,full-review;factor-aggregate-plan 阶段 1)。
+"""因子盘面布局的唯一正主(SSOT)。
 
 一个因子在因子库(alphalib)的全部落点从这里拼,**任何地方不得再手写
-`config.alpha_xxx / name`**(原先散布 40+ 处,"pnl 是单文件"这类布局事实靠
-CLAUDE.md 警告人肉维持,check.py 曾因此对单文件 pnl 用 rmtree 踩 Errno 20,R4)。
+`config.alpha_xxx / name`** —— 散布各处手拼,"pnl 是单文件"这类布局事实就
+只能靠文档人肉维持。
 
-布局事实(从此由类型承载,不再靠文档):
+布局事实(由类型承载,不靠文档):
   - src / staging / dump      —— **目录**
   - pnl / 池副本 / feature    —— **单文件**(删除用 unlink,不能 rmtree!)
   - feature 命名 `<name>.<v1|v2>.npy`,meta.json 随因子目录走(staging 或 src)
 
 边界:本类只管**因子库布局**(alphalib 五路径 + bcorr 池)。check 期工作区
 (workspace 的 pnl_path/alpha_path/checkpoint_path)是 AlphaMetadata 的工作台
-路径,不在此列(其正名属 factor-aggregate-plan 阶段 2)。
+路径,不在此列。
 
-归宿:FactorRepository 产物面的内部构件(`repo.paths(name)`,阶段 2);在那
-之前由各 service 直接 `FactorPaths.of(name, config)` 使用。
+归宿:FactorRepository 产物面的内部构件(`repo.paths(name)`);在那之前由各
+service 直接 `FactorPaths.of(name, config)` 使用。
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # 仅类型引用:core 不得运行期依赖 infra(import-linter C1)。
+    # 仅类型引用:core 不得运行期依赖 infra(import-linter)。
     from ops.infra.config import Config
 
 # 因子目录身份证文件名(随因子在 staging → alpha_src 间迁移)
@@ -69,7 +69,7 @@ class FactorPaths:
     @property
     def pools(self) -> tuple[Path, Path]:
         """两个 bcorr 分流池的副本路径。回收/删除时两个都查 —— 因子来源
-        (discovery_method)可能在历史上变过(PV7)。"""
+        (discovery_method)可能在历史上变过。"""
         return (self.pool_automated, self.pool_manual)
 
     @property

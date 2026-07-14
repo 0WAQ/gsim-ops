@@ -3,9 +3,9 @@ from enum import Enum
 
 
 class FactorStatus(str, Enum):
-    # 与 factor_state 的 chk_status CHECK 约束一一对应(DB 是权威)。DECAYING/RETIRED
-    # 曾在此声明但 DB 拒收、无任何 transition 产生 —— 接口先行的幽灵状态,2026-07-07
-    # 移除(full-review 第三部分 S10/G13);真要引入衰退生命周期时随 DB 约束一起加。
+    # 与 factor_state 的 chk_status CHECK 约束一一对应(DB 是权威)。别加没有 DB
+    # 约束背书的状态:DECAYING/RETIRED 曾作接口先行的幽灵状态在此声明,DB 拒收、
+    # 无任何 transition 产生,已移除;真要引入衰退生命周期时随 DB 约束一起加。
     SUBMITTED = "submitted"
     CHECKING  = "checking"
     ACTIVE    = "active"
@@ -14,7 +14,7 @@ class FactorStatus(str, Enum):
 
 # correlation 是唯一具有生命周期语义的 stage 名:它是 approve(多样性豁免)的
 # 放行判据(last_fail_stage == CORRELATION)。定义放 core 使 approve 不必跨包
-# import check(C3);stage 的顺序/路由/行为 SSOT 仍是 check/stages.py 的
+# import check;stage 的顺序/路由/行为 SSOT 仍是 check/stages.py 的
 # PIPELINE(其 correlation 行引用本常量,单一定义)。
 CORRELATION = "correlation"
 
@@ -35,19 +35,18 @@ class CheckRecord:
         return cls(**d)
 
 
-# factor_history.op 的合法值(与 DB chk_op CHECK 约束同一提交改,schema v2b)。
+# factor_history.op 的合法值(与 DB chk_op CHECK 约束同一提交改)。
 # 'entered' 是唯一非命令 op:任何写路径把 status 置 ACTIVE(check 归档 /
 # approve 放行)都自动发射,是"入库了"这一事实的统一标记;其余 op 一一对应
 # 写命令动作。CHECKING / revert-SUBMITTED 是瞬时态,无事件。'backfill' 是
-# 历史枚举:命令 2026-07-13 退役(legacy 清理批),存量事件是历史事实,
-# 枚举值与 DB chk_op 一并保留。
+# 历史枚举:命令已退役,但存量事件是历史事实,枚举值与 DB chk_op 一并保留。
 HISTORY_OPS = ("submit", "overwrite", "check", "approve",
                "restage", "cancel", "rm", "backfill", "entered")
 
 
 @dataclass
 class HistoryEvent:
-    """factor_history 一行的领域形态 —— 全操作审计事件(schema v2b)。
+    """factor_history 一行的领域形态 —— 全操作审计事件。
 
     刻意无 FK:审计要活过 ops rm(指向已删因子的事件属预期,同名重提续写
     同一 name 的时间线)。started_at/passed/failed_stage/fail_reason 是
@@ -67,14 +66,14 @@ class HistoryEvent:
 class FactorRecord:
     """因子生命周期状态（纯状态机，不含身份信息）。
 
-    author 已移到 FactorInfo，discovery_method 同理。
+    身份(author / discovery_method)在 FactorInfo，不在此。
     本 record 只管状态转移: SUBMITTED -> CHECKING -> ACTIVE/REJECTED。
 
-    rejected_at / last_fail_stage / last_fail_reason 已删(schema v2b):
+    rejected_at / last_fail_stage / last_fail_reason 不落此表:
     "最近一次失败"是 factor_history 的派生事实(op='check' AND passed=FALSE
     的最新行),读侧走 `Factor.last_fail`(repository 组装)。check_history
-    v2c 起也不在 record 上(遗留项 ④):全史按需 `store.checks(name)` /
-    时间线 `store.history(name)`,record 是纯状态机快照。
+    同理不在 record 上:全史按需 `store.checks(name)` / 时间线
+    `store.history(name)`,record 是纯状态机快照。
     """
     name: str
     status: FactorStatus
@@ -93,7 +92,7 @@ class FactorRecord:
         d = dict(d)
         d["status"] = FactorStatus(d["status"])
         d.setdefault("version", 1)
-        # 旧 json state 文件兼容:v2b 删的三列 + v2c 剥离的 check_history
+        # 旧 json state 文件兼容:已删的三列 + 剥离的 check_history
         # (全史按需查 store.checks(),record 不再背着走)静默丢弃
         for legacy in ("rejected_at", "last_fail_stage", "last_fail_reason",
                        "check_history"):
