@@ -11,6 +11,7 @@
 | 目录 / 文件 | 内容 |
 |---|---|
 | [architecture.md](architecture.md) | **架构总览**——自顶向下的地图,链接以下各区 |
+| [components/](components/) | 子部件详细参考([数据模型](components/data-model.md) / [盘面布局](components/storage-layout.md) / [拓扑](components/topology.md) / [流水线](components/check-pipeline.md) / [命令](components/commands.md)) |
 | [design/](design/) | 设计决策记录(schema v2·v3 / 聚合施工图 / 共享 staging / legacy 清理 / combo) |
 | [gsim/](gsim/) | gsim 框架 + 因子开发(研究员面向) |
 | [remediation/](remediation/) | 执行手册 + JOURNAL(每批迁移的手册与记账) |

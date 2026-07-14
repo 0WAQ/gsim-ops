@@ -43,8 +43,8 @@ changed files.
    - Changed `ops/services/<x>/` → start with `ops/services/<x>/CLAUDE.md`.
    - Then always check cross-references: top-level `CLAUDE.md` (command examples
      block + subcommand table + "已完成的大事件" + design principles), `docs/*.md`
-     (esp. `factor-state-machine.md`, `gsim-factor-workflow.md`,
-     `gsim-factor-validation.md`), `.claude/plans.md`, and any `.claude/skills` /
+     (esp. `components/commands.md`, `gsim/factor-workflow.md`,
+     `gsim/factor-validation.md`), `.claude/plans.md`, and any `.claude/skills` /
      `.claude/agents` that mention the changed command/behavior.
    - `grep` the whole scan surface for old command names / symbols the change
      removed or renamed, to catch stale references anywhere.
