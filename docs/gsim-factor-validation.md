@@ -170,9 +170,9 @@ XML 中通过 `Constants` 控制：
 
 **实现**: `ops/services/check/checker/correlation_checker.py`
 
-**标准**: 最大相关性 ≤ 0.7
+**标准**: 最大相关性 `abs(max_bcorr) < 0.7`(严格小于;≥0.7 并非一律拒 —— 若新因子在 fitness/ret/shrp 中打败竞品 ≥2 项仍可放行,见 `correlation_checker.py`)。此 stage 同时校验业绩门槛(ret ≥ / shrp > / tvr ≤,阈值见下表)。
 
-**检测方法**: 使用 `/usr/local/gsim/dataops/bcorr` 计算新因子 PNL 与因子库中所有 PNL 的相关性。
+**检测方法**: 使用 `/usr/local/gsim/dataops/bcorr` 计算新因子 PNL 与对比池的相关性。对比池按 `discovery_method` 分池(automated/manual 各比各的,`resolve_bcorr_pools`),避免人工因子与机器因子互相撞车。
 
 **手动相关性测试**:
 
@@ -190,7 +190,7 @@ XML 中通过 `Constants` 控制：
 
 **操作**:
 - 运行 `simsummary` 提取指标（ret/shrp/dd/tvr/fitness）
-- 指标写入 PG `factor_snapshot`（入库时不可变快照，`snapshot_at = entered_at`）
+- 指标写入 PG `factor_snapshot`（**测得快照**,schema v3:= 最近一次 check 测得的表现,`snapshot_at` = 测得时刻。pass 因子在此写;correlation/compliance 被拒的因子也在失败路径写快照 —— 故被拒因子在 `ops list` 也能看到指标。快照不可离线重算,需最新表现须重跑 backtest）
 - 将因子源代码、Config、Readme 移动到 `alpha_src/`
 - 将 PNL 文件移动到 `alpha_pnl/`
 - 将 alpha_dump 移动到 `alpha_dump/`

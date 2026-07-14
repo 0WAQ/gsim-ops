@@ -102,13 +102,19 @@ wbai 原话(2026-07-07):
 @dataclass(frozen=True)
 class Factor:
     identity: FactorIdentity       # name/author/discovery_method/created_at
-    state: FactorState             # status/version/时间戳/last_fail_*
-    snapshot: Snapshot | None      # 入库时不可变快照(未入库 = None)
+    state: FactorState             # status/version/时间戳
+    snapshot: Snapshot | None      # 最近一次 check 测得的表现(从未测得 = None)
 ```
 
-不变量在类型层表达:`state.status == ACTIVE ⇒ snapshot is not None 且
-snapshot.at == state.entered_at`(构造时校验,坏数据 warn 不炸 —— 存量迁移期
-残留见 U2 鬼影记录)。service 层只见 `Factor`,三张表的 dataclass 降级为
+> **注(2026-07-13,本施工图 2026-07-09,后续演进已改写以下两点)**:
+> ① v2b 起 `last_fail_*`/`check_history` 不在 state —— 迁 `factor_history` 事件表,
+> `Factor.last_fail` 是派生切面;② v3 起 snapshot 是**测得快照**(被拒因子也有),
+> 不变量 `snapshot_at == entered_at` **作废**,`snapshot_at = 测得时刻`。下方原文
+> 保留作施工时序记录。
+
+不变量在类型层表达(v2 语义,v3 已作废):`state.status == ACTIVE ⇒ snapshot is
+not None 且 snapshot.at == state.entered_at`(构造时校验,坏数据 warn 不炸 —— 存量
+迁移期残留见 U2 鬼影记录)。service 层只见 `Factor`,三张表的 dataclass 降级为
 Repository 内部行网关。
 
 ### 3.2 `FactorRepository`(ops/infra/repository.py)

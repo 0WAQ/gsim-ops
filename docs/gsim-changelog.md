@@ -115,7 +115,7 @@ class AlphaLoadFeat(AlphaBase):
 
 - **alpha_dump 逐步弃用**: 新建 combo 推荐使用 `AlphaLoadFeat`
 - **ops pack**: ops 已实现 `ops pack` 命令，将 `alpha_dump` 聚合为 `alpha_feature`
-- **ops sync**: alpha_dump 已降级为纯本地中间产物，sync 不再传输
+- **ops sync**: alpha_dump 已降级为纯本地中间产物，sync 不再传输(注:`ops sync` 命令本身已于 2026-07-07 Wave 1 整体退役删除 —— S3 传输模型被 JFS 取代;此条为当时的影响记录)
 
 #### 待实现
 
@@ -131,4 +131,4 @@ class AlphaLoadFeat(AlphaBase):
 - Gsim 架构：[gsim-architecture.md](gsim-architecture.md)
 - XML 配置（含 FeatureReader 节）：[gsim-xml-config.md](gsim-xml-config.md#featurereaderalphaloadfeat)
 - ops pack 实现：`ops/services/pack/`
-- ops sync 设计：`ops/services/sync/`
+- ~~ops sync 设计：`ops/services/sync/`~~(命令与服务已于 2026-07-07 退役删除,路径已不存在)
