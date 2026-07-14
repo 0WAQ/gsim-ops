@@ -74,6 +74,7 @@ ops doctor                                     # 盘 ↔ PG 对账
 
 ## 文档
 
-- `CLAUDE.md` — 架构、命令、SSOT、拓扑(维护者)
+- `docs/architecture.md` — **项目架构总览**(分层/生命周期/存储/拓扑,先读这个)
+- `CLAUDE.md` — 命令、SSOT、拓扑、技术债(维护者参考)
 - `docs/` — gsim 框架 + 因子开发(研究员)、schema/设计文档
 - `.claude/plans.md` — 路线图

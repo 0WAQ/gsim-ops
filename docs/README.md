@@ -8,6 +8,7 @@
 
 | 文档 | 说明 | 何时阅读 |
 |-----|------|---------|
+| [architecture.md](architecture.md) | ops 项目架构总览(分层/生命周期/存储/拓扑) | 了解整个系统时 |
 | [gsim-factor-workflow.md](gsim-factor-workflow.md) | 因子开发完整流程 | 开发新因子时 |
 | [gsim-xml-config.md](gsim-xml-config.md) | XML 配置详细说明 | 配置回测时 |
 | [gsim-data-sources.md](gsim-data-sources.md) | gsim 框架数据源 API(XML / dr.getData) | gsim 内开发因子时 |
