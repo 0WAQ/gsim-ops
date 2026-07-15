@@ -62,6 +62,13 @@
 真实 dump 日**早 ≤1 交易日** —— 只动日期标签、不碰阈值分布。dump 路径无偏移,标签
 与 checker 的文件名日期一致。跨源精确对齐等把 rejected 因子的 dump 折进来时再做。
 
+**⚠ 判读注意(选择偏差)**:feature 只在 packed(≈ACTIVE)因子上有,而 ACTIVE =
+**已经通过旧 compliance 检查**的因子。所以 feature 源的分布是"安全内区"长什么样,
+指标全部远离阈值是**预期甚至近乎同义反复** —— 据此推不出"阈值偏松"。真正决定
+阈值的是两块边界人口:①被拒因子(dump 源覆盖);②活因子的**窗外早期天**(旧
+checker 只看尾部 762 文件,survey 的 maxpos_max 是全历史 —— "全史超线但旧窗没看到"
+的因子,正是"改成每天检查会误伤多少已入库因子"的量化对象)。
+
 ---
 
 ## 怎么跑
@@ -103,10 +110,15 @@ uv run python -c "import numpy as np,glob; f=sorted(glob.glob('$HOME/csurvey-sam
 ### 2 · 全量(可选,抽检判读后按需)
 
 ```bash
-nohup uv run python scripts/compliance_survey.py --source feature \
+nohup uv run python scripts/compliance_survey.py --source auto \
     --out ~/compliance-survey > ~/compliance-survey.log 2>&1 &
 echo "PID=$!"
 ```
+
+`--source auto` = feature 优先、无 feature 时回落本机 dump —— 一趟同时拿到活因子
+内区 + 本机能覆盖的被拒尾巴(边界人口,定阈值最需要的半边)。summary 的 `source`
+列标注每因子来源,判读时可分开切。`coverage-missing.txt` 里剩下的 = 本机 dump 也
+没有的因子(dump 在别的 check 机上,或产物已清),名单决定要不要去别的机器补跑。
 
 断点续跑安全(已有 `<name>.npz` 跳过);顺序读大(每因子 ~171MB feature memmap),
 JFS 上小时级,峰值内存 ~22MB。监控 `tail -3 ~/compliance-survey.log` /

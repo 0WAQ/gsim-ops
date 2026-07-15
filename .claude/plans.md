@@ -314,7 +314,13 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 标签、不碰分布。对抗验证收口三修(commit de53235):dump 越界崩溃守卫 / `total_min` 列
 补齐第四阈值 / nanmax 哨兵收窄。
 
-**下一步序列**:随机抽检(`--sample`,feature 源)分布判读 → 按需全量 →
+**抽检已完成**(2026-07-15,160,`--sample 8` seed=0):8/8 出统计、自检全过,
+仪器验证 OK。判读注意:feature 源 = 已过关的安全内区(选择偏差),指标远离阈值是
+预期,推不出阈值松紧 —— 定策靠边界人口(被拒 dump + 活因子窗外早期天),见
+runbook"判读注意"。
+
+**下一步序列**:全量(`--source auto`,160 nohup,feature+本机 dump 一趟)→
+分布判读(内区分布 / 缺陷 1 误伤面 / 薄尾形状 / 纯多头存量)→
 用户按数据定策(容忍度/下限/gap/纯多头豁免/口径)→ checker 重写 +
 对 22 条已被拒 compliance 因子做新旧影子对比(最好的回归材料)→
 顺手修缺陷 6(long_backtest 的 prepare 显式声明 dump_alpha=True)。
