@@ -306,9 +306,15 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
   delay=1 有 -1 行偏移(分布统计无影响)、全 NaN 行 = 无 dump 日;
 - 成本:~1.3TB 顺序读,一次性小时级,断点续跑(已有 npz 跳过),160 nohup。
 
-**当前状态**:`scripts/compliance_survey.py` 草稿已在分支(**未沙盘未跑**)。
+**当前状态**(2026-07-15,分支 `claude/compliance-survey`,runbook
+`docs/design/compliance-survey.md`):脚本已沙盘 + 五问对抗验证过关。加了 dump 回落源
+(覆盖被拒因子的完整判定域)+ `--sample N`(只从有源因子抽,可复现)。**feature↔dump
+等价性确认**:pack 是纯字节搬运(verify_sample 自证),survey 四列 = checker 同款表达式,
+计数/max/跳过逐位一致、total_abs 仅差 ~1e-16 FP;delay=1 feature 读只早 ≤1 交易日的日期
+标签、不碰分布。对抗验证收口三修(commit de53235):dump 越界崩溃守卫 / `total_min` 列
+补齐第四阈值 / nanmax 哨兵收窄。
 
-**下一步序列**:脚本沙盘实测 → 执行者 160 跑全库 → 分布判读贴回 →
+**下一步序列**:随机抽检(`--sample`,feature 源)分布判读 → 按需全量 →
 用户按数据定策(容忍度/下限/gap/纯多头豁免/口径)→ checker 重写 +
 对 22 条已被拒 compliance 因子做新旧影子对比(最好的回归材料)→
 顺手修缺陷 6(long_backtest 的 prepare 显式声明 dump_alpha=True)。

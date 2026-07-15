@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import random
 import sys
 from pathlib import Path
 
@@ -183,6 +184,11 @@ def main() -> int:
                         help="输出目录(npz 缓存 + summary.csv)")
     parser.add_argument("--factor", help="只跑一个因子(调试)")
     parser.add_argument("--limit", type=int, help="只跑前 N 个(冒烟)")
+    parser.add_argument("--sample", type=int,
+                        help="随机抽 N 个 —— 只从该源确有数据的因子里抽,"
+                             "保证抽到的 N 个都能出统计(摸底/抽检用)")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="随机抽样种子(默认 0;同种子 + 同 --out 可复现同一批)")
     parser.add_argument("--source", choices=["auto", "feature", "dump"],
                         default="auto",
                         help="数据源:auto=feature 优先 dump 回落(默认,覆盖完整"
@@ -202,6 +208,20 @@ def main() -> int:
     factors = repo.find(include_submitted=True)
     if args.factor:
         factors = [x for x in factors if x.name == args.factor]
+
+    if args.sample:
+        # 抽样前先筛"该源有数据"的因子:否则随机抽到的多半没 feature、全落
+        # coverage-missing,实得样本远少于 N。用固定 seed 让抽检可复现。
+        def _has_source(x) -> bool:
+            p = FactorPaths.of(x.name, config)
+            if args.source in ("auto", "feature") and p.feature("v2").is_file():
+                return True
+            return args.source in ("auto", "dump") and p.dump.is_dir()
+        pool = [x for x in factors if _has_source(x)]
+        factors = random.Random(args.seed).sample(pool, min(args.sample, len(pool)))
+        print(f"随机抽样: 池 {len(pool)}(有 {args.source} 数据)→ 抽 {len(factors)}"
+              f"(seed={args.seed})")
+
     factors.sort(key=lambda x: x.name)
 
     rows, missing, done, skipped = [], [], 0, 0
