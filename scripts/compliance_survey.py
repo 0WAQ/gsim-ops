@@ -18,9 +18,15 @@
   **被拒因子(compliance/correlation)无 feature,只有 dump** —— 补上 dump 才覆盖
   完整判定域(定阈值最需要看的正是被拒尾巴)。dump 是**本机 sidecar**,dump 路径
   只能在持有该因子 dump 的机器上跑(消费/check 机)。
-- 两源同 npz 格式:行 i 对应 __universe/Dates.npy 第 i 个交易日;全 NaN / 零敞口
-  行 = 该日无有效持仓(数据未起 / 空洞),正是有效起始日与 gap 的判据。delay 偏移
-  对逐日分布统计无影响。
+- 两源同 npz 格式(PACK_L 行);全 NaN / 零敞口行 = 该日无有效持仓(数据未起 /
+  空洞),正是有效起始日与 gap 的判据。**逐日分布统计(百分位 / 计数 / valid_days /
+  gap)与数据源无关**:每日四元组两源逐位等价(feature 的 nansum-over-padded 与
+  dump 的 sum-over-valid 仅差 ~1e-16 FP 舍入,远低于任何阈值),feature 的 pack 行
+  偏移只是常量平移,不改多重集。**唯一源相关处**:feature 行号含 delay 偏移
+  (delay=1 时行 i 存的是交易日 i+1 的 dump),故 first/last_valid_date 在 delay=1
+  feature-读因子上比真实 dump 日早 ≤1 交易日 —— 只动日期标签、不碰阈值分布;dump
+  路径无偏移,标签与 compliance checker 的文件名日期一致。跨源精确对齐(把 rejected
+  因子的 dump 折进来时)留作后续。
 
 输出(--out 目录):
 - universe_dates.npy           行号 → 交易日(int,一次)
@@ -83,6 +89,9 @@ def _summarize(total_abs, max_abs, long_cnt, short_cnt, out_npz: Path) -> dict:
     first, last = int(idx[0]), int(idx[-1])
     vp = max_pos_pct[valid]
     lc, sc = long_cnt[valid], short_cnt[valid]
+    # min_total_stocks 判据是逐日 long+short 之和的下限;long_min/short_min 可能落在
+    # 不同天,min(a+b)≠min(a)+min(b),故单列 —— 四条 compliance 阈值全从 summary 可复算
+    tot = lc + sc
     return {
         "valid_days": int(valid.sum()),
         "first_valid_row": first,
@@ -94,6 +103,7 @@ def _summarize(total_abs, max_abs, long_cnt, short_cnt, out_npz: Path) -> dict:
         "maxpos_max": round(float(vp.max()), 6),
         "long_min": int(lc.min()), "long_p05": int(np.percentile(lc, 5)),
         "short_min": int(sc.min()), "short_p05": int(np.percentile(sc, 5)),
+        "total_min": int(tot.min()), "total_p05": int(np.percentile(tot, 5)),
     }
 
 
@@ -114,7 +124,9 @@ def survey_one_feature(feature: Path, out_npz: Path) -> dict:
         # 全 NaN 行 nanmax 会警告并给 NaN —— 先兜 0 再还原
         with np.errstate(all="ignore"):
             m = np.nanmax(np.where(np.isnan(a), -np.inf, a), axis=1)
-        max_abs[lo:hi] = np.where(np.isinf(m), np.nan, m)
+        # 只把全 NaN 行的 -inf 哨兵还原成 NaN;真 +inf(不该出现的坏权重)保留,
+        # 不静默吞成 NaN —— 与 checker 一致地让坏数据显形而非消失
+        max_abs[lo:hi] = np.where(m == -np.inf, np.nan, m)
         long_cnt[lo:hi] = np.nansum(blk > 0, axis=1)
         short_cnt[lo:hi] = np.nansum(blk < 0, axis=1)
     del mm
@@ -126,8 +138,9 @@ def survey_one_dump(dump_dir: Path, date_to_idx: dict, out_npz: Path) -> dict:
 
     dump 是被拒因子(无 feature)的唯一持仓来源——feature 只覆盖 packed 因子,
     补上 dump 才覆盖完整 compliance 判定域(active + compliance/correlation 被拒)。
-    按 universe 交易日映射到行,与 feature 路径同 npz 格式;delay 偏移对逐日分布
-    统计无影响,不做偏移。dump 是本机 sidecar,须在持有 dump 的机器上跑。
+    按 universe 交易日映射到行,与 feature 路径同 npz 格式;不做 delay 偏移 —— dump
+    的行 = 文件名日期直落 date_to_idx,与 compliance checker 的日期语义一致(见模块
+    docstring 的源相关性说明)。dump 是本机 sidecar,须在持有 dump 的机器上跑。
     """
     files = v2npy_files(dump_dir)
     if not files:
@@ -139,7 +152,9 @@ def survey_one_dump(dump_dir: Path, date_to_idx: dict, out_npz: Path) -> dict:
             di = date_to_idx.get(int(f.name[:8]))
         except ValueError:
             continue
-        if di is None:                               # 日期不在 universe(未来日等)
+        # di 越界(>=PACK_L)= 20251231 后的日增日:在 pack 水平线外、feature 侧也无,
+        # 与 pack.py 同域丢弃(否则 total_abs[di] 越界会崩整轮扫描)。di 恒 >=0(枚举下标)。
+        if di is None or di >= PACK_L:               # None=日期不在 universe(未来日等)
             continue
         try:
             data = np.load(f)
@@ -228,7 +243,8 @@ def main() -> int:
               "first_valid_row", "first_valid_date", "last_valid_date",
               "last_valid_row", "gap_days",
               "maxpos_p50", "maxpos_p95", "maxpos_p99", "maxpos_max",
-              "long_min", "long_p05", "short_min", "short_p05", "error"]
+              "long_min", "long_p05", "short_min", "short_p05",
+              "total_min", "total_p05", "error"]
     summary = args.out / "summary.csv"
     new_file = not summary.exists()
     with summary.open("a", newline="") as f:
