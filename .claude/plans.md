@@ -343,6 +343,14 @@ test_e2e_compliance_fail)。
 缺陷 6 已修(long_backtest prepare 显式 dump_alpha=True)。**批次六缺陷全数处置**:
 1/2/3 全史+跳无效日+容忍根治、4 数据证无客户不做、5 用户拍口径不变、6 显式声明。
 
-**遗留(不阻断)**:①12 条转放行毛刺是否主动 restage(重跑全流水线,过其它 stage
-才入库)—— 用户决定;②coverage-missing 里 123 个 active 双缺源,影子盲区(低风险,
-留档);③分支 claude/compliance-survey 合 main。
+**compliance 测量不进 PG**(2026-07-16 定案):单因子 compliance 是入库卫生闸,
+真约束在 combo 层 binding(实盘交易的是加权组合,单因子集中度被稀释)—— 对卫生闸
+做精细测量无消费者,不加 snapshot 列(ops health 僵尸表教训)。被拒因子的详细记录
+走事件路:fail_reason 自足(判定 + 全貌画像"分规则天数/最长连违/最近违规日" +
+10 条带日期样例),dump 留盘(keep_artifacts),钻取用单因子 survey+profile 重跑。
+**重开条件**:combo 侧出现真消费者(per-factor 集中度先验 / combo 级合规报告),
+届时形态是"当前测量"非"入库快照"。
+
+**遗留(不阻断)**:①12 条转放行毛刺不主动 restage(用户拍:通知 QR 自决);
+②coverage-missing 里 123 个 active 双缺源,影子盲区(低风险,留档);
+③分支 claude/compliance-survey 合 main。

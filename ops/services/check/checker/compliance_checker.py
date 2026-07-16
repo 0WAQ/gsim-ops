@@ -20,6 +20,7 @@
 "全史"的真实上界 = long_backtest 所产 dump 的窗口(`xml_prepare.LONG_BACKTEST_WINDOW`,
 非本 checker 决定):上调那个窗口端点时,本判定的基数随之静默扩张,届时重看容忍度。
 """
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -96,18 +97,24 @@ class ComplianceChecker(Checker):
                 avg_short_pct=float(np.sum(np.abs(short_positions)) / total_abs * 100),
             )
 
-    def _soft_violations(self, d: DayStat) -> list[str]:
-        """该日违反的软线规则(空 = 合规)。"""
-        v: list[str] = []
+    def _soft_violations(self, d: DayStat) -> list[tuple[str, str]]:
+        """该日违反的软线规则,(规则标签, 明细) 列表(空 = 合规)。
+
+        标签供拒绝消息里的分规则计数 —— fail_reason 是被拒因子唯一的持久记录
+        (compliance 测量有意不进 PG:单因子层是卫生闸,真约束在 combo 层),
+        全貌画像必须在这条消息里自足。"""
+        v: list[tuple[str, str]] = []
         if d.max_pos_pct > self.max_position_pct:
-            v.append(f"个股最大持仓 {d.max_pos_pct*100:.2f}% > {self.max_position_pct*100}%")
+            v.append(("单票集中",
+                      f"个股最大持仓 {d.max_pos_pct*100:.2f}% > {self.max_position_pct*100}%"))
         total = d.long_count + d.short_count
         if total < self.min_total_stocks:
-            v.append(f"总持股 {total}(多 {d.long_count}+空 {d.short_count})< {self.min_total_stocks}")
+            v.append(("总数不足",
+                      f"总持股 {total}(多 {d.long_count}+空 {d.short_count})< {self.min_total_stocks}"))
         if d.long_count < self.min_long_stocks:
-            v.append(f"多头持股 {d.long_count} < {self.min_long_stocks}")
+            v.append(("多头不足", f"多头持股 {d.long_count} < {self.min_long_stocks}"))
         if d.short_count < self.min_short_stocks:
-            v.append(f"空头持股 {d.short_count} < {self.min_short_stocks}")
+            v.append(("空头不足", f"空头持股 {d.short_count} < {self.min_short_stocks}"))
         return v
 
     def check(self, factor: AlphaMetadata) -> CompResult:
@@ -116,9 +123,15 @@ class ComplianceChecker(Checker):
             raise CheckSkip("未找到 v2 版本的 npy 文件")
 
         days: list[DayStat] = []
-        # 硬顶命中即刻拒(不看容忍度);软线逐日累计违规日数
+        # 硬顶命中即刻拒(不看容忍度);软线逐日累计违规日数 + 全貌画像
+        # (分规则计数/最长连违/最近违规日)—— 拒绝时全部进 fail_reason,
+        # 那是被拒因子唯一的持久记录,必须自足
         hard_hit: str | None = None
+        hard_days = 0
         viol_days = 0
+        rule_days: Counter[str] = Counter() # 规则标签 → 违规日数
+        streak = max_streak = 0             # 连违按有效日序列算(无效日不断链)
+        last_viol: str | None = None
         viol_examples: list[str] = []       # 头几条软线违规,进日志
         bad_reads: list[str] = []           # np.load 失败的文件(损坏/权限)
 
@@ -133,19 +146,29 @@ class ComplianceChecker(Checker):
                 continue
             days.append(d)
 
-            if hard_hit is None:
-                if not np.isfinite(d.max_pos_pct):
-                    # inf 坏权重日(max/total=inf/inf=NaN):软线比较测不到,
-                    # 但"单票 inf"正是硬顶要挡的灾难形态,显式硬拒不继承旧洞
-                    hard_hit = f"{d.date}: 个股占比非有限值(疑似 inf 坏权重)"
-                elif d.max_pos_pct > self.hard_position_pct:
-                    hard_hit = (f"{d.date}: 个股最大持仓 {d.max_pos_pct*100:.2f}% "
-                                f"超硬顶 {self.hard_position_pct*100:.1f}%")
+            if not np.isfinite(d.max_pos_pct):
+                # inf 坏权重日(max/total=inf/inf=NaN):软线比较测不到,
+                # 但"单票 inf"正是硬顶要挡的灾难形态,显式硬拒不继承旧洞
+                hard_days += 1
+                hard_hit = hard_hit or f"{d.date}: 个股占比非有限值(疑似 inf 坏权重)"
+            elif d.max_pos_pct > self.hard_position_pct:
+                hard_days += 1
+                hard_hit = hard_hit or (
+                    f"{d.date}: 个股最大持仓 {d.max_pos_pct*100:.2f}% "
+                    f"超硬顶 {self.hard_position_pct*100:.1f}%")
             soft = self._soft_violations(d)
             if soft:
                 viol_days += 1
+                streak += 1
+                max_streak = max(max_streak, streak)
+                last_viol = d.date
+                for tag, _ in soft:
+                    rule_days[tag] += 1
                 if len(viol_examples) < _EXAMPLE_CAP:
-                    viol_examples.append(f"{d.date}: {'; '.join(soft)}")
+                    viol_examples.append(
+                        f"{d.date}: {'; '.join(m for _, m in soft)}")
+            else:
+                streak = 0
 
         if bad_reads:
             logger.warning(
@@ -157,9 +180,17 @@ class ComplianceChecker(Checker):
         if not days:
             raise CheckSkip("持仓全空")
 
+        # 违规全貌(进 fail_reason,QR 第一眼看到修什么;样例给具体日期佐证)
+        profile = (f"违规分布: "
+                   f"{' / '.join(f'{t} {n} 天' for t, n in rule_days.most_common())}"
+                   f";最长连违 {max_streak} 天;最近违规 {last_viol}")
+
         # 硬顶优先:单日灾难不因"总违规天数少"被容忍度放过
         if hard_hit is not None:
-            raise CheckFail(f"硬顶违规(单日立拒): {hard_hit}")
+            raise CheckFail(
+                f"硬顶违规(单日立拒,共 {hard_days} 天超"
+                f" {self.hard_position_pct*100:.1f}%): {hard_hit};"
+                f"全史软线违规 {viol_days}/{len(days)} 天({profile})")
 
         if viol_days > self.violation_tolerance:
             head = "; ".join(viol_examples)
@@ -167,7 +198,7 @@ class ComplianceChecker(Checker):
                     if viol_days > len(viol_examples) else "")
             raise CheckFail(
                 f"全史 {viol_days}/{len(days)} 天违规,超容忍上限 "
-                f"{self.violation_tolerance} 天: {head}{more}")
+                f"{self.violation_tolerance} 天({profile}): {head}{more}")
 
         # 通过:CompResult 是接口一致性占位(流水线只关心是否抛),全史均值口径
         return CompResult(

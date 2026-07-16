@@ -72,8 +72,17 @@ def test_violations_over_tolerance_reject(tmp_path):
         _write_day(tmp_path, dt, _clean(n_long=10, n_short=10))
     for dt in dates[15:]:
         _write_day(tmp_path, dt, _clean())
-    with pytest.raises(CheckFail, match="超容忍"):
+    with pytest.raises(CheckFail, match="超容忍") as ei:
         _checker().check(_factor(tmp_path))
+    # fail_reason 是被拒因子唯一的持久记录,全貌画像必须自足:
+    # 10+10=20 股违 长/短/总 三条(不违 maxpos:1/20=5% 不超),连违 15,末违日可溯
+    msg = str(ei.value)
+    assert "多头不足 15 天" in msg and "空头不足 15 天" in msg \
+        and "总数不足 15 天" in msg
+    assert "单票集中" not in msg              # 恰 5% 不违规,不该出现在分布里
+    assert "最长连违 15 天" in msg
+    assert f"最近违规 {dates[14]}" in msg
+    assert "另有 5 天" in msg                 # 15 违规日 - 10 条样例
 
 
 def test_hard_ceiling_single_day_reject(tmp_path):
@@ -84,8 +93,12 @@ def test_hard_ceiling_single_day_reject(tmp_path):
     # 1 只 90 + 99 只 ±0.1 → max/total ≈ 0.90 > 硬顶 0.10;仅此 1 天违规 <= 容忍
     spike = np.array([90.0] + [0.1] * 50 + [-0.1] * 49)
     _write_day(tmp_path, dates[0], spike)
-    with pytest.raises(CheckFail, match="硬顶"):
+    with pytest.raises(CheckFail, match="硬顶") as ei:
         _checker().check(_factor(tmp_path))
+    # 硬顶消息也带全貌:硬顶天数 + 软线画像(spike 日同时违 maxpos 软线)
+    msg = str(ei.value)
+    assert "共 1 天超 10.0%" in msg
+    assert "单票集中 1 天" in msg
 
 
 def test_hard_ceiling_beats_tolerance(tmp_path):
