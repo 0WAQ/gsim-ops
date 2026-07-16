@@ -331,8 +331,14 @@ runbook"判读注意"。
   active 零状态变化(0 触硬顶、12 毛刺全在容忍内);评审收口:inf 日硬拒(不继承
   软线 NaN 洞)、dump 读失败计数告警(不静默当无效日)、14 例单测。
 
-**剩余**:①22 条已被拒 compliance 因子的 dump 源新旧对比(回归材料,须在持有其
-dump 的机器跑;coverage-missing 里还有 123 个 active 双缺源,影子对它们是盲区);
-②执行者把 `violations.csv` 推入 repo(回归材料存档);③合并前在有 gsim 的机器跑
-`uv run pytest -m e2e`;④缺陷 6(long_backtest 的 prepare 显式声明
-dump_alpha=True —— compliance 数据来源仍踩隐式继承)。
+**验证收尾**(2026-07-16):violations.csv 已入 repo(33f6b6f)→ 本地独立闭环:
+active 违规者 12 个 viol_days 全 ≤2(容忍 10 余量 8);全库影子新规则恰拒 10 个、
+全是现役 rejected(active/submitted 零命中);rejected 侧 563 零违规 / 13 毛刺
+(compliance 关会放行)/ 10 仍拒。e2e 在 160 真 gsim 全过(6/6,含
+test_e2e_compliance_fail)。
+
+**剩余**:①compliance-rejected 名单(PG factor_history 最近失败 stage=compliance)
+join violations.csv 出新旧影子表(发布材料;等执行者贴 SQL 结果);
+②coverage-missing 里 123 个 active 双缺源,影子盲区(低风险,留档);
+③缺陷 6(long_backtest 的 prepare 显式声明 dump_alpha=True —— compliance
+数据来源仍踩隐式继承)。
