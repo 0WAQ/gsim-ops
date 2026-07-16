@@ -99,6 +99,32 @@ def test_hard_ceiling_beats_tolerance(tmp_path):
         _checker().check(_factor(tmp_path))
 
 
+def test_violations_exactly_at_tolerance_pass(tmp_path):
+    """边界:违规日数恰等于容忍上限(10)放行 —— 拒的判据是严格 >。"""
+    dates = _dates(30)
+    for dt in dates[:10]:
+        _write_day(tmp_path, dt, _clean(n_long=10, n_short=10))
+    for dt in dates[10:]:
+        _write_day(tmp_path, dt, _clean())
+    res = _checker().check(_factor(tmp_path))
+    assert res.total_checked == 30
+
+
+def test_below_hard_ceiling_is_soft_only(tmp_path):
+    """单日 9.9%:超软线(5%)但低于硬顶(10%)→ 只记 1 个违规日,容忍内放行。"""
+    dates = _dates(30)
+    for dt in dates[1:]:
+        _write_day(tmp_path, dt, _clean())
+    # 1 只 s + 49 只 1.0 多 + 50 只 1.0 空:s/(99+s)=0.099 → s≈10.88
+    s = 0.099 * 99 / (1 - 0.099)
+    w = np.array([s] + [1.0] * 49 + [-1.0] * 50)
+    frac = w.max() / np.abs(w).sum()
+    assert 0.05 < frac < 0.10                      # 软线上、硬顶下
+    _write_day(tmp_path, dates[0], w)
+    res = _checker().check(_factor(tmp_path))      # 1 违规日 <= 容忍 → 放行
+    assert res.total_checked == 30
+
+
 def test_invalid_days_skipped_not_counted(tmp_path):
     """全 NaN / 零敞口日是无效日:跳过,不计违规(缺数据的早期天天然免疫)。"""
     dates = _dates(40)
