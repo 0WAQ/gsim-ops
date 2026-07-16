@@ -170,11 +170,24 @@ uv run python scripts/compliance_profile.py --cache ~/compliance-survey
 - **`total_min`/`total_p05` 列**:补齐 `min_total_stocks` 判据(边际 min 合不出总 min)。
 - **nanmax 哨兵收窄**成 `== -inf`:真 +inf 坏权重不再静默吞成 NaN。
 
-## 后续
+## 定策与 checker 重写(2026-07-16 完成)
 
-全量摸底已完成(2026-07-15,7972 因子入 `report/compliance-survey/`)。summary
-判读结论:阈值边距普遍巨大(maxpos 中位 0.13% vs 5%)、无纯多头 active(豁免
-无客户)、valid_days 最短 891(无需下限)。**用户已拍:四阈值不变**;待定的是
-聚合规则(容忍度/暖机处理)→ 跑 §4 违规画像定 → checker 重写 + 对 22 条已被拒
-compliance 因子做新旧影子对比(回归材料)→ 顺手修 long_backtest 的 `prepare`
-显式声明 `dump_alpha=True`(缺陷 6)。
+**摸底结论**(7972 因子入 `report/compliance-survey/`):阈值边距普遍巨大(maxpos
+中位 0.13% vs 5%)、无纯多头 active(豁免无客户)、valid_days 最短 891(无需下限)。
+违规画像(§4):全库仅 35 个因子有违规日(0.44%),且两极分化 —— **active 违规者
+12 个全是 ≤2 天早期毛刺**,持续违规(≥24 天)全在已拒因子,中间 2~24 是巨大空档。
+
+**已拍政策 = 四阈值不变 + 全史每日 + 跳过无效日 + 容忍 K=10 + 硬顶 2×(10%)**:
+- 全史每日取代尾窗 762(尾窗判定基数随数据起始漂移、且漏检窗外全史违规);
+- 跳过无效日 → 缺数据的早期天天然免疫("前面一段没数据"根上解决,不需尾窗 hack);
+- 容忍 K=10 违规日 → 放行早期毛刺(动机:"一天违规即拒太严");
+- 硬顶单日 maxpos > 10% 立拒 → 防"平时干净、某天单票半仓"被容忍度放过。
+
+**影子对比(summary.csv 复算 + violations.csv)**:新规则下 active **零状态变化**——
+active 中 0 个触硬顶(maxpos_max > 10% 的 5 个全是 rejected)、12 个软线违规者 viol_days
+≤2 ≤ 容忍 → 全放行;5 个持续/严重违规保持 rejected。checker 落地
+`ops/services/check/checker/compliance_checker.py`,单测 `tests/test_compliance_checker.py`
+(9 例:容忍内外 / 硬顶优先 / 无效日跳过 / 边界不违规)。
+
+**剩余**:22 条已被拒 compliance 因子的 dump 源新旧对比(回归材料,需在持有其 dump
+的机器上跑)→ 顺手修 long_backtest 的 `prepare` 显式声明 `dump_alpha=True`(缺陷 6)。

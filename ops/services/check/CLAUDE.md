@@ -6,7 +6,7 @@
 1. **Checkbias** - Short backtest (`CHECKBIAS_WINDOW`) with DataFirewall injection for forward-looking bias detection
 2. **Checkpoint** - Breakpoint stability validation (5-day checkpoint)
 3. **Long Backtest** - Full historical backtest (`LONG_BACKTEST_WINDOW`), pure run, no checks
-4. **Compliance** - Position limits (max 5% per stock), min stock counts (50 long, 50 short, 100 total)
+4. **Compliance** - 逐日持仓合规:全史每日检查(2026-07-16 重做,不再截尾窗)。个股 max 占比 5% / 多空各 50 / 总 100 四条软线,任一违反记该日为违规日,**全史违规日 > `violation_tolerance`(默认 10)才拒**(放行早期毛刺);外加**硬顶**——单日个股 > `max_position_pct × hard_position_mult`(默认 2× = 10%)立即拒,不吃容忍。无效日(空/全 NaN/零敞口)跳过。数据定策见 `docs/design/compliance-survey.md`
 5. **Correlation** - 相关性 + 业绩门槛 (单一 stage,见下)
 6. **Archive** - Run simsummary, persist snapshot, move to library。
 

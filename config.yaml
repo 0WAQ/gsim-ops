@@ -73,7 +73,10 @@ checker:
     min_total_stocks: 100
     min_long_stocks: 50
     min_short_stocks: 50
-    check_window: 762   # 只校验最近 N 个交易日 (约三年),规避早期数据暖机期
+    violation_tolerance: 10   # 全史软线违规日 > 此值才拒(放行早期毛刺,数据定策)
+    hard_position_mult: 2.0   # 硬顶 = max_position_pct × 此倍数(单日超此立拒,不吃容忍)
+    # check_window 已退役(2026-07-16):尾窗 762 的判定基数随数据起始漂移,且漏检
+    # 窗外全史违规。改全史每日 + 跳过无效日(缺数据的早期天天然免疫)。别加回来。
   checkpoint:
     enabled: true
   correlation:
