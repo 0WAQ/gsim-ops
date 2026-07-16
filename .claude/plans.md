@@ -319,8 +319,20 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 预期,推不出阈值松紧 —— 定策靠边界人口(被拒 dump + 活因子窗外早期天),见
 runbook"判读注意"。
 
-**下一步序列**:全量(`--source auto`,160 nohup,feature+本机 dump 一趟)→
-分布判读(内区分布 / 缺陷 1 误伤面 / 薄尾形状 / 纯多头存量)→
-用户按数据定策(容忍度/下限/gap/纯多头豁免/口径)→ checker 重写 +
-对 22 条已被拒 compliance 因子做新旧影子对比(最好的回归材料)→
-顺手修缺陷 6(long_backtest 的 prepare 显式声明 dump_alpha=True)。
+**全量摸底 + 定策 + checker 重写已完成**(2026-07-16,详见 runbook
+`docs/design/compliance-survey.md` "定策与 checker 重写"节):
+- 全量 7972 因子(`--source auto`)+ 违规画像(`scripts/compliance_profile.py`,
+  对抗验证过关):全库仅 35 个有违规日(0.44%),两极分化 —— active 违规者 12 个
+  全是 ≤2 天早期毛刺,持续违规(≥24 天)全在已拒,中间 2~24 巨大空档;
+- **已拍政策**:四阈值不变 + 全史每日 + 跳过无效日 + 容忍 K=10 + 硬顶 2×(10%);
+  缺陷 1/2/3 由"全史+跳无效日+容忍"根治,缺陷 4(纯多头豁免)数据证明无客户不做,
+  缺陷 5(5% 口径)维持现状(用户拍:约束不变);
+- checker 落地(commit 9b43df3 起,分支 `claude/compliance-survey`),影子对比
+  active 零状态变化(0 触硬顶、12 毛刺全在容忍内);评审收口:inf 日硬拒(不继承
+  软线 NaN 洞)、dump 读失败计数告警(不静默当无效日)、14 例单测。
+
+**剩余**:①22 条已被拒 compliance 因子的 dump 源新旧对比(回归材料,须在持有其
+dump 的机器跑;coverage-missing 里还有 123 个 active 双缺源,影子对它们是盲区);
+②执行者把 `violations.csv` 推入 repo(回归材料存档);③合并前在有 gsim 的机器跑
+`uv run pytest -m e2e`;④缺陷 6(long_backtest 的 prepare 显式声明
+dump_alpha=True —— compliance 数据来源仍踩隐式继承)。

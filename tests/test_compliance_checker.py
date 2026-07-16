@@ -28,7 +28,7 @@ def _checker(**overrides):
 
 
 def _factor(alpha_dir):
-    return SimpleNamespace(alpha_dir=alpha_dir)
+    return SimpleNamespace(alpha_dir=alpha_dir, name="AlphaFake")
 
 
 def _write_day(root, date: str, weights: np.ndarray):
@@ -123,6 +123,43 @@ def test_below_hard_ceiling_is_soft_only(tmp_path):
     _write_day(tmp_path, dates[0], w)
     res = _checker().check(_factor(tmp_path))      # 1 违规日 <= 容忍 → 放行
     assert res.total_checked == 30
+
+
+def test_exactly_hard_ceiling_not_hard(tmp_path):
+    """边界:单日恰 10.0% 不触硬顶(严格 >),只算软线 1 违规日 → 放行。"""
+    dates = _dates(30)
+    for dt in dates[1:]:
+        _write_day(tmp_path, dt, _clean())
+    # 1 只 11.0 + 49 只 1.0 多 + 50 只 1.0 空:11/110 = 0.1 恰等于硬顶
+    w = np.array([11.0] + [1.0] * 49 + [-1.0] * 50)
+    assert float(w.max() / np.abs(w).sum()) == 0.05 * 2.0   # 浮点精确相等
+    _write_day(tmp_path, dates[0], w)
+    res = _checker().check(_factor(tmp_path))
+    assert res.total_checked == 30
+
+
+def test_inf_weight_day_hard_rejected(tmp_path):
+    """±inf 坏权重日(max/total=NaN,软线测不到)→ 硬顶显式硬拒,不静默漏过。"""
+    dates = _dates(30)
+    for dt in dates[1:]:
+        _write_day(tmp_path, dt, _clean())
+    w = _clean().astype(float)
+    w[0] = np.inf
+    _write_day(tmp_path, dates[0], w)
+    with pytest.raises(CheckFail, match="非有限值"):
+        _checker().check(_factor(tmp_path))
+
+
+def test_corrupt_file_skipped_with_warning(tmp_path):
+    """np.load 失败的文件跳过但不当无效日吞掉(计数告警);其余照常判定。"""
+    dates = _dates(30)
+    for dt in dates[1:]:
+        _write_day(tmp_path, dt, _clean())
+    d = tmp_path / dates[0][:4] / dates[0][4:6]
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{dates[0]}.v2.npy").write_bytes(b"not-a-npy")
+    res = _checker().check(_factor(tmp_path))
+    assert res.total_checked == 29              # 坏文件不进统计
 
 
 def test_invalid_days_skipped_not_counted(tmp_path):
