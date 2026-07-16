@@ -128,6 +128,32 @@ JFS 上小时级,峰值内存 ~22MB。监控 `tail -3 ~/compliance-survey.log` /
 
 把 `summary.csv` 贴回 / 压缩发回 → 出全库(或样本)分布 → 按数据定阈值。
 
+### 4 · 违规画像(`scripts/compliance_profile.py`,summary 判读后的第二遍)
+
+summary 只有全窗极值,回答不了**"违规是毛刺还是持续、落在生命周期哪一段"**——
+而这正是"任一天违规即拒是否过严"、"暖机头部要不要跳过"两个政策问题的数据
+依据。画像脚本纯本地后处理 npz 缓存(不碰生产、不需要 PG),分钟级:
+
+```bash
+uv run python scripts/compliance_profile.py --cache ~/compliance-survey
+```
+
+产出 `<cache>/violations.csv`,每因子:违规天数/占比(any + 分规则)、最长连违
+(`max_streak`,有效日序列上)、首 252 有效日违规数(`viol_head252`,暖机集中度)、
+末 762 有效日违规数(`viol_tail762`,≈复现旧 checker 判定)、最后一个违规日之后
+的干净天数(`clean_suffix_days`,旧规则本质 = 干净后缀 ≥ 窗口长)、违规首末日。
+阈值默认 = 现行 config 值(0.05/50/50/100,算符与 checker 逐位一致:maxpos 严格
+`>`、counts 严格 `<`、空日跳过)。
+
+判读要点:
+- **暖机假设验证**:若违规集中在 `viol_head252`(尾部干净),政策可以是
+  "跳过头部 N 有效日"或"从首个连续合规段起算";
+- **毛刺 vs 持续**:`viol_days ≤ 数天且 max_streak 小` 的是毛刺,适合小容忍度
+  放行;`viol_frac` 高的是持续违规,零容忍也不冤;
+- **active 违规者的时间性**:`last_viol_date` 早于入库时间 = 旧窗口漏网;晚于
+  入库时间 = 入库后漂移(旧 checker 只在提交时跑一次,之后的天从没人查)——
+  两者政策含义完全不同,判读时对 PG `entered_at` 一join便知。
+
 ---
 
 ## 已修(对抗验证收口,commit `de53235`)
@@ -140,6 +166,9 @@ JFS 上小时级,峰值内存 ~22MB。监控 `tail -3 ~/compliance-survey.log` /
 
 ## 后续
 
-抽检/全量分布判读 → 用户按数据定策(容忍度 / 有效天数下限 / gap / 纯多头豁免 /
-5% 口径)→ checker 重写 + 对 22 条已被拒 compliance 因子做新旧影子对比(回归材料)
-→ 顺手修 long_backtest 的 `prepare` 显式声明 `dump_alpha=True`(缺陷 6)。
+全量摸底已完成(2026-07-15,7972 因子入 `report/compliance-survey/`)。summary
+判读结论:阈值边距普遍巨大(maxpos 中位 0.13% vs 5%)、无纯多头 active(豁免
+无客户)、valid_days 最短 891(无需下限)。**用户已拍:四阈值不变**;待定的是
+聚合规则(容忍度/暖机处理)→ 跑 §4 违规画像定 → checker 重写 + 对 22 条已被拒
+compliance 因子做新旧影子对比(回归材料)→ 顺手修 long_backtest 的 `prepare`
+显式声明 `dump_alpha=True`(缺陷 6)。
