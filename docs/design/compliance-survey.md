@@ -189,5 +189,8 @@ active 中 0 个触硬顶(maxpos_max > 10% 的 5 个全是 rejected)、12 个软
 `ops/services/check/checker/compliance_checker.py`,单测 `tests/test_compliance_checker.py`
 (9 例:容忍内外 / 硬顶优先 / 无效日跳过 / 边界不违规)。
 
-**剩余**:22 条已被拒 compliance 因子的 dump 源新旧对比(回归材料,需在持有其 dump
-的机器上跑)→ 顺手修 long_backtest 的 `prepare` 显式声明 `dump_alpha=True`(缺陷 6)。
+**影子对比收官**(2026-07-16,`scripts/compliance_shadow.py` →
+`report/compliance-survey/shadow-compliance-rejected.csv`):22 条 compliance-rejected
+→ 硬顶仍拒 5 / 超容忍仍拒 5 / 转放行(毛刺)12;仍拒 10 个与全库预演逐名对账一致,
+22 条全有数据全有违规痕迹。缺陷 6 已修(long_backtest prepare 显式 `dump_alpha=True`)。
+e2e 真 gsim 6/6 过。遗留:12 条转放行毛刺是否主动 restage,用户决定。
