@@ -143,7 +143,8 @@ uv run python scripts/compliance_profile.py --cache ~/compliance-survey
 末 762 有效日违规数(`viol_tail762`,≈复现旧 checker 判定)、最后一个违规日之后
 的干净天数(`clean_suffix_days`,旧规则本质 = 干净后缀 ≥ 窗口长)、违规首末日。
 阈值默认 = 现行 config 值(0.05/50/50/100,算符与 checker 逐位一致:maxpos 严格
-`>`、counts 严格 `<`、空日跳过)。
+`>`、counts 严格 `<`、空日跳过)。**逐日谓词与 checker 逐位等价**(五问对抗验证:
+算符/skip/阈值/inf 行为全 CONFIRMED,dump 源连浮点都逐位相同)。
 
 判读要点:
 - **暖机假设验证**:若违规集中在 `viol_head252`(尾部干净),政策可以是
@@ -153,6 +154,11 @@ uv run python scripts/compliance_profile.py --cache ~/compliance-survey
 - **active 违规者的时间性**:`last_viol_date` 早于入库时间 = 旧窗口漏网;晚于
   入库时间 = 入库后漂移(旧 checker 只在提交时跑一次,之后的天从没人查)——
   两者政策含义完全不同,判读时对 PG `entered_at` 一join便知。
+- **`viol_tail762` 是旧判定的上包络,两源语义不同**:结构上不漏报任何旧拒(无
+  假阴),仅近端有 skip 日时偏严多报。**dump 源(compliance-rejected)**尾端对齐
+  当年 check 日、数字与 checker 逐位相同 —— 是"旧规则会不会拒"的正解;**feature
+  源(ACTIVE)**尾端锚在 pack 水平线(20251231)而非当年 check 日,其 tail762 读作
+  "当前尾窗是否仍违规",不是当年判定复现。要严格回归旧判定,看 dump 源那一支。
 
 ---
 
