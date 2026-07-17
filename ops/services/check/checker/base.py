@@ -7,6 +7,14 @@ from ops.core.alpha.results.base import Result
 class CheckFail(Exception):
     """因子质量失败信号 → REJECTED(retryable stage 除外)。
 
+    **reason 统一风格**(fail_reason 是被拒因子唯一的持久记录,一行自足):
+    `违反项[; 违反项…] | 上下文`
+    —— 违反项 = `指标=测得 <op> 阈值 [(限定)]`(先说违反了什么);上下文 =
+    定位/佐证信息,逗号分隔,不复述违反项。范本:correlation 的
+    `ret%=8.50 < 10.0; tvr%=55.00 > 50.0 (delay=1) | ret=…, shrp=…`、
+    compliance 的 `违规天数=40/2603 > 容忍10 | 空头不足40天, 最近20241207: …`。
+    明细钻取不进消息(dump 留盘 + 单因子 survey/profile 重跑)。
+
     result(可选):checker 在失败前已测得的结果对象
     (如 CorrResult —— metrics + bcorr),流水线捕获后落"测得快照"
     (factor_snapshot:最近一次 check 测得的表现,被拒也写)。

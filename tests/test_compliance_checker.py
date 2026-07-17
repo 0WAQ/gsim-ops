@@ -1,7 +1,7 @@
-"""ComplianceChecker 单测(2026-07-16 重做:全史每日 + 容忍 + 硬顶)。
+"""ComplianceChecker 单测(2026-07-16 重做:全史每日 + 容忍 + 严重违规立拒)。
 
 快、无 gsim:直接喂合成 dump 向量给 checker,验四条政策不变量 ——
-跳过无效日 / 软线容忍 K / 硬顶单日立拒 / 全空跳过。逐日 numpy 表达式与
+跳过无效日 / 违规容忍 K / 严重违规单日立拒 / 全空跳过。逐日 numpy 表达式与
 scripts/compliance_survey.py 同源,violations.csv 是生产侧影子回归材料。
 """
 from types import SimpleNamespace
@@ -18,7 +18,7 @@ CFG = {
     "min_long_stocks": 50,
     "min_short_stocks": 50,
     "violation_tolerance": 10,
-    "hard_position_mult": 2.0,          # 硬顶 = 10%
+    "hard_position_mult": 2.0,          # 严重违规线 = 10%
 }
 
 
@@ -72,17 +72,17 @@ def test_violations_over_tolerance_reject(tmp_path):
         _write_day(tmp_path, dt, _clean(n_long=10, n_short=10))
     for dt in dates[15:]:
         _write_day(tmp_path, dt, _clean())
-    with pytest.raises(CheckFail, match="超容忍") as ei:
+    with pytest.raises(CheckFail, match="容忍") as ei:
         _checker().check(_factor(tmp_path))
-    # fail_reason 是被拒因子唯一的持久记录,全貌画像必须自足:
-    # 10+10=20 股违 长/短/总 三条(不违 maxpos:1/20=5% 不超),连违 15,末违日可溯
+    # fail_reason 是被拒因子唯一的持久记录,一行自足(风格契约见 base.CheckFail):
+    # 违反项 | 分规则天数, 连违, 最近违规日及其具体数字
     msg = str(ei.value)
-    assert "多头不足 15 天" in msg and "空头不足 15 天" in msg \
-        and "总数不足 15 天" in msg
+    assert "违规天数=15/30 > 容忍10" in msg
+    assert "多头不足15天" in msg and "空头不足15天" in msg and "总数不足15天" in msg
     assert "单票集中" not in msg              # 恰 5% 不违规,不该出现在分布里
-    assert "最长连违 15 天" in msg
-    assert f"最近违规 {dates[14]}" in msg
-    assert "另有 5 天" in msg                 # 15 违规日 - 10 条样例
+    assert "最长连违15天" in msg
+    assert f"最近{dates[14]}: " in msg
+    assert "多头 10 < 50" in msg              # 最近违规日的具体数字(佐证)
 
 
 def test_hard_ceiling_single_day_reject(tmp_path):
@@ -90,25 +90,25 @@ def test_hard_ceiling_single_day_reject(tmp_path):
     dates = _dates(30)
     for dt in dates[1:]:
         _write_day(tmp_path, dt, _clean())
-    # 1 只 90 + 99 只 ±0.1 → max/total ≈ 0.90 > 硬顶 0.10;仅此 1 天违规 <= 容忍
+    # 1 只 90 + 99 只 ±0.1 → max/total ≈ 0.90 > 严重违规线 0.10;仅此 1 天 <= 容忍
     spike = np.array([90.0] + [0.1] * 50 + [-0.1] * 49)
     _write_day(tmp_path, dates[0], spike)
-    with pytest.raises(CheckFail, match="硬顶") as ei:
+    with pytest.raises(CheckFail, match="严重违规线") as ei:
         _checker().check(_factor(tmp_path))
-    # 硬顶消息也带全貌:硬顶天数 + 软线画像(spike 日同时违 maxpos 软线)
+    # 一行自足:违反项(含日期) | 超线天数 + 全史违规天数
     msg = str(ei.value)
-    assert "共 1 天超 10.0%" in msg
-    assert "单票集中 1 天" in msg
+    assert f"({dates[0]})" in msg
+    assert "超线共1天" in msg and "全史违规1/30天" in msg
 
 
 def test_hard_ceiling_beats_tolerance(tmp_path):
-    """硬顶优先于容忍:即便软线违规日已超容忍,报的也应是硬顶(单日立拒语义)。"""
+    """严重违规优先于容忍:即便违规日已超容忍,报的也应是严重违规(单日立拒语义)。"""
     dates = _dates(30)
     spike = np.array([90.0] + [0.1] * 50 + [-0.1] * 49)
     _write_day(tmp_path, dates[0], spike)
-    for dt in dates[1:]:                 # 29 个软线违规日,远超容忍
+    for dt in dates[1:]:                 # 29 个违规日,远超容忍
         _write_day(tmp_path, dt, _clean(n_long=5, n_short=5))
-    with pytest.raises(CheckFail, match="硬顶"):
+    with pytest.raises(CheckFail, match="严重违规"):
         _checker().check(_factor(tmp_path))
 
 
@@ -124,7 +124,7 @@ def test_violations_exactly_at_tolerance_pass(tmp_path):
 
 
 def test_below_hard_ceiling_is_soft_only(tmp_path):
-    """单日 9.9%:超软线(5%)但低于硬顶(10%)→ 只记 1 个违规日,容忍内放行。"""
+    """单日 9.9%:超阈值(5%)但低于严重违规线(10%)→ 只记 1 个违规日,容忍内放行。"""
     dates = _dates(30)
     for dt in dates[1:]:
         _write_day(tmp_path, dt, _clean())
@@ -132,18 +132,18 @@ def test_below_hard_ceiling_is_soft_only(tmp_path):
     s = 0.099 * 99 / (1 - 0.099)
     w = np.array([s] + [1.0] * 49 + [-1.0] * 50)
     frac = w.max() / np.abs(w).sum()
-    assert 0.05 < frac < 0.10                      # 软线上、硬顶下
+    assert 0.05 < frac < 0.10                      # 阈值上、严重违规线下
     _write_day(tmp_path, dates[0], w)
     res = _checker().check(_factor(tmp_path))      # 1 违规日 <= 容忍 → 放行
     assert res.total_checked == 30
 
 
 def test_exactly_hard_ceiling_not_hard(tmp_path):
-    """边界:单日恰 10.0% 不触硬顶(严格 >),只算软线 1 违规日 → 放行。"""
+    """边界:单日恰 10.0% 不触严重违规(严格 >),只算普通违规 1 日 → 放行。"""
     dates = _dates(30)
     for dt in dates[1:]:
         _write_day(tmp_path, dt, _clean())
-    # 1 只 11.0 + 49 只 1.0 多 + 50 只 1.0 空:11/110 = 0.1 恰等于硬顶
+    # 1 只 11.0 + 49 只 1.0 多 + 50 只 1.0 空:11/110 = 0.1 恰等于严重违规线
     w = np.array([11.0] + [1.0] * 49 + [-1.0] * 50)
     assert float(w.max() / np.abs(w).sum()) == 0.05 * 2.0   # 浮点精确相等
     _write_day(tmp_path, dates[0], w)
@@ -152,7 +152,7 @@ def test_exactly_hard_ceiling_not_hard(tmp_path):
 
 
 def test_inf_weight_day_hard_rejected(tmp_path):
-    """±inf 坏权重日(max/total=NaN,软线测不到)→ 硬顶显式硬拒,不静默漏过。"""
+    """±inf 坏权重日(max/total=NaN,阈值测不到)→ 严重违规显式立拒,不静默漏过。"""
     dates = _dates(30)
     for dt in dates[1:]:
         _write_day(tmp_path, dt, _clean())

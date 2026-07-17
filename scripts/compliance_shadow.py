@@ -7,10 +7,10 @@
                             docs/design/compliance-survey.md)
 - violations.csv / summary.csv / coverage-missing.txt   摸底产物
 
-输出:每条 compliance-rejected 因子在**新规则**(全史每日 + 容忍 10 + 硬顶 10%)
+输出:每条 compliance-rejected 因子在**新规则**(全史每日 + 容忍 10 + 严重违规线 10%)
 下的判定标签 + 汇总,落 shadow-compliance-rejected.csv 并打印。标签:
 
-- 硬顶仍拒     maxpos_max > 10%(单日灾难,新旧一致拒)
+- 严重违规仍拒  maxpos_max > 10%(单日灾难,新旧一致拒)
 - 超容忍仍拒   viol_days > 10(持续违规,新旧一致拒)
 - 转放行(毛刺) 1 <= viol_days <= 10(政策有意豁免;能否入库还要过其它 stage)
 - 零违规需查   摸底数据里一天都没违规 —— 当年拒但现数据干净,通常是 dump 已被
@@ -54,7 +54,7 @@ def main() -> int:
             out["viol_days"] = viol_days
             out["maxpos_max"] = f"{maxpos:.4f}"
             if maxpos > HARD:
-                out["verdict"] = "硬顶仍拒"
+                out["verdict"] = "严重违规仍拒"
             elif viol_days > TOLERANCE:
                 out["verdict"] = "超容忍仍拒"
             elif viol_days > 0:
@@ -63,7 +63,7 @@ def main() -> int:
                 out["verdict"] = "零违规需查"
         rows.append(out)
 
-    order = ["硬顶仍拒", "超容忍仍拒", "转放行(毛刺)", "零违规需查",
+    order = ["严重违规仍拒", "超容忍仍拒", "转放行(毛刺)", "零违规需查",
              "无源盲区", "不在摸底内(需查)"]
     rows.sort(key=lambda r: (order.index(r["verdict"]),
                              -(r["viol_days"] or 0) if isinstance(r["viol_days"], int) else 0,

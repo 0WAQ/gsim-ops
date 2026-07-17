@@ -7,12 +7,13 @@
    不算违规(旧 checker 的 `check_window=762` 尾窗正是为规避早期暖机而设,现由
    "跳过无效日"从根上解决,尾窗连同其判定基数随数据起始漂移的毛病一并退役;
    **别再加回 check_window** —— 全史每日是有意为之)。
-2. **软线容忍**:个股 max 占比 / 多空 / 总持股四条阈值,任一违反记该日为违规日;
+2. **违规容忍**:个股 max 占比 / 多空 / 总持股四条阈值,任一违反记该日为违规日;
    全史违规日数 > `violation_tolerance`(默认 10)才拒。摸底数据(7972 因子)显示
    违规两极分化 —— active 因子的违规都是 ≤2 天的早期毛刺,持续违规(≥24 天)全在
    已拒因子,中间是 2~24 的巨大空档,故小容忍度即可放行毛刺、拦住真违规。
-3. **硬顶**:单日个股 max 占比 > `max_position_pct × hard_position_mult`(默认 2×
-   = 10%)立即拒,不吃容忍额度 —— 防"平时干净、某天单票半仓"的灾难日被容忍度放过。
+3. **严重违规**:单日个股 max 占比 > `max_position_pct × hard_position_mult`
+   (默认 2× = 10%)立即拒,不吃容忍额度 —— 防"平时干净、某天单票半仓"的
+   灾难日被容忍度放过。
 
 逐日四元组的 numpy 表达式与摸底脚本 `scripts/compliance_survey.py` 逐位一致
 (该脚本已五问对抗验证,violations.csv 是本规则的影子回归材料)。
@@ -32,9 +33,6 @@ from ops.infra.config import Config
 
 from .base import Checker, CheckFail, CheckSkip
 from .dumpscan import v2npy_files
-
-# 拒绝消息里最多展示几条违规样例(与 violation_tolerance 无关,纯展示上限)
-_EXAMPLE_CAP = 10
 
 
 class DayStat:
@@ -59,7 +57,7 @@ class ComplianceChecker(Checker):
         self.min_total_stocks: int = c["min_total_stocks"]
         self.min_long_stocks: int = c["min_long_stocks"]
         self.min_short_stocks: int = c["min_short_stocks"]
-        # 软线违规日容忍上限(全史违规日 > 此值才拒);硬顶 = 软线 max 占比 × 倍数
+        # 违规日容忍上限(全史违规日 > 此值才拒);严重违规线 = max 占比上限 × 倍数
         self.violation_tolerance: int = c.get("violation_tolerance", 10)
         self.hard_position_pct: float = (
             self.max_position_pct * c.get("hard_position_mult", 2.0))
@@ -83,10 +81,10 @@ class ComplianceChecker(Checker):
         long_positions = valid_data[valid_data > 0]
         short_positions = valid_data[valid_data < 0]
         max_abs = np.max(np.abs(valid_data, dtype=np.float64))
-        # ±inf 坏权重日:max/total = inf/inf = NaN,软线比较恒 False(与 survey/
-        # profile 逐位一致);硬顶侧不继承这个洞 —— check() 用 isfinite 显式硬拒
-        # (库内存量数据无 inf,已核 summary.csv,无影子发散面)。errstate 压
-        # NaN 除法在 worker 日志里的 RuntimeWarning 噪音。
+        # ±inf 坏权重日:max/total = inf/inf = NaN,四条阈值比较恒 False(与
+        # survey/profile 逐位一致);严重违规侧不继承这个洞 —— check() 用
+        # isfinite 显式立拒(库内存量数据无 inf,已核 summary.csv,无影子发散
+        # 面)。errstate 压 NaN 除法在 worker 日志里的 RuntimeWarning 噪音。
         with np.errstate(invalid="ignore"):
             return DayStat(
                 date=npy_file.name[0:8],
@@ -97,24 +95,24 @@ class ComplianceChecker(Checker):
                 avg_short_pct=float(np.sum(np.abs(short_positions)) / total_abs * 100),
             )
 
-    def _soft_violations(self, d: DayStat) -> list[tuple[str, str]]:
-        """该日违反的软线规则,(规则标签, 明细) 列表(空 = 合规)。
+    def _violations(self, d: DayStat) -> list[tuple[str, str]]:
+        """该日违反的阈值规则,(规则标签, 明细) 列表(空 = 合规)。
 
         标签供拒绝消息里的分规则计数 —— fail_reason 是被拒因子唯一的持久记录
         (compliance 测量有意不进 PG:单因子层是卫生闸,真约束在 combo 层),
-        全貌画像必须在这条消息里自足。"""
+        消息必须一行自足(风格契约见 base.CheckFail)。"""
         v: list[tuple[str, str]] = []
         if d.max_pos_pct > self.max_position_pct:
             v.append(("单票集中",
-                      f"个股最大持仓 {d.max_pos_pct*100:.2f}% > {self.max_position_pct*100}%"))
+                      f"个股占比 {d.max_pos_pct*100:.2f}% > {self.max_position_pct*100}%"))
         total = d.long_count + d.short_count
         if total < self.min_total_stocks:
             v.append(("总数不足",
-                      f"总持股 {total}(多 {d.long_count}+空 {d.short_count})< {self.min_total_stocks}"))
+                      f"总持股 {total}(多{d.long_count}+空{d.short_count}) < {self.min_total_stocks}"))
         if d.long_count < self.min_long_stocks:
-            v.append(("多头不足", f"多头持股 {d.long_count} < {self.min_long_stocks}"))
+            v.append(("多头不足", f"多头 {d.long_count} < {self.min_long_stocks}"))
         if d.short_count < self.min_short_stocks:
-            v.append(("空头不足", f"空头持股 {d.short_count} < {self.min_short_stocks}"))
+            v.append(("空头不足", f"空头 {d.short_count} < {self.min_short_stocks}"))
         return v
 
     def check(self, factor: AlphaMetadata) -> CompResult:
@@ -123,16 +121,15 @@ class ComplianceChecker(Checker):
             raise CheckSkip("未找到 v2 版本的 npy 文件")
 
         days: list[DayStat] = []
-        # 硬顶命中即刻拒(不看容忍度);软线逐日累计违规日数 + 全貌画像
-        # (分规则计数/最长连违/最近违规日)—— 拒绝时全部进 fail_reason,
-        # 那是被拒因子唯一的持久记录,必须自足
-        hard_hit: str | None = None
-        hard_days = 0
+        # 严重违规(单日超 2× 上限)命中即刻拒,不看容忍度;普通违规逐日累计,
+        # 全貌(分规则天数/最长连违/最近违规日)进 fail_reason —— 一行自足
+        severe_hit: str | None = None
+        severe_days = 0
         viol_days = 0
         rule_days: Counter[str] = Counter() # 规则标签 → 违规日数
         streak = max_streak = 0             # 连违按有效日序列算(无效日不断链)
         last_viol: str | None = None
-        viol_examples: list[str] = []       # 头几条软线违规,进日志
+        last_detail = ""                    # 最近一个违规日的具体数字(佐证)
         bad_reads: list[str] = []           # np.load 失败的文件(损坏/权限)
 
         for npy_file in npy_files:          # 全历史,不截尾窗
@@ -147,26 +144,24 @@ class ComplianceChecker(Checker):
             days.append(d)
 
             if not np.isfinite(d.max_pos_pct):
-                # inf 坏权重日(max/total=inf/inf=NaN):软线比较测不到,
-                # 但"单票 inf"正是硬顶要挡的灾难形态,显式硬拒不继承旧洞
-                hard_days += 1
-                hard_hit = hard_hit or f"{d.date}: 个股占比非有限值(疑似 inf 坏权重)"
+                # inf 坏权重日(max/total=inf/inf=NaN):阈值比较测不到,
+                # 但"单票 inf"正是严重违规要挡的灾难形态,显式立拒不继承旧洞
+                severe_days += 1
+                severe_hit = severe_hit or f"个股占比非有限值(inf 坏权重) ({d.date})"
             elif d.max_pos_pct > self.hard_position_pct:
-                hard_days += 1
-                hard_hit = hard_hit or (
-                    f"{d.date}: 个股最大持仓 {d.max_pos_pct*100:.2f}% "
-                    f"超硬顶 {self.hard_position_pct*100:.1f}%")
-            soft = self._soft_violations(d)
-            if soft:
+                severe_days += 1
+                severe_hit = severe_hit or (
+                    f"单日个股占比={d.max_pos_pct*100:.2f}% > "
+                    f"严重违规线{self.hard_position_pct*100:.1f}% ({d.date})")
+            viol = self._violations(d)
+            if viol:
                 viol_days += 1
                 streak += 1
                 max_streak = max(max_streak, streak)
                 last_viol = d.date
-                for tag, _ in soft:
+                last_detail = "; ".join(m for _, m in viol)
+                for tag, _ in viol:
                     rule_days[tag] += 1
-                if len(viol_examples) < _EXAMPLE_CAP:
-                    viol_examples.append(
-                        f"{d.date}: {'; '.join(m for _, m in soft)}")
             else:
                 streak = 0
 
@@ -180,25 +175,18 @@ class ComplianceChecker(Checker):
         if not days:
             raise CheckSkip("持仓全空")
 
-        # 违规全貌(进 fail_reason,QR 第一眼看到修什么;样例给具体日期佐证)
-        profile = (f"违规分布: "
-                   f"{' / '.join(f'{t} {n} 天' for t, n in rule_days.most_common())}"
-                   f";最长连违 {max_streak} 天;最近违规 {last_viol}")
-
-        # 硬顶优先:单日灾难不因"总违规天数少"被容忍度放过
-        if hard_hit is not None:
+        # 严重违规优先:单日灾难不因"总违规天数少"被容忍度放过
+        if severe_hit is not None:
             raise CheckFail(
-                f"硬顶违规(单日立拒,共 {hard_days} 天超"
-                f" {self.hard_position_pct*100:.1f}%): {hard_hit};"
-                f"全史软线违规 {viol_days}/{len(days)} 天({profile})")
+                f"{severe_hit} | 超线共{severe_days}天, "
+                f"全史违规{viol_days}/{len(days)}天")
 
         if viol_days > self.violation_tolerance:
-            head = "; ".join(viol_examples)
-            more = (f" (另有 {viol_days - len(viol_examples)} 天)"
-                    if viol_days > len(viol_examples) else "")
+            breakdown = ", ".join(f"{t}{n}天" for t, n in rule_days.most_common())
             raise CheckFail(
-                f"全史 {viol_days}/{len(days)} 天违规,超容忍上限 "
-                f"{self.violation_tolerance} 天({profile}): {head}{more}")
+                f"违规天数={viol_days}/{len(days)} > 容忍{self.violation_tolerance} | "
+                f"{breakdown}, 最长连违{max_streak}天, "
+                f"最近{last_viol}: {last_detail}")
 
         # 通过:CompResult 是接口一致性占位(流水线只关心是否抛),全史均值口径
         return CompResult(

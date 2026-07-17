@@ -177,20 +177,20 @@ uv run python scripts/compliance_profile.py --cache ~/compliance-survey
 违规画像(§4):全库仅 35 个因子有违规日(0.44%),且两极分化 —— **active 违规者
 12 个全是 ≤2 天早期毛刺**,持续违规(≥24 天)全在已拒因子,中间 2~24 是巨大空档。
 
-**已拍政策 = 四阈值不变 + 全史每日 + 跳过无效日 + 容忍 K=10 + 硬顶 2×(10%)**:
+**已拍政策 = 四阈值不变 + 全史每日 + 跳过无效日 + 容忍 K=10 + 严重违规线 2×(10%)**:
 - 全史每日取代尾窗 762(尾窗判定基数随数据起始漂移、且漏检窗外全史违规);
 - 跳过无效日 → 缺数据的早期天天然免疫("前面一段没数据"根上解决,不需尾窗 hack);
 - 容忍 K=10 违规日 → 放行早期毛刺(动机:"一天违规即拒太严");
-- 硬顶单日 maxpos > 10% 立拒 → 防"平时干净、某天单票半仓"被容忍度放过。
+- 严重违规:单日 maxpos > 10% 立拒 → 防"平时干净、某天单票半仓"被容忍度放过。
 
 **影子对比(summary.csv 复算 + violations.csv)**:新规则下 active **零状态变化**——
-active 中 0 个触硬顶(maxpos_max > 10% 的 5 个全是 rejected)、12 个软线违规者 viol_days
+active 中 0 个触严重违规线(maxpos_max > 10% 的 5 个全是 rejected)、12 个违规者 viol_days
 ≤2 ≤ 容忍 → 全放行;5 个持续/严重违规保持 rejected。checker 落地
 `ops/services/check/checker/compliance_checker.py`,单测 `tests/test_compliance_checker.py`
-(9 例:容忍内外 / 硬顶优先 / 无效日跳过 / 边界不违规)。
+(容忍内外 / 严重违规优先 / 无效日跳过 / 边界不违规)。
 
 **影子对比收官**(2026-07-16,`scripts/compliance_shadow.py` →
 `report/compliance-survey/shadow-compliance-rejected.csv`):22 条 compliance-rejected
-→ 硬顶仍拒 5 / 超容忍仍拒 5 / 转放行(毛刺)12;仍拒 10 个与全库预演逐名对账一致,
+→ 严重违规仍拒 5 / 超容忍仍拒 5 / 转放行(毛刺)12;仍拒 10 个与全库预演逐名对账一致,
 22 条全有数据全有违规痕迹。缺陷 6 已修(long_backtest prepare 显式 `dump_alpha=True`)。
 e2e 真 gsim 6/6 过。遗留:12 条转放行毛刺是否主动 restage,用户决定。
