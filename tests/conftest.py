@@ -221,6 +221,11 @@ def _isolated_paths(base: dict, tmp_path: Path, library_id: str) -> None:
     base["sync"]["library_id"] = library_id
     base["sync"].pop("remote", None)
 
+    # produce 块隔离:config.yaml 带生产值(/datasvc/data/cc_all),测试绝不碰
+    if "produce" in base:
+        base["produce"]["nio_data_path"] = str(tmp_path / "nio_produce")
+        base["produce"]["workspace"] = str(tmp_path / "workspace" / "produce")
+
 
 def _mkdirs(config) -> None:
     """预建数据目录(pipeline __init__ 只 mkdir 一部分)。"""

@@ -187,5 +187,6 @@ def test_write_command_declarations_match_registry():
     declared = {name for name, p in sub.choices.items()
                 if p.get_default("is_write_command")}
     # setup 2026-07-11 加入:缺省补建是写(--check 经 _CheckAction 运行时撤销声明)
+    # produce 2026-07-17 加入:写本机 sidecar alpha_dump(root-owned)
     assert declared == {"submit", "restage", "check", "run", "rm",
-                        "approve", "cancel", "clear", "pack", "setup"}
+                        "approve", "cancel", "clear", "pack", "setup", "produce"}
