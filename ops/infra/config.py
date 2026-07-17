@@ -25,26 +25,23 @@ def get_default_config_path() -> Path:
 
     config.yaml = 生产默认 (JFS 路径 + Postgres state)。没有回退配置 ——
     config.prod-legacy.yaml 已删除 (假保险)。
+
+    OPS_CONFIG 一旦设置就是唯一候选,**不存在也不回落**——静默跳过会让 typo
+    的路径默默换成别的 config 去操作因子库;存在性检查统一在 Config.load
+    响亮失败。本函数在 parser 注册期被调用(cli/common 的 default=),
+    不得在此退出/抛错,否则 `ops --help` 都会炸。
     """
-    # 1. Environment variable
     env_config = os.environ.get("OPS_CONFIG")
     if env_config:
-        env_path = Path(env_config)
-        if env_path.exists():
-            return env_path
+        return Path(env_config)
 
-    # 2. Current directory
     cwd_config = Path.cwd() / "config.yaml"
     if cwd_config.exists():
         return cwd_config
 
-    # 3. Project root
-    project_config = get_project_root() / "config.yaml"
-    if project_config.exists():
-        return project_config
-
-    # Fallback to project root (even if not exists, for error message)
-    return project_config
+    # uv tool install 场景 get_project_root() 找不到 pyproject.toml 会退化成
+    # cwd(见彼处),此路径可能不存在 —— 由 Config.load 给可行动的报错
+    return get_project_root() / "config.yaml"
 
 
 class Config:
@@ -231,6 +228,20 @@ class Config:
 
     @staticmethod
     def load(config_path: Path) -> "Config":
+        # 缺文件干净退出而非裸 FileNotFoundError 双 traceback:uv tool install
+        # 从任意目录跑时三级解析(OPS_CONFIG → ./config.yaml → 项目根)可能全落空,
+        # 报错必须自带怎么修。SystemExit 穿透 main 的 BaseException 臂和
+        # sudo.maybe_elevate 的 except Exception,两条路径都只见这一条消息。
+        if not config_path.is_file():
+            env = os.environ.get("OPS_CONFIG")
+            hint = (f"OPS_CONFIG={env} 指向不存在的文件,修正或 unset 它"
+                    if env and Path(env) == config_path else
+                    "解析顺序 OPS_CONFIG → ./config.yaml → 项目根 config.yaml 全部落空。\n"
+                    "修法任选:  export OPS_CONFIG=/path/to/gsim-ops/config.yaml"
+                    "(uv tool 安装的 ops 推荐,写进 ~/.bashrc)\n"
+                    "         或  ops <子命令> -c /path/to/config.yaml\n"
+                    "         或  cd 到 gsim-ops 仓库目录再跑")
+            raise SystemExit(f"ops: 找不到配置文件 {config_path}\n{hint}")
         with config_path.open("r", encoding="utf-8") as f:
             raw = yaml.safe_load(f.read())
         hostname = socket.gethostname()

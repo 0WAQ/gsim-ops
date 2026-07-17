@@ -5,6 +5,11 @@
 ## Config (`config.py`)
 
 `Config` class loads YAML. Resolution order: `OPS_CONFIG` env var → `./config.yaml` → project root `config.yaml`.
+**OPS_CONFIG 一旦设置就是唯一候选**——指向不存在的文件不回落(typo 静默换 config
+比崩溃可怕),由 `Config.load` 响亮退出(SystemExit + 可行动修法;uv tool install
+从任意 cwd 跑、三级解析全落空同此,不再裸 FileNotFoundError)。`get_default_config_path`
+在 parser 注册期被调用,永不退出/抛错(`ops --help` 不能炸)。
+测试 `tests/test_config_resolution.py`。
 
 Supports `${var_name}` variable substitution from the `vars:` block in YAML. 变量优先级(2026-07-11 hosts 声明,ops setup 配套):**OPS_* 环境变量 > `hosts:[本机 hostname]` > vars 基础值** —— 每机挂载点差异进 hosts 块按 hostname 精确匹配,同一份 config 四机零环境变量可用;命中情况回填 `config.hostname` / `config.host_declared` 供 `ops setup` 报告。
 
