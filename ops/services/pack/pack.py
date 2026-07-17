@@ -15,28 +15,23 @@ from pathlib import Path
 
 import numpy as np
 
+from ops.core.dumpfiles import iter_dump_files
 from ops.core.paths import FactorPaths
+from ops.core.universe import load_universe
 from ops.infra.config import Config
 from ops.infra.lock import FactorLocked, factor_lock
 from ops.utils.log import logger
 from ops.utils.printer import banner, bottom, error, info, warn
 
-DATES_FILE = "__universe/Dates.npy"
-INSTRUMENTS_FILE = "__universe/Instruments.npy"
 DTYPE = np.float64
 VERSIONS = ("v1", "v2")
 ATOL = 1e-6
 VERIFY_SAMPLES = 5
 
-# Pack 流程只覆盖到 20251231(check 流程上限),日增 (>20251231) 走另一条路径。
+# Pack 流程只覆盖到 20251231(check 流程上限),日增 (>20251231) 走另一条路径
+# (dump 侧已由 ops produce 落地;feature 行扩展见 .claude/plans.md 后议项)。
 # L 写死 3900;H 当前 5484,1-2 年内不变,变了再说。
 PACK_L = 3900
-
-
-def load_universe(nio_data_path: Path) -> tuple[np.ndarray, np.ndarray, dict[int, int]]:
-    dates = np.array(np.memmap(nio_data_path / DATES_FILE, mode="r", dtype=int))
-    ins = np.array(np.memmap(nio_data_path / INSTRUMENTS_FILE, mode="r", dtype=np.dtype("U32")))
-    return dates, ins, {int(d): i for i, d in enumerate(dates)}
 
 
 def _read_delay(paths: FactorPaths) -> int:
@@ -54,32 +49,6 @@ def _read_delay(paths: FactorPaths) -> int:
 
 def _offset_for_delay(delay: int) -> int:
     return 0 if delay == 0 else -1
-
-
-def _iter_date_files(factor_dump_dir: Path):
-    """Yield (date:int, version:str, path:Path) for each per-date npy under a factor."""
-    if not factor_dump_dir.exists():
-        return
-    for year in factor_dump_dir.iterdir():
-        if not year.is_dir():
-            continue
-        for month in year.iterdir():
-            if not month.is_dir():
-                continue
-            for f in month.iterdir():
-                if not f.name.endswith(".npy"):
-                    continue
-                stem = f.name[:-4]
-                if len(stem) < 10:
-                    continue
-                try:
-                    date = int(stem[:8])
-                except ValueError:
-                    continue
-                version = stem[8:10]
-                if version not in VERSIONS:
-                    continue
-                yield date, version, f
 
 
 def _atomic_write_memmap(target: Path, ram: np.ndarray) -> None:
@@ -108,7 +77,7 @@ def verify_sample(paths: FactorPaths,
     any mismatch.
     """
     offset = _offset_for_delay(delay)
-    candidates = [c for c in _iter_date_files(paths.dump)
+    candidates = [c for c in iter_dump_files(paths.dump)
                   if (di := date_to_idx.get(c[0])) is not None
                   and 0 <= di + offset < shape[0]]
     if not candidates:
@@ -143,7 +112,7 @@ def pack_one(paths: FactorPaths,
     ram = {v: np.full((L, H), np.nan, dtype=DTYPE) for v in VERSIONS}
     offset = _offset_for_delay(delay)
 
-    for date, version, f in _iter_date_files(paths.dump):
+    for date, version, f in iter_dump_files(paths.dump):
         di = date_to_idx.get(date)
         if di is None:
             continue
@@ -183,7 +152,7 @@ def pack_one_incremental(name: str, dates: list[int], config: Config) -> None:
     mms = {v: np.memmap(paths.feature(v),
                         mode="r+", shape=shape, dtype=DTYPE) for v in VERSIONS}
     try:
-        for date, version, f in _iter_date_files(paths.dump):
+        for date, version, f in iter_dump_files(paths.dump):
             if wanted is not None and date not in wanted:
                 continue
             di = date_to_idx.get(date)
