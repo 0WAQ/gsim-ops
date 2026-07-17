@@ -246,6 +246,38 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 **触发条件**:
 - 立即做的前提:Phase D/E 准备启动,需要增量来压成本
 - 或者:有人开始关心日更全量重写的 S3 流量费用
+- 新增(2026-07-17):`ops produce` 已落地日增 dump,feature 侧成为日增链路唯一
+  断点。**前置依赖:PACK_L 扩行**(2026+ 的 di ≥ 3900,不扩行增量写不进)。
+
+## 因子增量生产(2026-07-17 produce 落地;branch claude/factor-production-features-pdnjdc)
+
+**已落地**:`ops produce`(ACTIVE 因子 alpha_dump 日增生产,设计与边界见
+`ops/services/produce/CLAUDE.md`)+ core 上提 `dumpfiles.py` / `universe.py`。
+
+**170 实机验证清单(上机窗口执行)**:
+1. 黄金对比:produce 根临时指 cc_2025,重产 202512 段与 check 产的同日 dump
+   按 ATOL 比对(或跑 `pytest -m e2e tests/e2e/test_e2e_produce.py`)——
+   验段起点首日与全史跑一致(backdays 暖场充分性)。
+2. dump 真名 `ls` 确认(解析容错两种写法,写出沿 gsim 真名)。
+3. 170 上 `/datasvc/data/cc_all` 存在性 / Basedata/.meta 格式 / 新鲜度。
+4. 单因子段回测 wall time 实测 → 估 8k ACTIVE 夜间窗口,定 --workers 默认。
+5. gsim 对 enddate > .meta lastDate 的行为(报错 or 静默截断)。
+6. 归档 XML 存量 niodatapath 前缀抽查(有无 cc_2024/绝对路径特例)。
+
+**后议项**:
+- PACK_L 扩行(方案未定:预分配 / 分代文件 / zarr;用户 2026-07-17 定"先记录
+  后议")。触发:feature 出现真消费者(AlphaLoadFeat 因子库投产)或 pack --date
+  立项;AlphaLoadFeat 的 `{ver}` 命名对齐属同一验证。
+- pack --date 接线(上节,前置 = PACK_L 扩行)。
+- cron 节奏化:170 每日 `ops produce`(失败退出码 1 已备),与共享 staging 的
+  "消费节奏后议"同批议。
+- combo 日增:predict `start=end=today` 特例;实盘半边(147)零代码,须先定
+  "因子库投产"标志。
+- 滞后表因子 per-factor 就绪:读 5min/realtime 表的因子近 ~30 日产全 NaN dump
+  (本批照常安装 + warn);细化 = 按 factor_snapshot.tables 做 per-factor 闸门。
+- 跨机 dump 历史归拢:170 sidecar 无 2026-07-11 前的历史 dump(散在各机),
+  produce 只补 2026+ 不受影响;pack 在 170 立项时必须先归拢。
+- dumpscan / core.library 两份存量走查收敛到 core/dumpfiles(纯机械,顺手批)。
 
 
 ## redis-jfs 6380 maxclients 根因治理 (2026-06-23 事故后, Not Started)

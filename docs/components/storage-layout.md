@@ -39,6 +39,11 @@ alphalib/
 
 ⇒ src / pnl / feature / staging + 分流池全部共享;只有 alpha_dump 本机。
 
+alpha_dump 的两段来源:≤20251231 由 check 的 long_backtest 产出(入库时搬入);
+>production_start(2026+)由 `ops produce` 日增补产(落跑命令那台机的 sidecar,
+生产 = 170,与 check 消费同机 dump 才连续)。feature 仍只覆盖到 20251231
+(PACK_L 扩行后议,见 .claude/plans.md)。
+
 ## bcorr 分流池
 
 archive 入库时按 `discovery_method` 把 pnl 额外分流一份:automated → `pnl_automated/`,

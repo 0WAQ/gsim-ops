@@ -136,4 +136,9 @@ checker:
     hard_position_mult: 2.0        # 严重违规线 = max_position_pct × 此(单日超线立拒)
   correlation:
     corr_threshold: 0.7            # Pass if < 0.7
+produce:                           # 因子日增生产(ops produce);块缺失时命令响亮报错
+  nio_data_path:                   # 生产数据根(cc_all,持续日增;与 check 的 path.nio_data_path 分族)
+  production_start:                # 生产起点(check 历史窗口 20251231 之后)
+  workspace:                       # gsim src/alpha/checkpoint 工作区(本机)
+  readiness_dirs:                  # 就绪判定 canary 目录(缺省 [Basedata])
 ```

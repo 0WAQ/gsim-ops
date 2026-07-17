@@ -45,6 +45,9 @@ uv run ops info <factor-name>        # Show factor details (入库时快照 metr
 uv run ops pack                      # Aggregate alpha_dump → alpha_feature (skip already-packed)
 uv run ops pack --force              # Rewrite all factors
 uv run ops pack --factor AlphaXxx    # Pack one factor
+uv run ops produce                   # ACTIVE 因子 dump 日增:补到最新就绪交易日(幂等)
+uv run ops produce --date 20260716 --dry-run   # 指定目标日,只列缺失区间
+uv run ops produce --force --date 20260716 [--start 20260701]  # 重产(覆盖已有,确认制)
 uv run ops rm AlphaXxx               # 彻底删除因子(src/pnl/dump/feature + factor_info 级联 state+snapshot,不可逆)
 uv run ops rm AlphaXxx -y            # 跳过确认
 uv run ops restage AlphaXxx          # 原代码不变,召回 staging 待重跑 check
@@ -110,6 +113,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
+| `produce` | 在库(ACTIVE)因子 alpha_dump 日增生产:从 `produce.production_start` 补到最新就绪交易日(数据根 cc_all,与 check 的 cc_2025 冻结窗口分族;无状态、幂等;dump 落本机 sidecar,生产在 170 跑) | `ops/cli/produce.py` + `ops/services/produce/` |
 | `setup` | 声明式管理本机 alphalib 部署:hosts 块按 hostname 匹配挂载点,缺省幂等补建(目录/软链/权限组),`--check` 只读体检。JFS 挂载本身归 join.sh | `ops/cli/setup.py` + `ops/services/setup/` |
 | `doctor` | 盘 ↔ PG 数据对账(8 族:池鬼影/stale 快照/时间线不变量/info 孤儿/src·staging 漂移/产物孤儿/本机 dump 孤儿)。缺省纯只读;`--fix <族>` 逐族确认修复(五道闸删除管道) | `ops/cli/doctor.py` + `ops/services/doctor/` |
 

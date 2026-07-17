@@ -34,8 +34,8 @@ JFS 集中运维模型下 `alpha_src` / `staging` / `alpha_pnl` 等都是 root-o
 **写命令集由 cli 注册处 `mark_write(parser)` 声明派生**(S16,2026-07-10;
 `ops/cli/common.py`,`set_defaults(is_write_command=True)`):原 `WRITE_COMMANDS`
 手抄集合是多真相源(`run` 曾缺席 → JFS 下非 root 直接 EACCES,full-review 1.2),
-已删除。当前 10 个写命令声明:submit/restage/check/run/rm/approve/cancel/clear/
-pack/setup(backfill 2026-07-13 随命令退役出列);声明集钉在
+已删除。当前 11 个写命令声明:submit/restage/check/run/rm/approve/cancel/clear/
+pack/setup/produce(backfill 2026-07-13 随命令退役出列);声明集钉在
 `tests/test_pure.py::test_write_command_declarations_match_registry`。
 
 `ensure_redis_password` 钩子随 redis state 后端一并删除(2026-07-07 Wave 1)。
