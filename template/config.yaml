@@ -88,6 +88,12 @@ authors:
     email: junjie@graceim.ai
 
 # 运行模式
+# 因子日增生产 (ops produce),可缺省 (不配则 produce 报错退出,其它命令不受影响)
+produce:
+  nio_data_path: /datasvc/data/cc_all
+  production_start: '20260101'
+  workspace: /home/wbai/alpha/produce
+
 mode:
   max_workers: 16
   dry_run: false       # 测试模式 (不发送邮件)

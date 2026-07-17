@@ -113,6 +113,18 @@ authors:
     name: jzhang
     email: junjie@graceim.ai
 
+# 因子日增生产 (ops produce):为 ACTIVE 因子补产 >production_start 的每日 dump。
+# 数据根与 check 分族:check 用 path.nio_data_path=cc_2025 (.meta 冻结 20251231,
+# 验证窗口可复现,一字不动);produce 走 cc_all (持续日增,gsim 按其 .meta 可见
+# 最新数据)。cc_all 四机同一绝对路径,无需 hosts override —— 将来某机路径分叉
+# 时把值改成 ${produce_nio_root} 并进 vars/hosts 声明即可。
+# dump 是本机 sidecar:在哪台跑 produce 就落哪台 (生产消费机 = 170)。
+produce:
+  nio_data_path: /datasvc/data/cc_all
+  production_start: '20260101'        # 生产起点 (check 历史窗口 20251231 之后)
+  workspace: ${workspace}/produce     # gsim src/alpha/checkpoint 工作区 (本机)
+  # readiness_dirs: [Basedata]        # 就绪判定 canary 数据目录 (缺省 Basedata)
+
 # 运行模式
 mode:
   max_workers: 4              # PoC 期降低并发,方便观察 IO 行为
