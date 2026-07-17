@@ -271,7 +271,7 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
    - 通知实现待定(原 `ops/infra/notify/feishu_send.py` 已随 notify/ 删除,2026-07-07)。
 
 
-## Compliance 判定重做(2026-07-13 立项,先测量后定策;分支 claude/compliance-redesign)
+## Compliance 判定重做(2026-07-13 立项,先测量后定策;立项分支 claude/compliance-redesign,实施移至 claude/compliance-survey)
 
 **起因**:用户观察 compliance 判定有问题。走查现状(`checker/compliance_checker.py`):
 数据 = long_backtest 全历史 dump(工作区 v2 npy,逐日带符号持仓金额向量);
@@ -346,8 +346,9 @@ test_e2e_compliance_fail)。
 **compliance 测量不进 PG**(2026-07-16 定案):单因子 compliance 是入库卫生闸,
 真约束在 combo 层 binding(实盘交易的是加权组合,单因子集中度被稀释)—— 对卫生闸
 做精细测量无消费者,不加 snapshot 列(ops health 僵尸表教训)。被拒因子的详细记录
-走事件路:fail_reason 自足(判定 + 全貌画像"分规则天数/最长连违/最近违规日" +
-10 条带日期样例),dump 留盘(keep_artifacts),钻取用单因子 survey+profile 重跑。
+走事件路:fail_reason 一行自足(判定 + 全貌画像"分规则天数/最长连违/最近违规日+明细",
+风格契约见 base.CheckFail;样例堆砌不进消息),dump 留盘(keep_artifacts),
+钻取用单因子 survey+profile 重跑。
 **重开条件**:combo 侧出现真消费者(per-factor 集中度先验 / combo 级合规报告),
 届时形态是"当前测量"非"入库快照"。
 

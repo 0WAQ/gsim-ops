@@ -3,16 +3,17 @@
 **目的**:compliance 判定重做前,先产出**阈值无关的逐日持仓分布**,用数据定策
 (先测量后定策)。纯只读,零 sudo,只往 `--out` 目录落缓存,不碰任何生产写路径。
 
-**状态**(2026-07-15):脚本已沙盘 + 五问对抗验证过关;数据源等价性已确认。分支
-`claude/compliance-survey`。摸底方案与缺陷全清单见 `.claude/plans.md` "Compliance
-判定重做"节。
+**状态**(2026-07-16 收官):摸底 → 定策 → checker 重写 → 影子对比全链完成(见文末
+"定策与 checker 重写"两节),产出存档 `report/compliance-survey/`。分支
+`claude/compliance-survey`(待合 main)。缺陷全清单与决策记录见 `.claude/plans.md`
+"Compliance 判定重做"节。
 
 ---
 
 ## 它测什么
 
 对每个因子、每个交易日,存 **compliance checker 判定所需的四个原始量**
-(`ComplianceChecker._check_position` 同款,`ops/services/check/checker/compliance_checker.py`):
+(`ComplianceChecker._day_stat` 同款表达式,`ops/services/check/checker/compliance_checker.py`):
 
 | 列 | 定义 | 对应阈值 |
 |---|---|---|

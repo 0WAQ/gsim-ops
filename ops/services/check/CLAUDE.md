@@ -85,7 +85,7 @@ YYYY/MM 布局按时序,目录缺失返回空,不再裸吞 OSError —— 真错
 同批清理 results 空壳(checkpoint.py 删除,CheckpointChecker.check 返回 None;
 Status/Results 空壳类删除,`Result` 仅剩标记基类 + CompResult/CorrResult)。
 
-Checkers inherit from `Checker` ABC in `checker/base.py`(`check()` 必须实现 + `clean()` 默认 no-op 钩子,流水线对每个 stage 通过后统一调用)。Failures raise `CheckFail`; skippable issues raise `CheckSkip` —— **不带 stage 参数**,流水线捕获时归因。
+Checkers inherit from `Checker` ABC in `checker/base.py`(`check()` 必须实现 + `clean()` 默认 no-op 钩子,流水线对每个 stage 通过后统一调用)。Failures raise `CheckFail`; skippable issues raise `CheckSkip` —— **不带 stage 参数**,流水线捕获时归因。`CheckFail` 的 reason 有统一风格契约(`违反项[; …] | 上下文`,一行自足 —— fail_reason 是被拒因子唯一的持久记录),正主是 base.py 的 CheckFail docstring;compliance/correlation 消息均按此。
 
 `CheckerPipeline.__init__` 收一个可选 `checkers: dict[str, Checker] | None`(依赖注入):不传时按 PIPELINE 表 new 真的 gsim-backed checker(生产行为不变),测试注入 fake checker 在指定 stage 抛 `CheckFail`/`CheckSkip`/`Exception` 来验路由,不碰 gsim。路由/自愈/锁的单测见 `tests/test_check_routing_json.py`(json 后端,CI 常跑)+ `tests/test_check_routing.py`(PG,含 pass→archive)+ `tests/test_check_scan.py`。
 

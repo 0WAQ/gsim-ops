@@ -13,7 +13,7 @@
 | 1 | checkbias | 一个月 | AST 注入 `@DataFirewall`,检前视偏差 | REJECTED |
 | 2 | checkpoint | 5 天断点 | 断点续跑稳定性 | REJECTED |
 | 3 | long_backtest | 全历史(2015–2025) | 纯跑,无检查,产 pnl+dump | **retryable** → SUBMITTED |
-| 4 | compliance | 尾窗 762 天 | 仓位约束(见下) | REJECTED + 保产物 |
+| 4 | compliance | —(读 long_backtest dump,全史逐日) | 仓位约束(见下) | REJECTED + 保产物 |
 | 5 | correlation | — | 业绩门槛 + bcorr(见下) | REJECTED + 保产物 |
 | 6 | archive | — | 测得快照落库,搬入 alpha_src | — |
 
