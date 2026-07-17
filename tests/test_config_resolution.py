@@ -38,14 +38,21 @@ def test_cwd_config_when_no_env(monkeypatch, tmp_path):
 
 
 def test_load_missing_file_exits_with_hint(tmp_path, monkeypatch):
-    """144 现场:tool install + 任意 cwd,解析落空 → 干净退出带修法。"""
+    """144 现场:tool install + 任意 cwd,解析落空 → 干净退出带修法。
+
+    site-packages 里 get_project_root() 找不到 pyproject.toml 退化成 cwd ——
+    repo 内跑测试无法自然复现,monkeypatch 模拟该退化。"""
+    import ops.infra.config as cfg_mod
     monkeypatch.delenv("OPS_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cfg_mod, "get_project_root", lambda: tmp_path)
     missing = tmp_path / "config.yaml"
     with pytest.raises(SystemExit) as ei:
         Config.load(missing)
     msg = str(ei.value)
     assert str(missing) in msg
     assert "OPS_CONFIG" in msg          # 提示里必须有修法
+    assert "全部落空" in msg            # 走的是"解析落空"分支,不是 -c 分支
     assert "FileNotFoundError" not in msg
 
 
@@ -57,3 +64,51 @@ def test_load_missing_file_names_bad_env(tmp_path, monkeypatch):
         Config.load(Path(str(missing)))
     assert "OPS_CONFIG" in str(ei.value)
     assert "unset" in str(ei.value)
+
+
+def test_load_missing_explicit_c_names_the_flag(tmp_path, monkeypatch):
+    """显式 -c 传缺失路径:消息说"-c 拼写",不谎报"三级解析落空"(评审 M1)。
+
+    含 OPS_CONFIG 指向有效文件的变体 —— 更不能暗示 env 落空。"""
+    monkeypatch.delenv("OPS_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    explicit = tmp_path / "i-typed-this-wrong.yaml"
+    with pytest.raises(SystemExit) as ei:
+        Config.load(explicit)
+    assert "-c/--config-path" in str(ei.value)
+    assert "全部落空" not in str(ei.value)
+
+    good = tmp_path / "good.yaml"
+    good.write_text("vars: {}\n")
+    monkeypatch.setenv("OPS_CONFIG", str(good))
+    with pytest.raises(SystemExit) as ei:
+        Config.load(explicit)
+    assert "-c/--config-path" in str(ei.value)
+    assert "全部落空" not in str(ei.value)
+
+
+def test_project_root_fallback_third_level(monkeypatch, tmp_path):
+    """第三级:env 未设、cwd 无 config → 项目根 config.yaml(repo 内跑必存在)。"""
+    monkeypatch.delenv("OPS_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)                     # cwd 无 config.yaml
+    p = get_default_config_path()
+    assert p.name == "config.yaml" and p.is_file()  # 本仓库根的那份
+
+
+def test_exit_carries_message_not_code(tmp_path, monkeypatch):
+    """SystemExit 载荷是消息字符串(shell 退出码 1),不是裸 int。"""
+    monkeypatch.delenv("OPS_CONFIG", raising=False)
+    with pytest.raises(SystemExit) as ei:
+        Config.load(tmp_path / "config.yaml")
+    assert isinstance(ei.value.code, str)
+
+
+def test_help_survives_deleted_cwd(monkeypatch, tmp_path):
+    """cwd 被删除时 get_default_config_path 不抛(评审 M2:"永不抛"契约密闭)。"""
+    monkeypatch.delenv("OPS_CONFIG", raising=False)
+    doomed = tmp_path / "gone"
+    doomed.mkdir()
+    monkeypatch.chdir(doomed)
+    doomed.rmdir()
+    p = get_default_config_path()                   # 不得抛 OSError
+    assert p == Path("config.yaml")

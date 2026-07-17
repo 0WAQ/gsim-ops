@@ -35,13 +35,17 @@ def get_default_config_path() -> Path:
     if env_config:
         return Path(env_config)
 
-    cwd_config = Path.cwd() / "config.yaml"
-    if cwd_config.exists():
-        return cwd_config
-
-    # uv tool install 场景 get_project_root() 找不到 pyproject.toml 会退化成
-    # cwd(见彼处),此路径可能不存在 —— 由 Config.load 给可行动的报错
-    return get_project_root() / "config.yaml"
+    # cwd 可能已被删除(Path.cwd() 抛 OSError)——"永不抛"契约必须密闭,
+    # 返回一个必然不存在的相对路径,由 Config.load 响亮报错
+    try:
+        cwd_config = Path.cwd() / "config.yaml"
+        if cwd_config.exists():
+            return cwd_config
+        # uv tool install 场景 get_project_root() 找不到 pyproject.toml 会退化成
+        # cwd(见彼处),此路径可能不存在 —— 由 Config.load 给可行动的报错
+        return get_project_root() / "config.yaml"
+    except OSError:
+        return Path("config.yaml")
 
 
 class Config:
@@ -230,17 +234,24 @@ class Config:
     def load(config_path: Path) -> "Config":
         # 缺文件干净退出而非裸 FileNotFoundError 双 traceback:uv tool install
         # 从任意目录跑时三级解析(OPS_CONFIG → ./config.yaml → 项目根)可能全落空,
-        # 报错必须自带怎么修。SystemExit 穿透 main 的 BaseException 臂和
-        # sudo.maybe_elevate 的 except Exception,两条路径都只见这一条消息。
+        # 报错必须自带怎么修。承重墙是 main.py 的 `except SystemExit: raise`
+        # 专臂(别删它 —— 否则 BaseException 臂会把双 traceback 加回来);
+        # sudo.maybe_elevate 的 except Exception 拦不住 SystemExit,写命令在
+        # sudo prompt 之前就报错,不会白输密码。
         if not config_path.is_file():
             env = os.environ.get("OPS_CONFIG")
-            hint = (f"OPS_CONFIG={env} 指向不存在的文件,修正或 unset 它"
-                    if env and Path(env) == config_path else
-                    "解析顺序 OPS_CONFIG → ./config.yaml → 项目根 config.yaml 全部落空。\n"
-                    "修法任选:  export OPS_CONFIG=/path/to/gsim-ops/config.yaml"
-                    "(uv tool 安装的 ops 推荐,写进 ~/.bashrc)\n"
-                    "         或  ops <子命令> -c /path/to/config.yaml\n"
-                    "         或  cd 到 gsim-ops 仓库目录再跑")
+            if env and Path(env) == config_path:
+                hint = f"OPS_CONFIG={env} 指向不存在的文件,修正或 unset 它"
+            elif config_path != get_default_config_path():
+                # 路径不是缺省解析给的 → 来自显式 -c/--config-path,
+                # 别谎报"三级解析落空"误导用户去改 env
+                hint = "路径来自 -c/--config-path,检查拼写"
+            else:
+                hint = ("解析顺序 OPS_CONFIG → ./config.yaml → 项目根 config.yaml 全部落空。\n"
+                        "修法任选:  export OPS_CONFIG=/path/to/gsim-ops/config.yaml"
+                        "(uv tool 安装的 ops 推荐,写进 ~/.bashrc)\n"
+                        "         或  ops <子命令> -c /path/to/config.yaml\n"
+                        "         或  cd 到 gsim-ops 仓库目录再跑")
             raise SystemExit(f"ops: 找不到配置文件 {config_path}\n{hint}")
         with config_path.open("r", encoding="utf-8") as f:
             raw = yaml.safe_load(f.read())
