@@ -495,3 +495,135 @@ combo_eq: 读三人 combo_dump → AlphaComboEqualProd 等权 → combo_pnl/comb
 ```
 
 **数据路径**: `niodatapath="/nvme125/datasvc/data/cc"`,因子读取 `alphaDir="/nvme125/alpha_dump/"`(本机 sidecar)。
+
+---
+
+## 7. `/nvme125/alpha_dump` 身份调查(补充,2026-07-17 21:08)
+
+### 7.1 路径身份
+
+```
+$ ls -ld /nvme125/alpha_dump /nvme125/alphalib/alpha_dump /nvme125/alphalib.local/alpha_dump
+drwxrwxr-x 7589 wbai alpha-data 7589 Jul 17 18:29 /nvme125/alpha_dump
+lrwxrwxrwx    1 root root         28 Jun  8 09:44 /nvme125/alphalib/alpha_dump -> ../alphalib.local/alpha_dump
+drwxr-sr-x    2 root alpha-data    2 Jul 11 19:32 /nvme125/alphalib.local/alpha_dump
+```
+
+**结论**: 三个路径是**三个独立实体**:
+| 路径 | 身份 | 用途 |
+|---|---|---|
+| `/nvme125/alpha_dump` | **独立 ZFS dataset** (`nvme125/alpha_dump`, 1.35T used, 11.6T avail) | combo 生产的因子日产出(cchang 运维) |
+| `/nvme125/alphalib/alpha_dump` | JFS 软链 → `alphalib.local/alpha_dump` | ops alphalib sidecar 约定(当前**空目录**) |
+| `/nvme125/alphalib.local/alpha_dump` | 本地 sidecar 实目录 | ops 设计中的 alpha_dump 落盘位(当前**空**,未投产) |
+
+**`/nvme125/alpha_dump` 不是 JFS 的一部分**,不是 alphalib sidecar,是 cchang 独立建的 ZFS dataset,
+与 ops alphalib 体系完全脱钩。combo 生产配置硬编码 `alphaDir="/nvme125/alpha_dump/"` 读它。
+
+### 7.2 内容规模
+
+```
+$ ls /nvme125/alpha_dump | wc -l
+7587
+
+$ ls /nvme125/alpha_dump | head
+AlphaCchangAmtAwareRev
+AlphaCchangIntraOvnFusion
+AlphaCchangLimitDynamics
+AlphaCchangVwapPressure
+AlphaFguo12_10
+AlphaFguo12_14
+AlphaFguo12_2
+AlphaFguo12_4
+AlphaFguo12_5
+AlphaFguo12_7
+```
+
+7587 个因子目录,覆盖 fguo / lhw / zxu / cchang 四位研究员。
+
+### 7.3 最近 dump 文件(样本)
+
+```
+$ ls -la /nvme125/alpha_dump/AlphaFguo12_10/2026/07/ | tail -5
+-rw-rw-r-- 1 cchang cchang 44000 Jul 17 18:33 20260715v2.npy
+-rw-rw-r-- 1 cchang cchang 44000 Jul 17 18:33 20260716v1.npy
+-rw-rw-r-- 1 cchang cchang 44000 Jul 17 18:33 20260716v2.npy
+-rw-rw-r-- 1 cchang cchang 44000 Jul 17 18:33 20260717v1.npy
+-rw-rw-r-- 1 cchang cchang 44000 Jul 17 18:33 20260717v2.npy
+
+$ stat /nvme125/alpha_dump/AlphaFguo12_10/2026/07/20260717v2.npy
+Modify: 2026-07-17 18:33:10.944944972 +0800
+Uid: (1003/cchang) Gid: (1003/cchang)
+```
+
+### 7.4 所有权统计
+
+```
+$ find /nvme125/alpha_dump -maxdepth 4 -name "20260717v2.npy" -exec stat -c "%U" {} \; | sort | uniq -c
+   7530 cchang
+```
+
+**100% cchang 写入**。
+
+### 7.5 生产时间窗
+
+```
+# 今天(Jul 17)的 dump 写入时间范围:
+最早: 2026-07-17 18:33:10 (AlphaFguo12_10)
+最晚: 2026-07-17 18:46:28 (AlphaZxu_260706_AftIntraSkew_delay1)
+→ 全量 7530 因子在 ~13 分钟内完成
+```
+
+### 7.6 生产机制:per-factor gsim + checkpoint
+
+```
+# 配套 per-factor checkpoint 目录:
+$ ls /nvme125/checkpoint/ | wc -l
+7535
+
+$ du -sh /nvme125/checkpoint/
+4.2G
+
+$ ls -la /nvme125/checkpoint/AlphaFguo12_10/
+-rw-rw-r-- 1 cchang alpha-core 440823 Jul 17 18:33 archive.bin
+
+# checkpoint 写入时间与 dump 一致 (18:33-18:46):
+$ find /nvme125/checkpoint -name "archive.bin" -printf "%T+ %p\n" | sort -r | head -3
+2026-07-17+18:46:28  AlphaZxu_260706_AftIntraSkew_delay1/archive.bin
+2026-07-17+18:45:56  AlphaZxu_260706_NoonVolShare_delay1/archive.bin
+2026-07-17+18:45:55  AlphaZxu_260706_LgTradeRetCorr_delay1/archive.bin
+
+# alpha_pnl 同时写入:
+$ stat /nvme125/alpha_pnl/AlphaFguo12_10
+Modify: 2026-07-17 18:33:11.059944843 +0800
+Uid: (1003/cchang) Gid: (1003/cchang)
+
+# ZFS dataset:
+$ zfs list nvme125/alpha_pnl
+nvme125/alpha_pnl  1.02G  11.6T  1.02G  /nvme125/alpha_pnl
+```
+
+**机制**: cchang 的 `run_combo.sh` 脚本对每个因子并发跑 gsim (使用 `run_cp.py` = checkpoint 版),
+每因子有独立 config(生产端 overwrite 了原 `alpha_src` 里的 XML,将 `enddate` 改为 `TODAY-1`、
+`dumpAlphaDir` 改为 `/nvme125/alpha_dump`、`checkpointDir` 改为 `/nvme125/checkpoint/<factor>/`),
+**单次增量生产 = 读 checkpoint → 续跑最后 N 天 → 产出 dump + pnl + 更新 checkpoint**。
+
+### 7.7 谁触发 & 几点跑
+
+```
+# 当前正在运行的进程:
+$ ps aux | grep combo
+cchang  3456290  bash /home/cchang/stock_combo_product/run_combo.sh prod --author zxu
+cchang  3456330  /usr/local/gsim/.venv/bin/python3 /usr/local/gsim/run_cp.py /nvme125/combo_cchang/xml/combo_zxu/mode0.xml
+
+# cchang 工作环境:VS Code Remote + tmux,run_combo.sh 从 VS Code terminal 手动启动。
+# 无系统级 cron。
+# /home/cchang/ 权限 0750,脚本内容不可读。
+```
+
+**回答**:
+1. `/nvme125/alpha_dump` 是 **cchang 运维的独立 ZFS dataset**,不是 JFS/alphalib 的一部分。
+2. 每日由 cchang 通过 `/home/cchang/stock_combo_product/run_combo.sh` 脚本触发,**非自动 cron**。
+3. 执行链: `run_combo.sh` → 并发 gsim `run_cp.py` (per-factor config + checkpoint) → 写 `/nvme125/alpha_dump/<factor>/` + `/nvme125/alpha_pnl/<factor>` + `/nvme125/checkpoint/<factor>/`。
+4. 今天 18:33-18:46 跑完 7530 因子(~13 分钟,checkpoint 续跑)。
+5. combo 在 20:11 才启动(alpha_dump 就位后手动触发)。
+6. **全链条无告警、无监控**,人工目视 + mtime 检查。
