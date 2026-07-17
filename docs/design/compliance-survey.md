@@ -1,0 +1,197 @@
+# Compliance 摸底(`scripts/compliance_survey.py`)
+
+**目的**:compliance 判定重做前,先产出**阈值无关的逐日持仓分布**,用数据定策
+(先测量后定策)。纯只读,零 sudo,只往 `--out` 目录落缓存,不碰任何生产写路径。
+
+**状态**(2026-07-16 收官):摸底 → 定策 → checker 重写 → 影子对比全链完成(见文末
+"定策与 checker 重写"两节),产出存档 `report/compliance-survey/`。分支
+`claude/compliance-survey`(待合 main)。缺陷全清单与决策记录见 `.claude/plans.md`
+"Compliance 判定重做"节。
+
+---
+
+## 它测什么
+
+对每个因子、每个交易日,存 **compliance checker 判定所需的四个原始量**
+(`ComplianceChecker._day_stat` 同款表达式,`ops/services/check/checker/compliance_checker.py`):
+
+| 列 | 定义 | 对应阈值 |
+|---|---|---|
+| `total_abs` | 当日总敞口 Σ\|w\| | max 占比的分母 |
+| `max_pos_pct` | 单股最大占比 max\|w\|/Σ\|w\| | `max_position_pct`(现 5%) |
+| `long_count` | 多头持股数 #(w>0) | `min_long_stocks`(现 50) |
+| `short_count` | 空头持股数 #(w<0) | `min_short_stocks`(现 50) |
+
+**不存**"当前阈值下的违规计数"—— 那只能回答一个问题。存原始分布后,任何候选政策
+("5% 改 4.5% 多拒多少"、"容忍 0.5% 天数"、"纯多头豁免")都是对缓存的秒级查询。
+
+产出(`--out` 目录):
+
+| 文件 | 内容 |
+|---|---|
+| `<name>.npz` | 逐日四列(`total_abs`/`max_pos_pct`/`long_count`/`short_count`,长 PACK_L=3900) |
+| `summary.csv` | 每因子一行:有效起末日 / valid_days / gap_days / maxpos 分位数(p50/95/99/max)/ 多空/总持股 min·p05 |
+| `universe_dates.npy` | 行号 → 交易日 标尺(一次) |
+| `coverage-missing.txt` | 该源无数据的因子名单 |
+
+**四条 compliance 阈值全能从 `summary.csv` 复算**:`max_position_pct`←`maxpos_max`、
+`min_long_stocks`←`long_min`、`min_short_stocks`←`short_min`、`min_total_stocks`←
+`total_min`(单列,因 `min(多+空) ≠ min(多)+min(空)`)。
+
+---
+
+## 两个数据源与等价性(已确认)
+
+- **feature**:`alpha_feature/<name>.v2.npy`,裸 memmap `(3900, H)`,pack 直写无 npy 头。
+  快、JFS 共享,但只在 **packed(≈ACTIVE)** 因子上有。
+- **dump**:`alpha_dump/<name>/YYYY/MM/<yyyymmdd>*.v2.npy`,逐日 `(H,)` 向量。
+  **被拒因子(compliance/correlation)无 feature,只有 dump**,是完整判定域的另一半。
+  dump 是**本机 sidecar**,只能在持有该因子 dump 的机器上跑。
+
+**feature 是 dump 的忠实代理**(2026-07-15 五问对抗验证,`compliance_checker` /
+`pack.py` 逐行核实 + 数值对拍):
+
+- pack 转换是**纯字节搬运**,无缩放变换 —— pack 自带的 `verify_sample` 逐位比对
+  `feature[行] == dump[日]`(ATOL=1e-6,NaN-aware),本身即证明数值恒等;
+- survey 的四列 = checker 同款 numpy 表达式:**多空计数 / max 占比 / 跳过规则逐位
+  精确一致**;`total_abs` 仅差最后一个 ULP(feature 的 `nansum`-over-padded vs
+  checker 的 `sum`-over-valid,最坏 ~5e-16,阈值 0.05 —— 差 13 个数量级,不翻任何判定);
+- **逐日分布统计与数据源无关**:百分位 / 计数 / valid_days / gap 全部源不变。
+
+**唯一源相关处(已知、无害、留后续)**:feature 行号带 delay 偏移(delay=1 时行 i
+存的是交易日 i+1 的 dump),故 `first/last_valid_date` 在 delay=1 feature-读因子上比
+真实 dump 日**早 ≤1 交易日** —— 只动日期标签、不碰阈值分布。dump 路径无偏移,标签
+与 checker 的文件名日期一致。跨源精确对齐等把 rejected 因子的 dump 折进来时再做。
+
+**⚠ 判读注意(选择偏差)**:feature 只在 packed(≈ACTIVE)因子上有,而 ACTIVE =
+**已经通过旧 compliance 检查**的因子。所以 feature 源的分布是"安全内区"长什么样,
+指标全部远离阈值是**预期甚至近乎同义反复** —— 据此推不出"阈值偏松"。真正决定
+阈值的是两块边界人口:①被拒因子(dump 源覆盖);②活因子的**窗外早期天**(旧
+checker 只看尾部 762 文件,survey 的 maxpos_max 是全历史 —— "全史超线但旧窗没看到"
+的因子,正是"改成每天检查会误伤多少已入库因子"的量化对象)。
+
+---
+
+## 怎么跑
+
+**机器**:JFS 可达节点(160/150/170 皆可 —— feature 在 JFS 共享)。dump 源须在持有
+该因子 dump 的机器上跑。
+
+### 0 · 切分支 + 同步
+
+```bash
+cd ~/gsim-ops
+git fetch origin claude/compliance-survey
+git checkout claude/compliance-survey && git reset --hard origin/claude/compliance-survey
+uv sync --quiet
+df -h ~ | tail -1        # 抽检产出很小;全量缓存约 1G
+```
+
+### 1 · 随机抽检(推荐先跑这个)
+
+`--sample N` 只从**该源确有数据**的因子里抽,保证抽到的 N 个都出统计;`--seed` 固定
+可复现。
+
+```bash
+uv run python scripts/compliance_survey.py --source feature --sample 8 --out ~/csurvey-sample
+```
+
+跑完贴回:
+
+```bash
+head -1 ~/csurvey-sample/summary.csv                 # 表头
+column -t -s, ~/csurvey-sample/summary.csv | less -S  # 或整表贴回(纯统计,无敏感信息)
+# 抽一个 npz 看结构
+uv run python -c "import numpy as np,glob; f=sorted(glob.glob('$HOME/csurvey-sample/*.npz'))[0]; d=np.load(f); print(f.split('/')[-1]); [print(k,d[k].shape,d[k].dtype) for k in d.files]"
+```
+
+**自检**(不过就停下贴报错):`source` 列全 `feature`;`maxpos_max`/`long_min`/
+`short_min`/`total_min` 有值;无 `Traceback`;npz 四数组长 3900。
+
+### 2 · 全量(可选,抽检判读后按需)
+
+```bash
+nohup uv run python scripts/compliance_survey.py --source auto \
+    --out ~/compliance-survey > ~/compliance-survey.log 2>&1 &
+echo "PID=$!"
+```
+
+`--source auto` = feature 优先、无 feature 时回落本机 dump —— 一趟同时拿到活因子
+内区 + 本机能覆盖的被拒尾巴(边界人口,定阈值最需要的半边)。summary 的 `source`
+列标注每因子来源,判读时可分开切。`coverage-missing.txt` 里剩下的 = 本机 dump 也
+没有的因子(dump 在别的 check 机上,或产物已清),名单决定要不要去别的机器补跑。
+
+断点续跑安全(已有 `<name>.npz` 跳过);顺序读大(每因子 ~171MB feature memmap),
+JFS 上小时级,峰值内存 ~22MB。监控 `tail -3 ~/compliance-survey.log` /
+`ls ~/compliance-survey/*.npz | wc -l`。
+
+### 3 · 回收判读
+
+把 `summary.csv` 贴回 / 压缩发回 → 出全库(或样本)分布 → 按数据定阈值。
+
+### 4 · 违规画像(`scripts/compliance_profile.py`,summary 判读后的第二遍)
+
+summary 只有全窗极值,回答不了**"违规是毛刺还是持续、落在生命周期哪一段"**——
+而这正是"任一天违规即拒是否过严"、"暖机头部要不要跳过"两个政策问题的数据
+依据。画像脚本纯本地后处理 npz 缓存(不碰生产、不需要 PG),分钟级:
+
+```bash
+uv run python scripts/compliance_profile.py --cache ~/compliance-survey
+```
+
+产出 `<cache>/violations.csv`,每因子:违规天数/占比(any + 分规则)、最长连违
+(`max_streak`,有效日序列上)、首 252 有效日违规数(`viol_head252`,暖机集中度)、
+末 762 有效日违规数(`viol_tail762`,≈复现旧 checker 判定)、最后一个违规日之后
+的干净天数(`clean_suffix_days`,旧规则本质 = 干净后缀 ≥ 窗口长)、违规首末日。
+阈值默认 = 现行 config 值(0.05/50/50/100,算符与 checker 逐位一致:maxpos 严格
+`>`、counts 严格 `<`、空日跳过)。**逐日谓词与 checker 逐位等价**(五问对抗验证:
+算符/skip/阈值/inf 行为全 CONFIRMED,dump 源连浮点都逐位相同)。
+
+判读要点:
+- **暖机假设验证**:若违规集中在 `viol_head252`(尾部干净),政策可以是
+  "跳过头部 N 有效日"或"从首个连续合规段起算";
+- **毛刺 vs 持续**:`viol_days ≤ 数天且 max_streak 小` 的是毛刺,适合小容忍度
+  放行;`viol_frac` 高的是持续违规,零容忍也不冤;
+- **active 违规者的时间性**:`last_viol_date` 早于入库时间 = 旧窗口漏网;晚于
+  入库时间 = 入库后漂移(旧 checker 只在提交时跑一次,之后的天从没人查)——
+  两者政策含义完全不同,判读时对 PG `entered_at` 一join便知。
+- **`viol_tail762` 是旧判定的上包络,两源语义不同**:结构上不漏报任何旧拒(无
+  假阴),仅近端有 skip 日时偏严多报。**dump 源(compliance-rejected)**尾端对齐
+  当年 check 日、数字与 checker 逐位相同 —— 是"旧规则会不会拒"的正解;**feature
+  源(ACTIVE)**尾端锚在 pack 水平线(20251231)而非当年 check 日,其 tail762 读作
+  "当前尾窗是否仍违规",不是当年判定复现。要严格回归旧判定,看 dump 源那一支。
+
+---
+
+## 已修(对抗验证收口,commit `de53235`)
+
+- **dump 路径越界崩溃**:`survey_one_dump` 原无上界守卫,而 universe 已含 20251231
+  后的日增日(di 逼近/超 PACK_L=3900),dump 路径任一 2026 日期即 `IndexError` 崩
+  整轮。补 pack 同款 `di >= PACK_L` 守卫(与 pack/feature 同域丢弃日增段)。
+- **`total_min`/`total_p05` 列**:补齐 `min_total_stocks` 判据(边际 min 合不出总 min)。
+- **nanmax 哨兵收窄**成 `== -inf`:真 +inf 坏权重不再静默吞成 NaN。
+
+## 定策与 checker 重写(2026-07-16 完成)
+
+**摸底结论**(7972 因子入 `report/compliance-survey/`):阈值边距普遍巨大(maxpos
+中位 0.13% vs 5%)、无纯多头 active(豁免无客户)、valid_days 最短 891(无需下限)。
+违规画像(§4):全库仅 35 个因子有违规日(0.44%),且两极分化 —— **active 违规者
+12 个全是 ≤2 天早期毛刺**,持续违规(≥24 天)全在已拒因子,中间 2~24 是巨大空档。
+
+**已拍政策 = 四阈值不变 + 全史每日 + 跳过无效日 + 容忍 K=10 + 严重违规线 2×(10%)**:
+- 全史每日取代尾窗 762(尾窗判定基数随数据起始漂移、且漏检窗外全史违规);
+- 跳过无效日 → 缺数据的早期天天然免疫("前面一段没数据"根上解决,不需尾窗 hack);
+- 容忍 K=10 违规日 → 放行早期毛刺(动机:"一天违规即拒太严");
+- 严重违规:单日 maxpos > 10% 立拒 → 防"平时干净、某天单票半仓"被容忍度放过。
+
+**影子对比(summary.csv 复算 + violations.csv)**:新规则下 active **零状态变化**——
+active 中 0 个触严重违规线(maxpos_max > 10% 的 5 个全是 rejected)、12 个违规者 viol_days
+≤2 ≤ 容忍 → 全放行;5 个持续/严重违规保持 rejected。checker 落地
+`ops/services/check/checker/compliance_checker.py`,单测 `tests/test_compliance_checker.py`
+(容忍内外 / 严重违规优先 / 无效日跳过 / 边界不违规)。
+
+**影子对比收官**(2026-07-16,`scripts/compliance_shadow.py` →
+`report/compliance-survey/shadow-compliance-rejected.csv`):22 条 compliance-rejected
+→ 严重违规仍拒 5 / 超容忍仍拒 5 / 转放行(毛刺)12;仍拒 10 个与全库预演逐名对账一致,
+22 条全有数据全有违规痕迹。缺陷 6 已修(long_backtest prepare 显式 `dump_alpha=True`)。
+e2e 真 gsim 6/6 过。遗留:12 条转放行毛刺是否主动 restage,用户决定。

@@ -6,7 +6,7 @@
 1. **Checkbias** - Short backtest (`CHECKBIAS_WINDOW`) with DataFirewall injection for forward-looking bias detection
 2. **Checkpoint** - Breakpoint stability validation (5-day checkpoint)
 3. **Long Backtest** - Full historical backtest (`LONG_BACKTEST_WINDOW`), pure run, no checks
-4. **Compliance** - Position limits (max 5% per stock), min stock counts (50 long, 50 short, 100 total)
+4. **Compliance** - 逐日持仓合规:全史每日检查(2026-07-16 重做,不再截尾窗)。个股 max 占比 5% / 多空各 50 / 总 100 四条阈值,任一违反记该日为违规日,**全史违规日 > `violation_tolerance`(默认 10)才拒**(放行早期毛刺);外加**严重违规**——单日个股 > `max_position_pct × hard_position_mult`(默认 2× = 10%)立即拒,不吃容忍。无效日(空/全 NaN/零敞口)跳过。数据定策见 `docs/design/compliance-survey.md`
 5. **Correlation** - 相关性 + 业绩门槛 (单一 stage,见下)
 6. **Archive** - Run simsummary, persist snapshot, move to library。
 
@@ -85,7 +85,7 @@ YYYY/MM 布局按时序,目录缺失返回空,不再裸吞 OSError —— 真错
 同批清理 results 空壳(checkpoint.py 删除,CheckpointChecker.check 返回 None;
 Status/Results 空壳类删除,`Result` 仅剩标记基类 + CompResult/CorrResult)。
 
-Checkers inherit from `Checker` ABC in `checker/base.py`(`check()` 必须实现 + `clean()` 默认 no-op 钩子,流水线对每个 stage 通过后统一调用)。Failures raise `CheckFail`; skippable issues raise `CheckSkip` —— **不带 stage 参数**,流水线捕获时归因。
+Checkers inherit from `Checker` ABC in `checker/base.py`(`check()` 必须实现 + `clean()` 默认 no-op 钩子,流水线对每个 stage 通过后统一调用)。Failures raise `CheckFail`; skippable issues raise `CheckSkip` —— **不带 stage 参数**,流水线捕获时归因。`CheckFail` 的 reason 有统一风格契约(`违反项[; …] | 上下文`,一行自足 —— fail_reason 是被拒因子唯一的持久记录),正主是 base.py 的 CheckFail docstring;compliance/correlation 消息均按此。
 
 `CheckerPipeline.__init__` 收一个可选 `checkers: dict[str, Checker] | None`(依赖注入):不传时按 PIPELINE 表 new 真的 gsim-backed checker(生产行为不变),测试注入 fake checker 在指定 stage 抛 `CheckFail`/`CheckSkip`/`Exception` 来验路由,不碰 gsim。路由/自愈/锁的单测见 `tests/test_check_routing_json.py`(json 后端,CI 常跑)+ `tests/test_check_routing.py`(PG,含 pass→archive)+ `tests/test_check_scan.py`。
 

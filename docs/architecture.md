@@ -110,7 +110,7 @@ stateDiagram-v2
 | 1 | checkbias | 短回测 + AST 注入 `@DataFirewall`,检前视偏差 | reject |
 | 2 | checkpoint | 断点续跑稳定性 | reject |
 | 3 | long_backtest | 全历史回测(2015–2025) | retryable |
-| 4 | compliance | 仓位约束(个股 ≤5%,多/空 ≥50,总 ≥100) | reject + 保产物 |
+| 4 | compliance | 仓位约束全史逐日(个股 ≤5%,多/空 ≥50,总 ≥100;违规日 >10 或单日严重违规才拒) | reject + 保产物 |
 | 5 | correlation | 业绩门槛(ret/shrp/tvr)+ bcorr <0.7(否则须打败竞品) | reject + 保产物 |
 | 6 | archive | 测得快照落库,搬入 alpha_src | — |
 
@@ -262,5 +262,4 @@ flowchart TB
 - **依赖**:numpy / xmltodict / pyyaml / loguru / rich / psycopg(见 `pyproject.toml`)。
 - **演进史**:里程碑(Redis→PG / JFS 上线 / 三表重构 / schema v2·v3 / legacy 清理)见
   [根 CLAUDE.md](../CLAUDE.md) "已完成的大事件" + [.claude/plans.md](../.claude/plans.md) +
-  [remediation/JOURNAL.md](remediation/JOURNAL.md)。路线图在 [.claude/plans.md](../.claude/plans.md)
-  (下一批:compliance 判定重做,先测量后定策)。
+  [remediation/JOURNAL.md](remediation/JOURNAL.md)。路线图在 [.claude/plans.md](../.claude/plans.md)。

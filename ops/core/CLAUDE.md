@@ -127,11 +127,13 @@ script:
   simsummary_script:               # PNL summary tool
   bcorr_script:                    # Correlation calculator
 checker:
-  compliance:
+  compliance:                      # 全史每日 + 容忍 + 严重违规立拒(2026-07-16 重做)
     max_position_pct: 0.05         # Max 5% per stock
     min_total_stocks: 100
     min_long_stocks: 50
     min_short_stocks: 50
+    violation_tolerance: 10        # 全史违规日 > 此值才拒
+    hard_position_mult: 2.0        # 严重违规线 = max_position_pct × 此(单日超线立拒)
   correlation:
     corr_threshold: 0.7            # Pass if < 0.7
 ```

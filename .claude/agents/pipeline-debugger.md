@@ -56,8 +56,9 @@ The check pipeline runs 8 stages sequentially per factor:
    - State leaking between generate() calls
 
    **compliance failure**:
-   - Max position > 5% per stock
-   - Total stocks < 100, long < 50, short < 50
+   - 全史违规日 > 容忍(10)才拒;阈值:单票 > 5%,total < 100 / long < 50 / short < 50
+   - 或单日严重违规(单票 > 10%,含 inf 坏权重)立拒,不吃容忍
+   - fail_reason 一行自足(分规则天数 / 最长连违 / 最近违规日)
    - Check operations chain — missing Rank or Neutralize
 
    **correlation failure**:

@@ -13,7 +13,7 @@
 | 1 | checkbias | 一个月 | AST 注入 `@DataFirewall`,检前视偏差 | REJECTED |
 | 2 | checkpoint | 5 天断点 | 断点续跑稳定性 | REJECTED |
 | 3 | long_backtest | 全历史(2015–2025) | 纯跑,无检查,产 pnl+dump | **retryable** → SUBMITTED |
-| 4 | compliance | 尾窗 762 天 | 仓位约束(见下) | REJECTED + 保产物 |
+| 4 | compliance | —(读 long_backtest dump,全史逐日) | 仓位约束(见下) | REJECTED + 保产物 |
 | 5 | correlation | — | 业绩门槛 + bcorr(见下) | REJECTED + 保产物 |
 | 6 | archive | — | 测得快照落库,搬入 alpha_src | — |
 
@@ -48,16 +48,20 @@
 [`compliance_checker.py`](../../ops/services/check/checker/compliance_checker.py),阈值在
 `config.yaml -> checker.compliance`:
 
-| 项 | 门槛 |
-|---|---|
-| 个股最大持仓 `max\|w\|/Σ\|w\|` | ≤ 5% |
-| 总持股数 | ≥ 100 |
-| 多头持股数 | ≥ 50 |
-| 空头持股数 | ≥ 50 |
+| 项 | 门槛 | 层 |
+|---|---|---|
+| 个股最大持仓 `max\|w\|/Σ\|w\|` | ≤ 5% | 普通违规 |
+| 总持股数 | ≥ 100 | 普通违规 |
+| 多头持股数 | ≥ 50 | 普通违规 |
+| 空头持股数 | ≥ 50 | 普通违规 |
+| 单日个股最大持仓 | ≤ `max_position_pct × hard_position_mult`(2× = 10%) | **严重违规(立拒)** |
 
-现行判定 = long_backtest 的每日 dump,尾部 762 个文件窗口内逐日查四项,空/NaN 天静默跳过,
-任一天任一项违规即 REJECTED。**判定重做在路线图**(先测量后定策,见
-[`../../.claude/plans.md`](../../.claude/plans.md) "Compliance 判定重做")。
+判定(2026-07-16 重做,数据定策见
+[`../design/compliance-survey.md`](../design/compliance-survey.md)):long_backtest 的
+每日 dump **全史逐日**查(尾窗 762 已退役 —— 判定基数随数据起始漂移且漏检窗外违规);
+空/全 NaN/零敞口天跳过不计(缺数据的早期天天然免疫);四条阈值任一违反记该日违规,
+全史违规日 > `violation_tolerance`(10)才 REJECTED(放行早期毛刺);严重违规(单日超 2× 线)命中
+(或 inf 坏权重日)立拒不吃容忍。dump 文件读失败跳过但计数告警(不静默当无效日)。
 
 ## correlation 门槛
 

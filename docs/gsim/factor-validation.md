@@ -154,6 +154,12 @@ XML 中通过 `Constants` 控制：
 | 空头最小持股数 | ≥ 50 |
 | 总最小持股数 | ≥ 100 |
 
+**判定**(2026-07-16 重做,数据定策见 `docs/design/compliance-survey.md`):
+long_backtest 的每日 dump **全史逐日**查(尾窗 762 已退役);空/全 NaN/零敞口天跳过;
+任一指标违反记该日违规,**全史违规日 > `violation_tolerance`(10)才拒**(放行早期毛刺);
+单日个股占比 > `max_position_pct × hard_position_mult`(2× = 10%,含 inf 坏权重)为
+**严重违规,立拒不吃容忍**。
+
 **常见问题**:
 - 因子值过于集中导致持股数不足
 - 因子值分布不均导致多空失衡
@@ -241,6 +247,8 @@ XML 中通过 `Constants` 控制：
 | 多头最小持股数 | ≥ 50 | `compliance.min_long_stocks` |
 | 空头最小持股数 | ≥ 50 | `compliance.min_short_stocks` |
 | 总最小持股数 | ≥ 100 | `compliance.min_total_stocks` |
+| 违规日容忍 | 全史违规日 > 10 才拒 | `compliance.violation_tolerance` (10) |
+| 严重违规线 | 单日个股 > 2× 上限(10%)立拒 | `compliance.hard_position_mult` (2.0) |
 
 ## REJECTED 因子归档
 
@@ -329,7 +337,8 @@ uv run ops list -s rejected
 
 ### Compliance 失败
 
-**原因**: 仓位不满足约束
+**原因**: 全史违规日超容忍(10 天)或单日严重违规(个股 > 10%);fail_reason 一行自足
+(分规则天数/最长连违/最近违规日+明细)
 
 **解决方案**:
 1. 使用 `AlphaOpRank` 增加分散度

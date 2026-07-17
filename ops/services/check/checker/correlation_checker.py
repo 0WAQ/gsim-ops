@@ -109,15 +109,21 @@ class CorrelationChecker(Checker):
             if not competitor_metrices:
                 continue
 
-            # 未打败
+            # 未打败(消息风格契约见 base.CheckFail:违反项 | 上下文。
+            # 原来直接 str(CorrResult) 只倾倒数据、不说拒因,已改)
             if not self._check_beat(metrics, competitor_metrices):
-                # reason = str(CorrResult),result 同对象
                 _cr = CorrResult(
                     metrics,
                     max_corr, max_corr_factor,
                     len(high_corr_factors),
                     (competitor_name, corr, competitor_metrices))
-                raise CheckFail(_cr, result=_cr)
+                c = competitor_metrices
+                raise CheckFail(
+                    f"bcorr={corr:.2f} >= {self.corr_threshold} (vs {competitor_name}) "
+                    f"且未打败(fitness/ret/shrp 三项需胜二) | "
+                    f"本因子 fitness={metrics.fitness}, ret={metrics.ret}%, shrp={metrics.shrp}; "
+                    f"竞品 fitness={c.fitness}, ret={c.ret}%, shrp={c.shrp}",
+                    result=_cr)
 
         return CorrResult(metrics,
                           max_corr,max_corr_factor,

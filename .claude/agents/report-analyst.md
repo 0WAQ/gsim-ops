@@ -93,7 +93,8 @@ Common `fail` patterns worth naming:
 - **correlation**: 业绩/换手/相关性门槛(ret% / shrp / tvr% / bcorr 任一不达标),
   fail_reason 里带具体违反项,例 `tvr%=55.00 > 50.0 (delay=1)`。
 - **checkbias**: 前视(forward-looking)数据访问被 DataFirewall 拦截。
-- **compliance**: 单票超 5% 或股票数不足(long<50 / short<50 / total<100)。
+- **compliance**: 全史违规日(单票超 5% / 股票数不足 long<50 / short<50 / total<100)
+  超容忍 10 天,或单日严重违规(单票 > 10%)立拒;fail_reason 带分规则天数 + 最近违规日明细。
 - **checkpoint**: 断点复现不稳(非确定性 / 时间依赖逻辑)。
 
 ## Output format

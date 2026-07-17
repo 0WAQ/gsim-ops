@@ -271,7 +271,7 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
    - 通知实现待定(原 `ops/infra/notify/feishu_send.py` 已随 notify/ 删除,2026-07-07)。
 
 
-## Compliance 判定重做(2026-07-13 立项,先测量后定策;分支 claude/compliance-redesign)
+## Compliance 判定重做(2026-07-13 立项,先测量后定策;立项分支 claude/compliance-redesign,实施移至 claude/compliance-survey)
 
 **起因**:用户观察 compliance 判定有问题。走查现状(`checker/compliance_checker.py`):
 数据 = long_backtest 全历史 dump(工作区 v2 npy,逐日带符号持仓金额向量);
@@ -306,9 +306,52 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
   delay=1 有 -1 行偏移(分布统计无影响)、全 NaN 行 = 无 dump 日;
 - 成本:~1.3TB 顺序读,一次性小时级,断点续跑(已有 npz 跳过),160 nohup。
 
-**当前状态**:`scripts/compliance_survey.py` 草稿已在分支(**未沙盘未跑**)。
+**当前状态**(2026-07-15,分支 `claude/compliance-survey`,runbook
+`docs/design/compliance-survey.md`):脚本已沙盘 + 五问对抗验证过关。加了 dump 回落源
+(覆盖被拒因子的完整判定域)+ `--sample N`(只从有源因子抽,可复现)。**feature↔dump
+等价性确认**:pack 是纯字节搬运(verify_sample 自证),survey 四列 = checker 同款表达式,
+计数/max/跳过逐位一致、total_abs 仅差 ~1e-16 FP;delay=1 feature 读只早 ≤1 交易日的日期
+标签、不碰分布。对抗验证收口三修(commit de53235):dump 越界崩溃守卫 / `total_min` 列
+补齐第四阈值 / nanmax 哨兵收窄。
 
-**下一步序列**:脚本沙盘实测 → 执行者 160 跑全库 → 分布判读贴回 →
-用户按数据定策(容忍度/下限/gap/纯多头豁免/口径)→ checker 重写 +
-对 22 条已被拒 compliance 因子做新旧影子对比(最好的回归材料)→
-顺手修缺陷 6(long_backtest 的 prepare 显式声明 dump_alpha=True)。
+**抽检已完成**(2026-07-15,160,`--sample 8` seed=0):8/8 出统计、自检全过,
+仪器验证 OK。判读注意:feature 源 = 已过关的安全内区(选择偏差),指标远离阈值是
+预期,推不出阈值松紧 —— 定策靠边界人口(被拒 dump + 活因子窗外早期天),见
+runbook"判读注意"。
+
+**全量摸底 + 定策 + checker 重写已完成**(2026-07-16,详见 runbook
+`docs/design/compliance-survey.md` "定策与 checker 重写"节):
+- 全量 7972 因子(`--source auto`)+ 违规画像(`scripts/compliance_profile.py`,
+  对抗验证过关):全库仅 35 个有违规日(0.44%),两极分化 —— active 违规者 12 个
+  全是 ≤2 天早期毛刺,持续违规(≥24 天)全在已拒,中间 2~24 巨大空档;
+- **已拍政策**:四阈值不变 + 全史每日 + 跳过无效日 + 容忍 K=10 + 严重违规线 2×(10%);
+  缺陷 1/2/3 由"全史+跳无效日+容忍"根治,缺陷 4(纯多头豁免)数据证明无客户不做,
+  缺陷 5(5% 口径)维持现状(用户拍:约束不变);
+- checker 落地(commit 9b43df3 起,分支 `claude/compliance-survey`),影子对比
+  active 零状态变化(0 触严重违规线、12 毛刺全在容忍内);评审收口:inf 日立拒(不继承
+  NaN 比较洞)、dump 读失败计数告警(不静默当无效日)、14 例单测。
+
+**验证收尾**(2026-07-16):violations.csv 已入 repo(33f6b6f)→ 本地独立闭环:
+active 违规者 12 个 viol_days 全 ≤2(容忍 10 余量 8);全库影子新规则恰拒 10 个、
+全是现役 rejected(active/submitted 零命中);rejected 侧 563 零违规 / 13 毛刺
+(compliance 关会放行)/ 10 仍拒。e2e 在 160 真 gsim 全过(6/6,含
+test_e2e_compliance_fail)。
+
+**影子对比收官**(2026-07-16,`report/compliance-survey/shadow-compliance-rejected.csv`):
+22 条 compliance-rejected → **严重违规仍拒 5 / 超容忍仍拒 5 / 转放行(毛刺)12**;仍拒 10 个
+与全库预演逐名精确对账(缺无/多无),22 条全有数据全有违规痕迹(零"需查"/零盲区)。
+缺陷 6 已修(long_backtest prepare 显式 dump_alpha=True)。**批次六缺陷全数处置**:
+1/2/3 全史+跳无效日+容忍根治、4 数据证无客户不做、5 用户拍口径不变、6 显式声明。
+
+**compliance 测量不进 PG**(2026-07-16 定案):单因子 compliance 是入库卫生闸,
+真约束在 combo 层 binding(实盘交易的是加权组合,单因子集中度被稀释)—— 对卫生闸
+做精细测量无消费者,不加 snapshot 列(ops health 僵尸表教训)。被拒因子的详细记录
+走事件路:fail_reason 一行自足(判定 + 全貌画像"分规则天数/最长连违/最近违规日+明细",
+风格契约见 base.CheckFail;样例堆砌不进消息),dump 留盘(keep_artifacts),
+钻取用单因子 survey+profile 重跑。
+**重开条件**:combo 侧出现真消费者(per-factor 集中度先验 / combo 级合规报告),
+届时形态是"当前测量"非"入库快照"。
+
+**遗留(不阻断)**:①12 条转放行毛刺不主动 restage(用户拍:通知 QR 自决);
+②coverage-missing 里 123 个 active 双缺源,影子盲区(低风险,留档);
+③分支 claude/compliance-survey 合 main。

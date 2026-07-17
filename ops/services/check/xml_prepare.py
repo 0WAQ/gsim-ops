@@ -51,7 +51,9 @@ def prepare_for_checkpoint(factor: AlphaMetadata) -> None:
 
 
 def prepare_for_long_backtest(factor: AlphaMetadata) -> None:
-    _apply(factor, window=LONG_BACKTEST_WINDOW, dump_pnl=True)
+    # dump_alpha 必须显式:compliance 的全史逐日判定吃的正是本 stage 产出的
+    # dump,靠上一站(checkpoint)残留继承 = 改动别的 stage 会静默断供
+    _apply(factor, window=LONG_BACKTEST_WINDOW, dump_pnl=True, dump_alpha=True)
 
 
 def prepare_for_initial(factor: AlphaMetadata, config: Config) -> None:

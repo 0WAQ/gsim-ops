@@ -39,9 +39,10 @@ Deep-dive into why a factor was rejected by the check pipeline.
    - Suggest: review operations chain, check for random seeds
 
    **compliance failure**:
-   - Position limits violated (max 5% per stock) or min stock counts not met
-   - Run `uv run ops info <name>` to see if PNL exists
-   - If PNL exists, could check dump files for position distribution
+   - 全史违规日 > 容忍(`violation_tolerance`=10)或单日严重违规(个股占比 > 2× 上限 = 10%,含 inf 坏权重)立拒
+   - fail_reason 一行自足:分规则天数 / 最长连违 / 最近违规日 + 明细
+   - 阈值:个股 max 5% / 多空各 ≥50 / 总 ≥100(`config.yaml -> checker.compliance`)
+   - 深钻:dump 留盘(keep_artifacts),用 `scripts/compliance_survey.py` + `compliance_profile.py` 单因子重跑画像
 
    **correlation failure**:
    - Factor too similar to existing library (corr >= 0.7)
