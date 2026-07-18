@@ -23,7 +23,7 @@ XML 本身就是生产态,拿来即用;不存在"从归档 XML 再生成 prod.xm
 |---|---|---|
 | D1 | 机制 = per-factor 持久生产 XML + `run_cp.py` checkpoint 续跑,enddate 交给 gsim 解析 | 生产范式现役验证;ops 侧就绪判定/缺失推导是重复造轮(v1 退场) |
 | D2 | 窗口 = startdate 20110101 + backdays 256 | 实盘已运行在此行为上,一致性优先(保真方案 20150101+原 backdays 被否) |
-| D3 | enddate = config 键(TODAY/TODAY-1/钉死日),缺省 **TODAY-1** | 因子级不产当天(数据未就绪产空仓垃圾);TODAY-1 为现役实跑形态;字面量使 XML 长期复用 |
+| D3 | enddate = config 键(TODAY/TODAY-1/钉死日),缺省 **TODAY**(2026-07-18 修正) | **生产跑在 T 日盘前**:delay 机制使 T 日仓位由 T-1 数据算出,T 日 dump 正是当天实盘目标仓位 —— 生产必须到 TODAY。TODAY-1 是"只看回测表现不生产"的语义(pnl 统计只到 T-1)。字面量使 XML 长期复用 |
 | D4 | 落点 = 沿用现有 dataset:`/nvme125/alpha_dump` + `/nvme125/alpha_pnl` + `/nvme125/checkpoint` | 资产/checkpoint 延续、combo 零改动;审计证实 dataset 可信(§8);且结构上分开"check 验证 dump"(alphalib sidecar)与"产线生产 dump"两个事实族 |
 | D5 | 杂质净化单轨化(v3.1):规则在**归档时**执行一次 + 存量一次性迁移;gen 层不存在 | alpha_src 即生产态,残疾治在源头,不留永久补丁层 |
 | D6 | dumpPnl = true,pnlDir = 产线 pnl 根(与 ops alpha_pnl 隔离) | 现役强制开;check 快照字节源不受污染 |
@@ -67,7 +67,7 @@ ops produce = sync(ACTIVE 集 ⇔ checkpoint 目录集)+ run(逐因子直接跑
 3. Constants/@checkpointDir = ⚙ `<checkpoint_root>/<因子>/`
 4. Constants/@checkpointDays = 5
 5. Universe/@startdate = ⚙ 20110101(D2)
-6. Universe/@enddate = ⚙ PROD_ENDDATE(D3,缺省 TODAY-1)
+6. Universe/@enddate = ⚙ PROD_ENDDATE(D3,缺省 TODAY —— 盘前产 T 日仓位)
 7. Stats/@pnlDir = ⚙ 产线 pnl 根;@dumpPnl = true(D6)
 8. Portfolio/Alpha/@dumpAlphaFile = true;@dumpAlphaDir = ⚙ 产线 dump 根
 9. Alpha/@module = `/mnt/storage/alphalib/alpha_src/<因子>/<原 module basename>`
@@ -128,13 +128,16 @@ ops produce -w 16               # 并行 worker
 - 输出:banner + 逐线 ✔/⚠/✘ + 汇总;**失败>0 退出码 1**(cron 判据)。
 - 无状态(D7);幂等:重复跑 = checkpoint 续跑重写尾部,收敛。
 - produce 仅在 170 运行(路径本机性;`--dry-run` 检测机器不符即警告)。
+- **运行时点 = T 日盘前**(build_cc 08:20 之后、combo/开盘之前):T 日 dump 由
+  T-1 数据经 delay 算出;delay=0 因子的 T 日行盘前无数据、由次日尾部重写自愈
+  (盘中口径归 jdw delay0 产线,非本命令职责)。
 
 ## 7. config 变更
 
 ```yaml
 produce:                     # 归档生产化(core/prodxml)与驱动共用
   nio_data_path: /nvme125/datasvc/data/cc_all   # D8
-  enddate: TODAY-1                              # D3
+  enddate: TODAY                                # D3(盘前产 T 日仓位;TODAY-1 仅回测查看语义)
   startdate: '20110101'                         # D2
   backdays: 256                                 # D2/D10
   checkpoint_root: /nvme125/checkpoint          # D4
@@ -169,8 +172,8 @@ produce:                     # 归档生产化(core/prodxml)与驱动共用
 5. 权限交接:dataset 三根 chown 至 ops 运维模型;cchang 停手前双方各跑一天,
    对拍尾部日文件。
 6. ops 正式接管日跑(手动一周观察)+ 443 新线首跑(全段,错峰)。
-7. cron 进 170 crontab `# 3. generate alpha` 槽位(build_cc 08:20 后;告警接
-   feishu 脚本)。cchang 线退役。
+7. cron 进 170 crontab `# 3. generate alpha` 槽位(**盘前**:build_cc 08:20 之后、
+   combo 之前,全量续跑 ~13 分钟窗口够;告警接 feishu 脚本)。cchang 线退役。
 
 ## 10. v1 代码处置清单
 
