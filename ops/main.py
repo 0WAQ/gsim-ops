@@ -20,6 +20,7 @@ from ops.cli.status import add_status_subparser
 from ops.cli.submit import add_submit_subparser
 from ops.infra.sudo import maybe_elevate
 from ops.utils.log import logger
+from ops.utils.rlimit import raise_nofile
 
 # 子命令注册表 —— main 与测试共用的单一正主(否则声明集测试另抄一份注册
 # 函数列表,新命令不会自动进测试,又是一面会漂的镜子)。新增子命令 =
@@ -63,6 +64,9 @@ def main():
         # JFS 集中运维: write 命令 + alpha_src root-owned 时自动 sudo 提权,
         # 否则 no-op (read-only 命令直通)。详见 ops/infra/sudo.py。
         maybe_elevate(args)
+        # fd 限额自举:sudo 环境 soft=1024,gsim 全史 memmap 必打满(金丝雀
+        # 实测);抬到产线安全线,子进程继承
+        raise_nofile()
         args.func(args)
     except SystemExit:
         raise  # argparse --help / explicit sys.exit() are control flow, not bugs
