@@ -249,13 +249,20 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 - 新增(2026-07-17):`ops produce` 已落地日增 dump,feature 侧成为日增链路唯一
   断点。**前置依赖:PACK_L 扩行**(2026+ 的 di ≥ 3900,不扩行增量写不进)。
 
-## 因子增量生产(branch claude/factor-production-features-pdnjdc;v3 施工中)
+## 因子增量生产(branch claude/factor-production-features-pdnjdc;v3 代码已落地)
 
 **设计正主 `docs/design/factor-produce-v3.md`**(归档即生产态 + checkpoint 续跑
-薄驱动;决策台账 D1-D11 + 接管七步序列在彼)。v1 实现(就绪判定/缺失推导模型)
-2026-07-18 评审后退场;留存 core 上提(`dumpfiles.py` / `universe.py`)与
-config produce 块(v3 键)。实证材料:`docs/remediation/DISCOVER-PRODUCE-PROD*` +
-`AUDIT-DUMP-CONSISTENCY*`。
+薄驱动;决策台账 D1-D11 + 接管七步序列在彼)。实证材料:
+`docs/remediation/DISCOVER-PRODUCE-PROD*` + `AUDIT-DUMP-CONSISTENCY*`。
+
+**代码侧已齐**(2026-07-18):`core/prodxml.py`(规则表)→ `repo.archive` 归档
+内联生产化 + 拆雷退役 → `ops produce`(sync+run 薄驱动)→
+`scripts/migrate_prod_xml.py`(存量迁移)+ `scripts/audit_combo_legs.py`
+(腿清单闸门)+ e2e(`tests/e2e/test_e2e_produce.py`,窗口钉死 cc_2025 内)。
+
+**待执行:接管序列(执行者,设计 §9)**:存量迁移(dry-run→apply)→ 行为对拍
+(样本 scratch 跑 vs dataset byte-diff)→ 腿清单闸门裁决 → 权限交接 →
+手动观察周 + 443 新线首跑 → cron 进 `# 3. generate alpha` 槽位,cchang 线退役。
 
 **后议项**:
 - `ops export`:库内因子导出为可独立运行副本 + "不让用户直跑因子库因子"约束

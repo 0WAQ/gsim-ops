@@ -45,7 +45,11 @@ uv run ops info <factor-name>        # Show factor details (入库时快照 metr
 uv run ops pack                      # Aggregate alpha_dump → alpha_feature (skip already-packed)
 uv run ops pack --force              # Rewrite all factors
 uv run ops pack --factor AlphaXxx    # Pack one factor
-# ops produce(因子日增生产)v3 重构中,见 docs/design/factor-produce-v3.md
+uv run ops produce                   # 因子产线:sync + 全部 ACTIVE checkpoint 续跑(T 日盘前跑,170)
+uv run ops produce --dry-run         # 产线体检:XML 形态/checkpoint/dump 进度,不跑
+uv run ops produce --sync-only       # 只做产线同步(停线归 .retired + 新线报告)
+uv run ops produce --force AlphaXxx -y   # 删 checkpoint 全段重跑(确认制)
+uv run ops produce --enddate 20251231 AlphaXxx  # 钉死日重算(临时副本,不碰生产 checkpoint)
 uv run ops rm AlphaXxx               # 彻底删除因子(src/pnl/dump/feature + factor_info 级联 state+snapshot,不可逆)
 uv run ops rm AlphaXxx -y            # 跳过确认
 uv run ops restage AlphaXxx          # 原代码不变,召回 staging 待重跑 check
@@ -111,7 +115,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
-| `produce` | 因子日增生产(v3 重构中:归档即生产态 + checkpoint 续跑薄驱动,设计 `docs/design/factor-produce-v3.md`;v1 已退场) | (v3 落地时回归) |
+| `produce` | 因子产线薄驱动:sync(ACTIVE ⇔ checkpoint,停线归 .retired)+ run(直接跑 alpha_src 归档 XML,gsim checkpoint 续跑重写尾部 ~5 天,dump/pnl 直落 170 产线 dataset)。归档 XML 即生产态(入库时 `repo.productionize_src` 写好,`core/prodxml.py` 三张规则表);无状态、幂等,失败退出码 1。设计 `docs/design/factor-produce-v3.md` | `ops/cli/produce.py` + `ops/services/produce/` |
 | `setup` | 声明式管理本机 alphalib 部署:hosts 块按 hostname 匹配挂载点,缺省幂等补建(目录/软链/权限组),`--check` 只读体检。JFS 挂载本身归 join.sh | `ops/cli/setup.py` + `ops/services/setup/` |
 | `doctor` | 盘 ↔ PG 数据对账(8 族:池鬼影/stale 快照/时间线不变量/info 孤儿/src·staging 漂移/产物孤儿/本机 dump 孤儿)。缺省纯只读;`--fix <族>` 逐族确认修复(五道闸删除管道) | `ops/cli/doctor.py` + `ops/services/doctor/` |
 

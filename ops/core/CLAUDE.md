@@ -13,6 +13,12 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 - **core/datasource.py**: 数据源解析纯函数(2026-07-09 自 services/list 迁入):`parse_datasources`(AST 走查 `getData` 字面量)/ `build_npy_index`(扫 nio_data_path,L2 `cn_equity*` 软链特例)/ `resolve_tables`。submit/check/backfill 共用。
 - **core/factormeta.py**: `FactorMeta`(meta.json 身份证格式)+ `parse_factor`(因子目录 → FactorMeta,2026-07-09 自 services/submit/parser.py 迁入)+ `infer_author_from_dir`(目录名 → author 词法推断)。
 - **core/paths.py**: `FactorPaths` — 盘面布局唯一正主(SSOT S4,2026-07-09)。`FactorPaths.of(name, config)` 拼出因子在 alphalib 的全部落点;布局事实由类型承载:src/staging/dump 是目录,pnl/池副本/feature 是**单文件**;feature 命名 `<name>.<v1|v2>.npy`(`FEATURE_VERSIONS`);meta.json 文件名常量 `META_FILENAME`。冻结可 pickle(pack 的 ProcessPool worker 直传)。**任何地方不得再手写 `config.alpha_xxx / name`**。边界:check 期工作区路径(pnl_path/alpha_path/checkpoint_path)属 AlphaMetadata 工作台,不在此列。布局契约测试 `tests/test_factor_paths.py`。
+- **core/prodxml.py**: 归档生产化改写 SSOT(factor-produce-v3.md §4):三张声明式
+  规则表(SET/REPLACE/SUFFIX_STRIP)把因子 XML 改成生产态,`repo.archive` 归档时 +
+  存量迁移脚本调用;纯函数、幂等;坑位备忘(Universe 例外 / Mod 削除范围 /
+  module basename)固化在 module docstring。参数 `ProdParams.from_config`(produce 块)。
+- **core/dumpfiles.py** / **core/universe.py**: alpha_dump 逐日布局走查正主 /
+  cc 数据根元数据读取(轴 + .meta 快照锁)。pack 与 produce 共用。
 - **core/metrics.py**: `Metrics` dataclass (ret, tvr, shrp, mdd, fitness). Serialization keys use `ret%`, `tvr%`, `mdd%` to indicate percentage fields. 另有 **`SNAPSHOT_METRICS` 注册表 + `metric_value()`**(2026-07-11,SSOT S8):可过滤/排序 metric 键集与取值语义(bcorr=abs(max_bcorr))的唯一定义,SQL 下推表达式(infra/snapshot)、list 内存兜底、CLI --sort-by choices(经 cli/common)三方派生。新增可排序 metric = 注册表加一行(snapshot 表须有对应列)。
 - **infra/gsim/runner.py**: `Runner` static methods shell out to gsim tools (`run_backtest`, `run_simsummary`, `run_bcorr`) via `subprocess.run` with configurable timeout.
 
@@ -136,9 +142,16 @@ checker:
     hard_position_mult: 2.0        # 严重违规线 = max_position_pct × 此(单日超线立拒)
   correlation:
     corr_threshold: 0.7            # Pass if < 0.7
-produce:                           # 因子日增生产(ops produce);块缺失时命令响亮报错
-  nio_data_path:                   # 生产数据根(cc_all,持续日增;与 check 的 path.nio_data_path 分族)
-  production_start:                # 生产起点(check 历史窗口 20251231 之后)
-  workspace:                       # gsim src/alpha/checkpoint 工作区(本机)
-  readiness_dirs:                  # 就绪判定 canary 目录(缺省 [Basedata])
+produce:                           # 归档生产化 + ops produce 驱动共用(factor-produce-v3.md §7)
+  nio_data_path:                   # 生产数据根(170 本机 cc_all;与 check 的 path.nio_data_path 分族)
+  enddate:                         # TODAY(盘前产 T 日仓位)/ TODAY-1(只看回测)/ 钉死日
+  startdate:                       # 20110101(照抄现役产线,D2)
+  backdays:                        # 256(D2/D10;>256 自 20110101 起 gsim 崩)
+  checkpoint_root:                 # 产线 dataset 三根(170 本机,沿用现役资产 D4)
+  dump_root:
+  pnl_root:
+  datasvc_prefix:                  # REPLACE-② 前缀迁移(空串 = 不迁移;Universe 例外内置)
+  module_prefix:                   # @module 跨机稳定前缀(D11)
 ```
+注:这些值在**归档时写死进 XML**(`core/prodxml.py`),改 config 只影响此后
+归档的因子;整改存量重跑 `scripts/migrate_prod_xml.py`。

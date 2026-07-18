@@ -85,6 +85,22 @@ def e2e_env(tmp_path, gsim_available, pg_schema, pg_conninfo, library_id, monkey
     base.setdefault("sync", {})["library_id"] = lib
     base["sync"].pop("remote", None)
 
+    # produce 块隔离:config.yaml 带 170 生产路径(/nvme125 dataset 三根),
+    # e2e 绝不触碰 —— 三根指 tmp;数据根用真 cc_2025(e2e 的核心是真 gsim);
+    # datasvc_prefix 空串 = 不做前缀迁移(160/170 皆可跑);窗口钉死在 cc_2025
+    # 可见范围内,产线 e2e 才是确定性的(enddate=TODAY 依赖日历,不可测)。
+    base["produce"] = {
+        "nio_data_path": str(_CC_DATA),
+        "enddate": "20251224",
+        "startdate": "20251201",
+        "backdays": 256,
+        "checkpoint_root": str(root / "produce_checkpoint"),
+        "dump_root": str(root / "produce_dump"),
+        "pnl_root": str(root / "produce_pnl"),
+        "datasvc_prefix": "",
+        "module_prefix": str(root / "alpha_src"),
+    }
+
     pw = os.environ.get("OPS_TEST_PG_PASSWORD") or _read_pg_password()
     pg = {"host": os.environ.get("OPS_TEST_PG_HOST", "10.9.100.160"),
           "port": int(os.environ.get("OPS_TEST_PG_PORT", "15432")),

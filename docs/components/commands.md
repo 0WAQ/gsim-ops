@@ -51,6 +51,7 @@ stateDiagram-v2
 | `rm` | 彻底删因子(src/pnl/dump/feature + factor_info 级联,不可逆) | 任意 | — |
 | `list` / `status` / `info` | 查询(库内因子集 / 生命周期 / 单因子详情) | — | — |
 | `run` / `pack` / `combo` | 回测 / 聚合 feature / combo 代测 | — | — |
+| `produce` | 因子产线驱动:checkpoint 续跑日增(归档 XML 即生产态,dump/pnl 落 170 产线 dataset;--force 删 checkpoint 全段重跑须点名+确认) | ACTIVE | 不变 |
 | `setup` / `doctor` | 部署补建 / 盘↔PG 对账 | — | — |
 
 ## 转移时数据产物规则

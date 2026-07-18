@@ -125,8 +125,11 @@ class Config:
         self.produce_checkpoint_root: Path | None = _opt_path("checkpoint_root")
         self.produce_dump_root: Path | None = _opt_path("dump_root")
         self.produce_pnl_root: Path | None = _opt_path("pnl_root")
-        self.produce_datasvc_prefix: str = str(
-            produce_cfg.get("datasvc_prefix") or "/nvme125")
+        # 显式空串 = "不做前缀迁移"(e2e 在 160 用真 /datasvc 数据跑),
+        # 不能用 `or` 吞掉 —— 缺省仅在键缺席时生效
+        self.produce_datasvc_prefix: str = (
+            str(produce_cfg["datasvc_prefix"]) if "datasvc_prefix" in produce_cfg
+            else "/nvme125")
         self.produce_module_prefix: Path | None = _opt_path("module_prefix")
 
         # library_id: ~/.cache/ops/lib/ 下的命名空间键。历史上住在 sync 段;

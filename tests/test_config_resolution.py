@@ -141,3 +141,9 @@ def test_produce_block_parsing():
     assert c2.produce_checkpoint_root is None
     assert c2.produce_enddate == "TODAY"      # 无害缺省;路径类键无缺省
     assert c2.produce_backdays == 256
+
+    # 显式空串前缀 = 不迁移(e2e 用真 /datasvc 数据),不得被缺省吞掉
+    base2 = dict(base)
+    base2["produce"] = {"datasvc_prefix": ""}
+    raw3, _, _ = Config._resolve_vars(dict(base2), "server-170")
+    assert Config(raw3).produce_datasvc_prefix == ""
