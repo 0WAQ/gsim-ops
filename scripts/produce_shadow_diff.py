@@ -74,10 +74,14 @@ def run_one(name: str, config_path: Path, scratch: str, enddate: str,
         config = Config.load(config_path)
         params = shadow_params(config, Path(scratch), enddate)
         xml = prepare_shadow_xml(config, name, params, Path(scratch))
+        # gsim checkpoint.save 不自建目录,必须预建(170 实测 FileNotFoundError)
+        (Path(scratch) / "checkpoint" / name).mkdir(parents=True, exist_ok=True)
         Runner.run_backtest(xml, config)
         return name, ""
     except Exception as e:
-        return name, str(e)[:300]
+        # 取尾不取头:gsim stderr 的真 traceback 在末尾,warning 刷屏挤出前段
+        msg = str(e)
+        return name, ("…" + msg[-400:]) if len(msg) > 400 else msg
 
 
 def diff_factor(name: str, shadow_dump: Path, dataset_root: Path,

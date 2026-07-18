@@ -191,3 +191,22 @@ def test_shadow_diff_factor_buckets(tmp_path):
     assert counts == {"byte": 1, "atol": 0, "drift": 1, "missing": 1}
     assert any("DRIFT" in d for d in details)
     assert any("MISSING" in d for d in details)
+
+
+def test_shadow_run_one_premakes_checkpoint_dir(legacy_and_migrated, tmp_path,
+                                                monkeypatch, json_config):
+    """gsim checkpoint.save 不自建目录(170 实测):run_one 跑测前必须预建
+    per-factor checkpoint 目录。"""
+    shadow = _load_script("produce_shadow_diff")
+    cfg_path, _ = json_config
+    config = legacy_and_migrated
+    scratch = tmp_path / "scratch"
+    seen = {}
+
+    def _fake(xml_file, cfg):
+        seen["ck_exists"] = (scratch / "checkpoint" / "AlphaWbaiDone").is_dir()
+
+    monkeypatch.setattr(shadow.Runner, "run_backtest", staticmethod(_fake))
+    name, err = shadow.run_one("AlphaWbaiDone", cfg_path, str(scratch), "20260714")
+    assert err == ""
+    assert seen["ck_exists"] is True          # 跑测那一刻目录已在

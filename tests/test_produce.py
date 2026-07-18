@@ -104,6 +104,8 @@ def test_worker_ok_runs_archived_xml(produce_env):
     assert status == "ok" and "20260717" in detail
     # 跑的就是 alpha_src 归档 XML 本尊(零副本零改写)
     assert seen == [config.alpha_src / "AlphaWbaiP1" / "Config.AlphaWbaiP1.xml"]
+    # checkpoint per-factor 目录已预建(gsim save 不自建,新线首跑必须有)
+    assert (config.produce_checkpoint_root / "AlphaWbaiP1").is_dir()
 
 
 def test_worker_unmigrated_guard(produce_env, write_factor):
@@ -152,7 +154,9 @@ def test_worker_force_removes_checkpoint(produce_env):
     name, status, _ = _produce_worker(
         "AlphaWbaiP4", config, force=True, backtest_fn=_fake_backtest([]))
     assert status == "ok"
-    assert not ck.exists()                    # 全段重跑 = checkpoint 已删
+    # 全段重跑 = 旧存档已清;目录本身重建为空(gsim save 不自建目录,须预建)
+    assert not (ck / "archive.bin").exists()
+    assert ck.is_dir() and not list(ck.iterdir())
 
 
 def test_worker_enddate_uses_temp_copy(produce_env):

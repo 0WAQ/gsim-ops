@@ -152,6 +152,9 @@ def _produce_worker(name: str, config: Config, force: bool = False,
             ck = Path(params.checkpoint_root) / name
             if force and ck.exists():
                 shutil.rmtree(ck)       # 重跑 = 删 checkpoint,gsim 自然全段
+            # gsim checkpoint.save 不自建目录(170 影子对拍实测 FileNotFoundError),
+            # 必须预建 —— 新线与重入库(归档刚删过目录)都会踩
+            ck.mkdir(parents=True, exist_ok=True)
 
             if enddate is not None:
                 # 钉死日重算:临时副本改 enddate,checkpoint 换一次性目录 ——
@@ -173,7 +176,10 @@ def _produce_worker(name: str, config: Config, force: bool = False,
         return (name, "locked", "被另一个进程占用")
     except Exception as e:
         logger.exception("produce failed factor={}", name)
-        return (name, "failed", str(e)[:300])
+        # 取尾不取头:BacktestError 载荷是 gsim stderr,真 traceback 在末尾,
+        # numpy warning 刷屏会把它挤出前段(170 影子对拍实测)
+        msg = str(e)
+        return (name, "failed", ("…" + msg[-300:]) if len(msg) > 300 else msg)
 
 
 # ---------------------------------------------------------------------------
