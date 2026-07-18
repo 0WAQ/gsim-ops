@@ -134,6 +134,9 @@ def main() -> int:
         return 1
 
     config = Config.load(args.config_path)
+    if config.env_overrides:
+        print(f"⚠ OPS_* 环境变量覆盖生效: {', '.join(config.env_overrides)} "
+              "—— hosts 声明被压掉;确认有意为之,否则 unset 后重跑")
     dataset_root = args.dataset or Path(ProdParams.from_config(config).dump_root)
 
     names = list(args.factors)

@@ -91,6 +91,10 @@ def main() -> int:
     args = ap.parse_args()
 
     config = Config.load(args.config_path)
+    if config.env_overrides:
+        print(f"⚠ OPS_* 环境变量覆盖生效: {', '.join(config.env_overrides)} "
+              "—— hosts 声明被压掉(170 曾因残留 OPS_ALPHALIB_ROOT 指错盘);"
+              "确认有意为之,否则 unset 后重跑")
     params = ProdParams.from_config(config)      # 缺键响亮,绝不半配置迁移
 
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")

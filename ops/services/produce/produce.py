@@ -182,6 +182,11 @@ def _produce_worker(name: str, config: Config, force: bool = False,
 
 def run_produce(args):
     config = Config.load(args.config_path)
+    if config.env_overrides:
+        # OPS_* 覆盖会静默压掉 hosts 声明(170 曾因残留 OPS_ALPHALIB_ROOT
+        # 指向已迁走的 /ext4)—— 产线命令必须把这层显性化
+        warn(f"⚠ OPS_* 环境变量覆盖生效: {', '.join(config.env_overrides)} "
+             "(hosts 声明被压掉;确认有意为之,否则 unset 后重跑)")
     params = _params_or_die(config)
 
     factors: list[str] = list(getattr(args, "factors", []) or [])
