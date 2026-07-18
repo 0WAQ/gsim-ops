@@ -1,3 +1,4 @@
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -110,11 +111,16 @@ class Runner:
 
     @staticmethod
     def run_backtest(xml_file: Path, config: Config):
+        # 禁写 __pycache__:回测 @module 指向共享盘(staging/alpha_src 均 JFS),
+        # root 进程往里写字节码缓存 = 污染 + JFS 写放大(生产化后归档 XML 可
+        # 直跑,此保护成为常态而非偶发)
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
         result = subprocess.run(
             [config.python_path, config.run_script, xml_file],
             capture_output=True,
             text=True,
-            timeout=config.timeout
+            timeout=config.timeout,
+            env=env,
         )
 
         if result.returncode != 0:

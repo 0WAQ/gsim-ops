@@ -34,7 +34,7 @@ from .stages import (
     RETRYABLE_STAGES,
     STAGES,
 )
-from .xml_prepare import prepare_for_archive, prepare_for_initial
+from .xml_prepare import prepare_for_initial
 
 
 class CheckerPipeline:
@@ -194,6 +194,9 @@ class CheckerPipeline:
             shutil.rmtree(paths.src)
         shutil.copytree(factor.dir, paths.src)
         rewrite_module_path(paths.src)
+        # REJECTED 也生产化 + 作废 checkpoint:approve 可不经重检直接翻 ACTIVE,
+        # 届时 XML 必须已是生产态(factor-produce-v3.md D9)
+        self._repo().productionize_src(factor.name)
 
         # 产物保留策略由 Stage 表的 keep_artifacts_on_fail 声明:
         # 晚期 stage(compliance/correlation)数据完整,保留 pnl + dump 供分析;
@@ -353,8 +356,8 @@ class CheckerPipeline:
             # snapshot_at 仍与 entered_at 逐字符相等)
             self._persist_derived(factor, metrics, corr_result, measured_at=now)
 
-            # 最后移动文件到 alpha_src
-            prepare_for_archive(factor)
+            # 最后移动文件到 alpha_src(归档内联生产化:入库即适配生产线,
+            # repo.archive → productionize_src,factor-produce-v3.md D9)
             self.to_lib(factor)
 
             q.put(("done", factor.name, "pass", "→ lib", "green"))

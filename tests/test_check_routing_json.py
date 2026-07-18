@@ -262,3 +262,24 @@ def test_identity_divergence_refused_before_state(json_config, write_factor,
     assert store.get("AlphaWbaiImposter") is None
     assert (victim_src / "AlphaWbaiVictim.py").exists()      # 受害者毫发无损
     assert d.exists()                                        # staging 原物保留
+
+
+def test_reject_archives_production_form(json_config, write_factor, fake_checkers):
+    """REJECTED 归档也生产化(D9):approve 可不经重检直接翻 ACTIVE,
+    届时 alpha_src XML 必须已是生产态。"""
+    from ops.utils.xmlio import load_xml
+
+    cfg_path, config = json_config
+    write_factor(config, name="AlphaWbaiRejP")
+    (config.pnl_path / "AlphaWbaiRejP").write_text("pnl")
+    (config.alpha_path / "AlphaWbaiRejP").mkdir(parents=True, exist_ok=True)
+    checkers, _ = fake_checkers(fail_stage="correlation", behavior="fail")
+
+    ret, rec = _run(cfg_path, config, "AlphaWbaiRejP", checkers)
+    assert ret == "fail" and rec.status == FactorStatus.REJECTED
+
+    g = load_xml(config.alpha_src / "AlphaWbaiRejP" /
+                 "Config.AlphaWbaiRejP.xml")["gsim"]
+    assert g["Universe"]["@enddate"] == "TODAY"
+    assert g["Constants"]["@backdays"] == "256"
+    assert g["Portfolio"]["Alpha"]["@dumpAlphaDir"] == str(config.produce_dump_root)

@@ -18,9 +18,10 @@ VALIDATE_WINDOW = ("20241201", "20241202")        # 最小可跑窗口:验证代
 CHECKBIAS_WINDOW = ("20241201", "20241231")       # 一个月:防火墙注入短回测
 LONG_BACKTEST_WINDOW = ("20150101", "20251231")   # 全历史
 
-# 归档后的 XML 输出目录改指这里 —— 有人手动重跑入库因子的 config 时,
-# pnl/dump 落 /tmp 而不是砸生产库
-ARCHIVED_XML_SCRATCH = "/tmp/alphalib"
+# prepare_for_archive("拆雷":归档 XML 输出改指 /tmp)已于 2026-07-18 退役,
+# 别加回来:归档 XML 现在**就是生产态**(repo.archive → core/prodxml 生产化,
+# 入库即适配生产线,factor-produce-v3.md D9)。"防手动重跑砸库"的保护改由
+# "库内因子不直跑 + 未来 ops export 导出"承担(plans.md TODO)。
 
 
 def _apply(factor: AlphaMetadata, *,
@@ -81,13 +82,3 @@ def prepare_for_initial(factor: AlphaMetadata, config: Config) -> None:
     save_xml(factor.xml_file, factor.xml_config)
 
 
-def prepare_for_archive(factor: AlphaMetadata) -> None:
-    """归档前"拆雷":pnl/dump 输出目录改指 /tmp,防手动重跑入库 XML 砸生产。
-
-    @module 不在这里写 —— to_lib 搬完目录后 rewrite_module_path 是唯一权威
-    (在此写会被随后的 rewrite 覆盖,属无效写入)。
-    """
-    gsim = factor.xml_config["gsim"]
-    gsim["Portfolio"]["Stats"]["@pnlDir"] = f"{ARCHIVED_XML_SCRATCH}/alpha_pnl"
-    gsim["Portfolio"]["Alpha"]["@dumpAlphaDir"] = f"{ARCHIVED_XML_SCRATCH}/alpha_dump"
-    save_xml(factor.xml_file, factor.xml_config)

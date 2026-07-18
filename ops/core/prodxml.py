@@ -48,6 +48,17 @@ class ProdParams:
     module_prefix: str
 
     @classmethod
+    def maybe_from_config(cls, config: Config) -> ProdParams | None:
+        """produce 块整体缺失(dev/test 最小 config)→ None(调用方警告跳过);
+        块存在但残缺 → from_config 的 ValueError(半配置是错误不是选项)。"""
+        probe = (config.produce_nio_data_path, config.produce_startdate,
+                 config.produce_checkpoint_root, config.produce_dump_root,
+                 config.produce_pnl_root, config.produce_module_prefix)
+        if all(v is None for v in probe):
+            return None
+        return cls.from_config(config)
+
+    @classmethod
     def from_config(cls, config: Config) -> ProdParams:
         """config produce 块 → 参数。路径类键缺失响亮抛(缺配的生产化 = 把
         None 写进 XML 静默投产,比报错危险)。"""

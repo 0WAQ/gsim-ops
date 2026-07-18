@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING
 
 from ops.core.factor import Factor, FactorIdentity, FactorSnapshot
 from ops.core.paths import FactorPaths
+from ops.core.prodxml import ProdParams, productionize_file
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus, HistoryEvent
 from ops.infra.info import default_info_store
 from ops.infra.lock import factor_lock
@@ -439,6 +440,7 @@ class FactorRepository:
             shutil.rmtree(paths.src)
         shutil.move(src_dir, paths.src)
         rewrite_module_path(paths.src)
+        self.productionize_src(name)
 
         if paths.dump.exists():
             shutil.rmtree(paths.dump)
@@ -463,6 +465,30 @@ class FactorRepository:
         else:
             logger.warning("discovery_method 缺失/非法, 跳过 pnl 分流 factor={} value={}",
                            name, discovery_method)
+
+    def productionize_src(self, name: str) -> None:
+        """归档 XML 生产化 + 作废产线 checkpoint(入库即适配生产线,
+        docs/design/factor-produce-v3.md D9/D10)。
+
+        pass 与 REJECTED 归档都做:approve 可不经重检直接翻 ACTIVE,届时 XML
+        必须已是生产态。checkpoint 联动作废:重入库 = 代码/XML 已换,旧
+        checkpoint 续跑会带病出 dump —— 删掉让下次 produce 全段重跑。
+        produce 块整体缺失(dev/test 最小 config)警告跳过;块残缺按配置错误
+        响亮抛(半配置生产化比报错危险)。
+        """
+        params = ProdParams.maybe_from_config(self.config)
+        if params is None:
+            logger.warning("produce 块缺失,归档 XML 未生产化 factor={}", name)
+            return
+        src = self.paths(name).src
+        xmls = sorted(src.glob("*.xml"))
+        if not xmls:
+            logger.warning("归档目录无 XML,跳过生产化 factor={}", name)
+            return
+        productionize_file(xmls[0], name=name, params=params)
+        ck = Path(params.checkpoint_root) / name
+        if ck.exists():
+            shutil.rmtree(ck)
 
     def recall(self, name: str) -> None:
         """alpha_src/<name> → staging/<name>(收编原 restage 的搬运半边):

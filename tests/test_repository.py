@@ -394,3 +394,64 @@ def test_unstage(json_config, write_factor):
     d = write_factor(config, name="AlphaWbaiUn")
     assert repo.unstage("AlphaWbaiUn") is True and not d.exists()
     assert repo.unstage("AlphaWbaiUn") is False                # 幂等:再删报不存在
+
+
+def test_archive_productionizes_and_invalidates_checkpoint(json_config, write_factor):
+    """归档即生产态(factor-produce-v3.md D9/D10):archive 后 XML 是产线形态,
+    且旧 checkpoint 被作废(重入库 = 代码已换,续跑会带病出 dump)。"""
+    from ops.utils.xmlio import load_xml
+
+    _, config = json_config
+    repo = FactorRepository(config)
+    d = write_factor(config, name="AlphaWbaiPrd", discovery_method="manual")
+    dump = config.alpha_path / "AlphaWbaiPrd"
+    dump.mkdir(parents=True)
+    pnl = config.pnl_path / "AlphaWbaiPrd"
+    pnl.write_text("pnl")
+    stale_ck = config.produce_checkpoint_root / "AlphaWbaiPrd"
+    stale_ck.mkdir(parents=True)
+    (stale_ck / "archive.bin").write_text("stale")
+
+    repo.archive("AlphaWbaiPrd", src_dir=d, dump_dir=dump, pnl_file=pnl,
+                 discovery_method="manual")
+
+    g = load_xml(config.alpha_src / "AlphaWbaiPrd" / "Config.AlphaWbaiPrd.xml")["gsim"]
+    assert g["Universe"]["@enddate"] == "TODAY"
+    assert g["Universe"]["@startdate"] == "20110101"
+    assert g["Constants"]["@backdays"] == "256"
+    assert g["Constants"]["@checkpointDir"] == \
+        f"{config.produce_checkpoint_root}/AlphaWbaiPrd/"
+    assert g["Portfolio"]["Alpha"]["@dumpAlphaDir"] == str(config.produce_dump_root)
+    assert g["Portfolio"]["Stats"]["@pnlDir"] == str(config.produce_pnl_root)
+    assert g["Portfolio"]["Stats"]["@dumpPnl"] == "true"
+    # @module = 稳定前缀(测试隔离下 == alpha_src)+ 原 basename
+    assert g["Modules"]["Alpha"]["@module"] == \
+        str(config.alpha_src / "AlphaWbaiPrd" / "AlphaWbaiPrd.py")
+    assert not stale_ck.exists()                      # checkpoint 联动作废
+
+
+def test_productionize_skipped_without_produce_block(json_config, write_factor,
+                                                     tmp_path):
+    """produce 块整体缺失(dev/test 最小 config)→ 警告跳过不炸,XML 保持原样。"""
+    import yaml
+
+    from ops.infra.config import Config as _Config
+
+    cfg_path, _ = json_config
+    base = yaml.safe_load(cfg_path.read_text())
+    base.pop("produce", None)
+    bare_path = tmp_path / "config.bare.yaml"
+    bare_path.write_text(yaml.safe_dump(base, allow_unicode=True))
+    config = _Config.load(bare_path)
+
+    repo = FactorRepository(config)
+    d = write_factor(config, name="AlphaWbaiBare")
+    dump = config.alpha_path / "AlphaWbaiBare"
+    dump.mkdir(parents=True)
+    pnl = config.pnl_path / "AlphaWbaiBare"
+    pnl.write_text("pnl")
+    repo.archive("AlphaWbaiBare", src_dir=d, dump_dir=dump, pnl_file=pnl,
+                 discovery_method="manual")
+
+    xml = (config.alpha_src / "AlphaWbaiBare" / "Config.AlphaWbaiBare.xml").read_text()
+    assert 'enddate="20251231"' in xml                # 未生产化,原窗口仍在
