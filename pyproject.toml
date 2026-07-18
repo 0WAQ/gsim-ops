@@ -96,7 +96,7 @@ ignore_imports = [
 # purge→Repository ×2、approve 语义 API ×1;factor-aggregate-plan 阶段 2)
 name = "C3 service packages are independent"
 type = "independence"
-modules = ["ops.services.submit", "ops.services.check", "ops.services.list", "ops.services.rm", "ops.services.restage", "ops.services.approve", "ops.services.cancel", "ops.services.clear", "ops.services.status", "ops.services.info", "ops.services.pack", "ops.services.run", "ops.services.combo"]
+modules = ["ops.services.submit", "ops.services.check", "ops.services.list", "ops.services.rm", "ops.services.restage", "ops.services.approve", "ops.services.cancel", "ops.services.clear", "ops.services.status", "ops.services.info", "ops.services.pack", "ops.services.run", "ops.services.combo", "ops.services.produce"]
 
 [[tool.importlinter.contracts]]
 name = "C5 utils is a leaf"
