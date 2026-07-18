@@ -143,3 +143,51 @@ def test_combo_legs_extraction_and_gate(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["audit_combo_legs.py", str(xml),
                                       "--active-file", str(active)])
     assert audit.main() == 0                       # 齐 → 通过
+
+
+# ---------------------------------------------------------------------------
+# produce_shadow_diff
+# ---------------------------------------------------------------------------
+
+def test_shadow_xml_redirects_only_roots(legacy_and_migrated, tmp_path):
+    """影子副本:三根重定向 scratch + enddate 钉死,规则其余与生产完全一致;
+    alpha_src 原件零改动。"""
+    shadow = _load_script("produce_shadow_diff")
+    config = legacy_and_migrated
+    scratch = tmp_path / "scratch"
+    archived = config.alpha_src / "AlphaWbaiDone" / "Config.AlphaWbaiDone.xml"
+    before = archived.read_text()
+
+    params = shadow.shadow_params(config, scratch, "20260714")
+    out = shadow.prepare_shadow_xml(config, "AlphaWbaiDone", params, scratch)
+
+    g = load_xml(out)["gsim"]
+    assert g["Universe"]["@enddate"] == "20260714"
+    assert g["Universe"]["@startdate"] == "20110101"          # 生产规则不动
+    assert g["Portfolio"]["Alpha"]["@dumpAlphaDir"] == str(scratch / "alpha_dump")
+    assert g["Constants"]["@checkpointDir"] == \
+        f"{scratch}/checkpoint/AlphaWbaiDone/"
+    assert archived.read_text() == before                     # 原件分毫未动
+
+
+def test_shadow_diff_factor_buckets(tmp_path):
+    import numpy as np
+    shadow = _load_script("produce_shadow_diff")
+    sd = tmp_path / "shadow" / "alpha_dump"
+    ds = tmp_path / "dataset"
+
+    def put(root, date, ver, arr):
+        p = root / "AlphaX" / str(date)[:4] / str(date)[4:6] / f"{date}{ver}.npy"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        np.save(p, arr)
+
+    put(sd, 20260701, "v2", np.array([1.0, 2.0]))     # byte-equal
+    put(ds, 20260701, "v2", np.array([1.0, 2.0]))
+    put(sd, 20260702, "v2", np.array([1.0, 2.0]))     # drift
+    put(ds, 20260702, "v2", np.array([1.0, 9.0]))
+    put(sd, 20260703, "v2", np.array([1.0]))          # missing-in-dataset
+
+    counts, details = shadow.diff_factor("AlphaX", sd, ds)
+    assert counts == {"byte": 1, "atol": 0, "drift": 1, "missing": 1}
+    assert any("DRIFT" in d for d in details)
+    assert any("MISSING" in d for d in details)
