@@ -152,8 +152,9 @@ def _produce_worker(name: str, config: Config, force: bool = False,
             ck = Path(params.checkpoint_root) / name
             if force and ck.exists():
                 shutil.rmtree(ck)       # 重跑 = 删 checkpoint,gsim 自然全段
-            # gsim checkpoint.save 不自建目录(170 影子对拍实测 FileNotFoundError),
-            # 必须预建 —— 新线与重入库(归档刚删过目录)都会踩
+            # gsim checkpoint 只单层 mkdir 叶子(isdir 守卫,非递归;170 源码
+            # + 实测钉死):父层在即可自建叶子。生产上 checkpoint_root 恒存,
+            # 此处预建整链是不依赖该未文档化行为的零成本保险
             ck.mkdir(parents=True, exist_ok=True)
 
             if enddate is not None:

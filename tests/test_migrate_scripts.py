@@ -195,8 +195,8 @@ def test_shadow_diff_factor_buckets(tmp_path):
 
 def test_shadow_run_one_premakes_checkpoint_dir(legacy_and_migrated, tmp_path,
                                                 monkeypatch, json_config):
-    """gsim checkpoint.save 不自建目录(170 实测):run_one 跑测前必须预建
-    per-factor checkpoint 目录。"""
+    """gsim checkpoint 只单层建叶子不补父层(170 判定):scratch 的 checkpoint
+    根不存在会 FileNotFoundError —— run_one 跑测前预建整链。"""
     shadow = _load_script("produce_shadow_diff")
     cfg_path, _ = json_config
     config = legacy_and_migrated

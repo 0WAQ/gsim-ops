@@ -74,7 +74,8 @@ def run_one(name: str, config_path: Path, scratch: str, enddate: str,
         config = Config.load(config_path)
         params = shadow_params(config, Path(scratch), enddate)
         xml = prepare_shadow_xml(config, name, params, Path(scratch))
-        # gsim checkpoint.save 不自建目录,必须预建(170 实测 FileNotFoundError)
+        # gsim checkpoint 只单层 mkdir 叶子,不补父层(170 判定)—— scratch 的
+        # checkpoint 根不存在即 FileNotFoundError(首轮 20/20 全灭的根因),预建整链
         (Path(scratch) / "checkpoint" / name).mkdir(parents=True, exist_ok=True)
         Runner.run_backtest(xml, config)
         return name, ""
