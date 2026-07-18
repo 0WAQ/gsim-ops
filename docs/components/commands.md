@@ -51,7 +51,6 @@ stateDiagram-v2
 | `rm` | 彻底删因子(src/pnl/dump/feature + factor_info 级联,不可逆) | 任意 | — |
 | `list` / `status` / `info` | 查询(库内因子集 / 生命周期 / 单因子详情) | — | — |
 | `run` / `pack` / `combo` | 回测 / 聚合 feature / combo 代测 | — | — |
-| `produce` | ACTIVE 因子 dump 日增生产(production_start → 最新就绪日;无状态、幂等;缺省只补缺失,--force 显式作用域重产) | ACTIVE | 不变 |
 | `setup` / `doctor` | 部署补建 / 盘↔PG 对账 | — | — |
 
 ## 转移时数据产物规则

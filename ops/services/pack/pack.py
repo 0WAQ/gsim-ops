@@ -29,7 +29,8 @@ ATOL = 1e-6
 VERIFY_SAMPLES = 5
 
 # Pack 流程只覆盖到 20251231(check 流程上限),日增 (>20251231) 走另一条路径
-# (dump 侧已由 ops produce 落地;feature 行扩展见 .claude/plans.md 后议项)。
+# (dump 侧归因子生产线,docs/design/factor-produce-v3.md;feature 行扩展
+# 见 .claude/plans.md 后议项)。
 # L 写死 3900;H 当前 5484,1-2 年内不变,变了再说。
 PACK_L = 3900
 

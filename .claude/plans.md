@@ -249,22 +249,18 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 - 新增(2026-07-17):`ops produce` 已落地日增 dump,feature 侧成为日增链路唯一
   断点。**前置依赖:PACK_L 扩行**(2026+ 的 di ≥ 3900,不扩行增量写不进)。
 
-## 因子增量生产(2026-07-17 produce 落地;branch claude/factor-production-features-pdnjdc)
+## 因子增量生产(branch claude/factor-production-features-pdnjdc;v3 施工中)
 
-**已落地**:`ops produce`(ACTIVE 因子 alpha_dump 日增生产,设计与边界见
-`ops/services/produce/CLAUDE.md`)+ core 上提 `dumpfiles.py` / `universe.py`。
-
-**170 实机验证清单(上机窗口执行)**:
-1. 黄金对比:produce 根临时指 cc_2025,重产 202512 段与 check 产的同日 dump
-   按 ATOL 比对(或跑 `pytest -m e2e tests/e2e/test_e2e_produce.py`)——
-   验段起点首日与全史跑一致(backdays 暖场充分性)。
-2. dump 真名 `ls` 确认(解析容错两种写法,写出沿 gsim 真名)。
-3. 170 上 `/datasvc/data/cc_all` 存在性 / Basedata/.meta 格式 / 新鲜度。
-4. 单因子段回测 wall time 实测 → 估 8k ACTIVE 夜间窗口,定 --workers 默认。
-5. gsim 对 enddate > .meta lastDate 的行为(报错 or 静默截断)。
-6. 归档 XML 存量 niodatapath 前缀抽查(有无 cc_2024/绝对路径特例)。
+**设计正主 `docs/design/factor-produce-v3.md`**(归档即生产态 + checkpoint 续跑
+薄驱动;决策台账 D1-D11 + 接管七步序列在彼)。v1 实现(就绪判定/缺失推导模型)
+2026-07-18 评审后退场;留存 core 上提(`dumpfiles.py` / `universe.py`)与
+config produce 块(v3 键)。实证材料:`docs/remediation/DISCOVER-PRODUCE-PROD*` +
+`AUDIT-DUMP-CONSISTENCY*`。
 
 **后议项**:
+- `ops export`:库内因子导出为可独立运行副本 + "不让用户直跑因子库因子"约束
+  (拆雷退役 D9 的替代保护;用户点名 TODO)。
+- submit/check 入口收紧新杂质(D5 单轨配套:旧路径形态/Mod id/V5 即拒)。
 - PACK_L 扩行(方案未定:预分配 / 分代文件 / zarr;用户 2026-07-17 定"先记录
   后议")。触发:feature 出现真消费者(AlphaLoadFeat 因子库投产)或 pack --date
   立项;AlphaLoadFeat 的 `{ver}` 命名对齐属同一验证。

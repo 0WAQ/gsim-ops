@@ -11,7 +11,6 @@ from ops.cli.doctor import add_doctor_subparser
 from ops.cli.info import add_info_subparser
 from ops.cli.list import add_list_subparser
 from ops.cli.pack import add_pack_subparser
-from ops.cli.produce import add_produce_subparser
 from ops.cli.restage import add_restage_subparser
 from ops.cli.rm import add_rm_subparser
 from ops.cli.run import add_run_subparser
@@ -32,7 +31,6 @@ SUBPARSER_REGISTRARS = (
     add_submit_subparser,
     add_status_subparser,
     add_pack_subparser,
-    add_produce_subparser,
     add_rm_subparser,
     add_restage_subparser,
     add_approve_subparser,

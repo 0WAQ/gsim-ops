@@ -104,22 +104,30 @@ class Config:
         self.dry_run: bool = config["mode"]["dry_run"]
         self.timeout: int = config["mode"]["timeout"]
 
-        # produce: 因子日增生产(ops produce)。与 check 是两个事实族:
+        # produce: 因子日增生产(归档生产化 + ops produce 驱动共用,
+        # 见 docs/design/factor-produce-v3.md)。与 check 是两个事实族:
         # path.nio_data_path 是 check 的验证窗口(cc_2025,.meta 冻结可复现),
         # produce.nio_data_path 是生产的日增数据根(cc_all,持续增长)——
-        # 两个键不是重复,别"归一"。块缺失不炸构造(dev/test config 无需配),
-        # run_produce 入口缺键响亮报错。
+        # 两个键不是重复,别"归一"。这些值在归档时写死进 XML,改 config 只影响
+        # 此后归档的因子,整改存量须重跑迁移脚本。块缺失不炸构造(dev/test
+        # config 无需配),消费方入口缺键响亮报错。
         produce_cfg: dict[str, Any] = config.get("produce") or {}
-        _p = produce_cfg.get("nio_data_path")
-        self.produce_nio_data_path: Path | None = Path(_p) if _p else None
-        self.production_start: str | None = (
-            str(produce_cfg["production_start"]) if "production_start" in produce_cfg
-            else None)
-        _w = produce_cfg.get("workspace")
-        self.produce_workspace: Path | None = Path(_w) if _w else None
-        # 就绪判定 canary 数据目录(所有因子至少依赖行情基准节奏)
-        self.produce_readiness_dirs: list[str] = (
-            list(produce_cfg.get("readiness_dirs") or ["Basedata"]))
+
+        def _opt_path(key: str) -> Path | None:
+            v = produce_cfg.get(key)
+            return Path(v) if v else None
+
+        self.produce_nio_data_path: Path | None = _opt_path("nio_data_path")
+        self.produce_enddate: str = str(produce_cfg.get("enddate") or "TODAY")
+        self.produce_startdate: str | None = (
+            str(produce_cfg["startdate"]) if "startdate" in produce_cfg else None)
+        self.produce_backdays: int = int(produce_cfg.get("backdays") or 256)
+        self.produce_checkpoint_root: Path | None = _opt_path("checkpoint_root")
+        self.produce_dump_root: Path | None = _opt_path("dump_root")
+        self.produce_pnl_root: Path | None = _opt_path("pnl_root")
+        self.produce_datasvc_prefix: str = str(
+            produce_cfg.get("datasvc_prefix") or "/nvme125")
+        self.produce_module_prefix: Path | None = _opt_path("module_prefix")
 
         # library_id: ~/.cache/ops/lib/ 下的命名空间键。历史上住在 sync 段;
         # sync 栈已退役 (JOURNAL F1),仅存此键。

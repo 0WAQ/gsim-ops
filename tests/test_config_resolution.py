@@ -112,3 +112,32 @@ def test_help_survives_deleted_cwd(monkeypatch, tmp_path):
     doomed.rmdir()
     p = get_default_config_path()                   # 不得抛 OSError
     assert p == Path("config.yaml")
+
+
+def test_produce_block_parsing():
+    """produce 块(v3,factor-produce-v3.md §7):键齐全时全解析;块缺失不炸
+    构造且属性 None/缺省 —— 消费方(归档生产化/produce 驱动)入口自行响亮报错。"""
+    import yaml
+
+    from ops.infra.config import get_project_root
+
+    base = yaml.safe_load((get_project_root() / "config.yaml").read_text())
+    raw, _, _ = Config._resolve_vars(dict(base), "server-170")
+    c = Config(raw)
+    assert str(c.produce_nio_data_path) == "/nvme125/datasvc/data/cc_all"
+    assert c.produce_enddate == "TODAY"
+    assert c.produce_startdate == "20110101"
+    assert c.produce_backdays == 256
+    assert str(c.produce_checkpoint_root) == "/nvme125/checkpoint"
+    assert str(c.produce_dump_root) == "/nvme125/alpha_dump"
+    assert str(c.produce_pnl_root) == "/nvme125/alpha_pnl"
+    assert c.produce_datasvc_prefix == "/nvme125"
+    assert str(c.produce_module_prefix) == "/mnt/storage/alphalib/alpha_src"
+
+    base.pop("produce")
+    raw2, _, _ = Config._resolve_vars(dict(base), "server-170")
+    c2 = Config(raw2)
+    assert c2.produce_nio_data_path is None
+    assert c2.produce_checkpoint_root is None
+    assert c2.produce_enddate == "TODAY"      # 无害缺省;路径类键无缺省
+    assert c2.produce_backdays == 256

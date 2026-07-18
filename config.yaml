@@ -113,17 +113,22 @@ authors:
     name: jzhang
     email: junjie@graceim.ai
 
-# 因子日增生产 (ops produce):为 ACTIVE 因子补产 >production_start 的每日 dump。
+# 因子日增生产 (归档生产化 + ops produce 驱动共用, docs/design/factor-produce-v3.md)。
 # 数据根与 check 分族:check 用 path.nio_data_path=cc_2025 (.meta 冻结 20251231,
-# 验证窗口可复现,一字不动);produce 走 cc_all (持续日增,gsim 按其 .meta 可见
-# 最新数据)。cc_all 四机同一绝对路径,无需 hosts override —— 将来某机路径分叉
-# 时把值改成 ${produce_nio_root} 并进 vars/hosts 声明即可。
-# dump 是本机 sidecar:在哪台跑 produce 就落哪台 (生产消费机 = 170)。
+# 验证窗口可复现,一字不动);produce 走 170 本机 cc_all (持续日增)。
+# 下列路径均为 170 本机事实 (生产只在 170 跑;dataset 沿用现役产线资产,D4);
+# 这些值在**归档时写死进 XML**,改 config 只影响此后归档的因子,
+# 整改存量须重跑迁移脚本 (scripts/migrate_prod_xml.py)。
 produce:
-  nio_data_path: /datasvc/data/cc_all
-  production_start: '20260101'        # 生产起点 (check 历史窗口 20251231 之后)
-  workspace: ${workspace}/produce     # gsim src/alpha/checkpoint 工作区 (本机)
-  # readiness_dirs: [Basedata]        # 就绪判定 canary 数据目录 (缺省 Basedata)
+  nio_data_path: /nvme125/datasvc/data/cc_all   # D8;cc_2025 在 170 无权限
+  enddate: TODAY              # D3 盘前产 T 日仓位;TODAY-1 仅"只看回测不生产"语义
+  startdate: '20110101'       # D2 照抄现役产线
+  backdays: 256               # D2/D10;>256 自 20110101 起早于数据起始, gsim 崩
+  checkpoint_root: /nvme125/checkpoint      # D4 沿用现役资产, per-factor 子目录
+  dump_root: /nvme125/alpha_dump            # D4;combo AlphaLoad 直读, 零改动
+  pnl_root: /nvme125/alpha_pnl              # D4/D6;与 alphalib alpha_pnl (check 快照字节源) 隔离
+  datasvc_prefix: /nvme125    # 归档改写 REPLACE-② 前缀 (Universe 例外内置, 见设计 §4)
+  module_prefix: /mnt/storage/alphalib/alpha_src   # D11 @module 跨机稳定前缀 (四机皆有软链)
 
 # 运行模式
 mode:

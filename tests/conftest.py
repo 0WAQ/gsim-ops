@@ -221,10 +221,15 @@ def _isolated_paths(base: dict, tmp_path: Path, library_id: str) -> None:
     base["sync"]["library_id"] = library_id
     base["sync"].pop("remote", None)
 
-    # produce 块隔离:config.yaml 带生产值(/datasvc/data/cc_all),测试绝不碰
+    # produce 块隔离:config.yaml 带 170 生产路径,测试全部重定位 tmp
     if "produce" in base:
-        base["produce"]["nio_data_path"] = str(tmp_path / "nio_produce")
-        base["produce"]["workspace"] = str(tmp_path / "workspace" / "produce")
+        p = base["produce"]
+        p["nio_data_path"] = str(tmp_path / "nio_produce")
+        p["checkpoint_root"] = str(tmp_path / "produce" / "checkpoint")
+        p["dump_root"] = str(tmp_path / "produce" / "alpha_dump")
+        p["pnl_root"] = str(tmp_path / "produce" / "alpha_pnl")
+        # 测试环境无 /mnt/storage 软链,@module 稳定前缀指向隔离 alpha_src
+        p["module_prefix"] = str(root / "alpha_src")
 
 
 def _mkdirs(config) -> None:
