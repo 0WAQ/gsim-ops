@@ -75,6 +75,8 @@ sudo .venv/bin/python scripts/bootstrap_groups.py --apply -y
 
 # 日常驱动(170,T 日盘前)
 ops produce --grouped                 # sync + pre-check + 逐组续跑 + pending 池
+ops produce --grouped --skip-pending  # 只跑存量(组);试点/验收期口径
+ops produce --grouped --pending-only  # 只跑新增(pending 池,per-factor);与 --skip-pending 互斥
 ops produce --grouped --dry-run       # 组体检:腿数/静音数/checkpoint/首跑标记
 ops produce --grouped --sync-only     # 只收敛静音/pending,不跑 gsim
 ops produce --grouped -w 4 --timeout 43200   # bootstrap 全史首跑(500 腿 ~7h/组)

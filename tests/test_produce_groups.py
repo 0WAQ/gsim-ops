@@ -121,7 +121,8 @@ def _fake_backtest(seen: list):
 
 def _args(cfg_path, **kw):
     base = dict(config_path=cfg_path, grouped=True, dry_run=False,
-                sync_only=False, skip_pending=False, workers=1, timeout=None)
+                sync_only=False, skip_pending=False, pending_only=False,
+                workers=1, timeout=None)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -327,6 +328,30 @@ def test_skip_pending_runs_groups_only(env, monkeypatch):
     run_produce_groups(_args(cfg_path, skip_pending=True))
 
     assert seen == [gdir / "group.xml"]
+
+
+def test_pending_only_skips_groups_and_mutex(env, monkeypatch):
+    """--pending-only:只跑 pending 池(新增因子),组一个不碰;
+    与 --skip-pending 互斥(语义矛盾直接拒)。"""
+    cfg_path, config, install = env
+    _mk_factor(config, "AlphaA")
+    _mk_factor(config, "AlphaNew")
+    gdir = _mk_group(config, "wbai", "g001", ["AlphaA"])
+    fake = _FakeRepo(
+        active=[("AlphaA", "wbai", 1), ("AlphaNew", "wbai", 1)],
+        roster={"g001": ("wbai", [("AlphaA", False)])},
+        records={"AlphaNew": _active_record("AlphaNew")})
+    install(fake)
+    seen: list = []
+    monkeypatch.setattr(groups_mod, "Runner",
+                        SimpleNamespace(run_backtest=_fake_backtest(seen)))
+
+    run_produce_groups(_args(cfg_path, pending_only=True))
+
+    assert len(seen) == 1 and seen[0] != gdir / "group.xml"   # 只有 pending 临时副本
+
+    with pytest.raises(SystemExit):
+        run_produce_groups(_args(cfg_path, pending_only=True, skip_pending=True))
 
 
 def test_pending_worker_rewrites_roots_to_new_production(env, monkeypatch):

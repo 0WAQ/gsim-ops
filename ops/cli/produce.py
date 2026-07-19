@@ -35,6 +35,9 @@ Example:
                              "而非逐因子(设计 docs/design/factor-produce-groups.md)")
     parser.add_argument("--skip-pending", action="store_true",
                         help="分组模式下不跑 pending 池(试点/验收期用:只跑已封的组)")
+    parser.add_argument("--pending-only", action="store_true",
+                        help="分组模式下只跑 pending 池(新增因子),不跑组;"
+                             "与 --skip-pending 互斥")
     parser.add_argument("--timeout", type=int, default=None,
                         help="单次 gsim 运行超时秒数(缺省 config.mode.timeout=1800;"
                              "bootstrap 全史首跑需放大,如 43200)")

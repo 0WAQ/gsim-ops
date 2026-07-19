@@ -225,11 +225,15 @@ def run_produce_groups(args) -> None:
     notes, corrupted, pending = sync_groups(repo, params, config)
     for n in notes:
         (error if n.startswith("✘") else warn)(f"  {n}")
+    if getattr(args, "pending_only", False) and getattr(args, "skip_pending", False):
+        error("ops produce --grouped: --pending-only 与 --skip-pending 语义互斥")
+        raise SystemExit(1)
     if getattr(args, "skip_pending", False):
         if pending:
             info(f"  pending {len(pending)} 个按 --skip-pending 跳过")
         pending = []
-    groups = [g for g in repo.groups() if g.gid not in corrupted]
+    groups = [] if getattr(args, "pending_only", False) else \
+        [g for g in repo.groups() if g.gid not in corrupted]
     info(f"  同步: 组 {len(repo.groups())}(跳过 {len(corrupted)}) | "
          f"pending {len(pending)}")
     if getattr(args, "sync_only", False):
