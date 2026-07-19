@@ -199,7 +199,6 @@ def test_shadow_run_one_premakes_checkpoint_dir(legacy_and_migrated, tmp_path,
     根不存在会 FileNotFoundError —— run_one 跑测前预建整链。"""
     shadow = _load_script("produce_shadow_diff")
     cfg_path, _ = json_config
-    config = legacy_and_migrated
     scratch = tmp_path / "scratch"
     seen = {}
 
