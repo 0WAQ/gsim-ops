@@ -188,6 +188,9 @@ def _produce_worker(name: str, config: Config, force: bool = False,
 # ---------------------------------------------------------------------------
 
 def run_produce(args):
+    if getattr(args, "grouped", False):
+        from ops.services.produce.groups import run_produce_groups
+        return run_produce_groups(args)
     config = Config.load(args.config_path)
     if config.env_overrides:
         # OPS_* 覆盖会静默压掉 hosts 声明(170 曾因残留 OPS_ALPHALIB_ROOT

@@ -40,6 +40,8 @@ from ops.core.factor import Factor, FactorIdentity, FactorSnapshot
 from ops.core.paths import FactorPaths
 from ops.core.prodxml import ProdParams, productionize_file
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus, HistoryEvent
+from ops.infra.groups import default_group_store
+from ops.infra.groups.pg_store import GroupMember, ProduceGroup
 from ops.infra.info import default_info_store
 from ops.infra.lock import factor_lock
 from ops.infra.pg import get_pool
@@ -55,6 +57,7 @@ from ops.utils.log import logger
 
 if TYPE_CHECKING:
     from ops.infra.config import Config
+    from ops.infra.groups.pg_store import PostgresGroupStore
     from ops.infra.info.base import InfoStore
     from ops.infra.snapshot.base import SnapshotStore
     from ops.infra.store.base import StateStore
@@ -139,6 +142,11 @@ class FactorRepository:
         self._conninfo  # noqa: B018 — 同上
         return default_snapshot_store(self.config)
 
+    @cached_property
+    def _groups(self) -> PostgresGroupStore:
+        self._conninfo  # noqa: B018 — 同上(PG-only;json 后端无产线拓扑)
+        return default_group_store(self.config)
+
     # ------------------------------------------------------------ 记录面:读
     def exists(self, name: str) -> bool:
         """因子是否存在 —— 一种语义:factor_info 有行(三表之根)。
@@ -173,6 +181,41 @@ class FactorRepository:
     def latest_check_ats(self) -> dict[str, str]:
         """全库 name → 最近一次 check 事件 at(doctor 测得快照对账)。"""
         return self._state.latest_check_ats()
+
+    # ------------------------------------------------------------ 分组 roster(produce)
+    # 组拓扑(roster/ordinal/muted)是语义真相 → produce_group 两表;
+    # 盘面 group.xml 是派生物。PG-only,json dev 后端走不到产线。
+
+    def create_group(self, gid: str, author: str, delay: int,
+                     factors: list[str]) -> None:
+        """建组 + roster 落库(factors 须已字典序,ordinal 即 checkpoint 腿序号)。"""
+        self._groups.create_group(ProduceGroup(gid=gid, author=author, delay=delay),
+                                  factors)
+
+    def groups(self, active_only: bool = True) -> list[ProduceGroup]:
+        return self._groups.list_groups(active_only)
+
+    def group_members(self, gid: str) -> list[GroupMember]:
+        return self._groups.members(gid)
+
+    def set_group_muted(self, gid: str, factors: set[str], muted: bool) -> None:
+        self._groups.set_muted(gid, factors, muted)
+
+    def group_membership(self) -> dict[str, str]:
+        """factor → gid(仅 active 组)—— sync 判"在不在组里"的唯一查询。"""
+        return self._groups.active_membership()
+
+    def ungrouped_delay1(self) -> list[tuple[str, str, int]]:
+        """delay1 ACTIVE 且不在任何 active 组的 (name, author, delay) ——
+        pending 池与封新组的来源。delay 载体是快照(入库时解析定死)。"""
+        membership = self.group_membership()
+        out = []
+        for f in self.find(status="active"):
+            delay = f.snapshot.delay if f.snapshot else None
+            if delay != 1 or f.name in membership:
+                continue
+            out.append((f.name, f.identity.author or "", 1))
+        return sorted(out)
 
     def history(self, name: str) -> list[HistoryEvent]:
         """完整生命周期事件时间线(status 详情;json dev/test 后端合成

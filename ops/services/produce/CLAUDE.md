@@ -38,3 +38,19 @@
 
 `tests/test_produce.py`:json 后端 + fake backtest(workers=1 串行进程内路径);
 sync 停线/新线、未迁移守卫、worker 四路、--force/--enddate 语义、退出码。
+
+## 分组模式(--grouped,2026-07-19 落地)
+
+`ops produce --grouped` = sync(DB/XML/ACTIVE 三方收敛:静音/解静音/pending
+归类 + "DB 序 == XML 腿序"不变量校验)+ pre-check(坏腿自动静音)+ 逐组
+run_cp.py 续跑 + pending 池 per-factor(临时副本指新根)。设计正主
+`docs/design/factor-produce-groups.md`;组拓扑 SSOT = PG produce_group 两表
+(roster/ordinal/muted),盘面 group.xml 是派生物;核心:组腿集合与顺序
+**永不修改**,唯一合法编辑是 `dumpAlphaFile` 属性翻转(checkpoint 按腿序号
+反序列化,实证 `docs/remediation/BATCH-PRODUCE-MECHANICS-RESULT.md`)。
+建组走 `scripts/bootstrap_groups.py`(dry-run 出样品,--apply 落盘写库)。
+当前只产 delay1(delay0 归 jdw 盘中产线)。
+
+测试:`tests/test_produce_groups.py`(json 后端 + FakeRepo + fake backtest:
+sync 各分支/precheck/退出码/pending 改写根)、`tests/test_group_store_pg.py`
+(PG roster 真身)、`tests/test_prodgroup.py`(纯函数:划分决定论/XML 生成不变量)。

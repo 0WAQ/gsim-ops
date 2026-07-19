@@ -85,3 +85,23 @@ CREATE INDEX IF NOT EXISTS idx_factor_snapshot_fields ON factor_snapshot USING G
 CREATE INDEX IF NOT EXISTS idx_factor_snapshot_tables ON factor_snapshot USING GIN(tables);
 CREATE INDEX IF NOT EXISTS idx_factor_snapshot_ret ON factor_snapshot(ret);
 CREATE INDEX IF NOT EXISTS idx_factor_snapshot_shrp ON factor_snapshot(shrp);
+
+-- 4. produce_group 两表 — 分组产线 roster (镜像 ops/infra/groups/pg_store.py:_SCHEMA)
+-- member.factor 不 FK factor_info:rm 因子 roster 不删(ordinal 即 checkpoint 腿序号),只 muted
+CREATE TABLE IF NOT EXISTS produce_group (
+    gid TEXT PRIMARY KEY,
+    author TEXT NOT NULL,
+    delay INT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_produce_group_status CHECK (status IN ('active', 'superseded'))
+);
+CREATE TABLE IF NOT EXISTS produce_group_member (
+    gid TEXT NOT NULL REFERENCES produce_group(gid),
+    factor TEXT NOT NULL,
+    ordinal INT NOT NULL,
+    muted BOOLEAN NOT NULL DEFAULT false,
+    PRIMARY KEY (gid, factor),
+    CONSTRAINT uq_pgm_gid_ordinal UNIQUE (gid, ordinal)
+);
+CREATE INDEX IF NOT EXISTS ix_pgm_factor ON produce_group_member(factor);

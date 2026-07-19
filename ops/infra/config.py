@@ -132,6 +132,21 @@ class Config:
             else "/nvme125")
         self.produce_module_prefix: Path | None = _opt_path("module_prefix")
 
+        # produce.grouped: 分组产线(docs/design/factor-produce-groups.md)。
+        # root 缺席 = 未启用分组(--grouped 入口响亮报错,旧 per-factor 不受影响);
+        # size/workers 有缺省,不是必须配。
+        grouped_cfg: dict[str, Any] = produce_cfg.get("grouped") or {}
+        root_v = grouped_cfg.get("root")
+        self.produce_grouped_root: Path | None = Path(root_v) if root_v else None
+        self.produce_grouped_size: int = int(grouped_cfg.get("group_size") or 500)
+        self.produce_grouped_workers: int = int(grouped_cfg.get("workers") or 8)
+        # roster_dbname:组 roster 写库覆盖(缺省 = state.postgres 同库,终态)。
+        # 试点接线专用 —— 因子读仍走主 conninfo(ops),roster 落 ops_test;
+        # 生产正式建组前必须移除,roster 与因子表同库才是终态。
+        roster_db = grouped_cfg.get("roster_dbname")
+        self.produce_grouped_roster_dbname: str | None = (
+            str(roster_db) if roster_db else None)
+
         # library_id: ~/.cache/ops/lib/ 下的命名空间键。历史上住在 sync 段;
         # sync 栈已退役 (JOURNAL F1),仅存此键。
         sync_cfg: dict[str, Any] = config.get("sync") or {}

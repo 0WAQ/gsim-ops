@@ -266,10 +266,12 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 手动观察周 + 443 新线首跑 → cron 进 `# 3. generate alpha` 槽位,cchang 线退役。
 
 **后议项**:
-- batch/分组产线形态:机制事实已钉死(sibling 平铺可行、组=故障域、checkpoint
-  序号语义下组成员冻结、静音开关处理入退库、规模与 bootstrap 测算),见
-  `docs/remediation/BATCH-PRODUCE-MECHANICS-RESULT.md`。是否启用、用于
-  bootstrap 还是日常增量,未拍板。
+- batch/分组产线形态:**已立项落地**(2026-07-19,`ops produce --grouped`;
+  组大小 500、roster 入 PG produce_group 两表、生产根 /nvme125/production/alpha、
+  只产 delay1)。设计正主 `docs/design/factor-produce-groups.md`;机制实证
+  `docs/remediation/BATCH-PRODUCE-MECHANICS-RESULT.md`。待办:bootstrap 全史
+  首跑 → byte-diff 抽验 → 观察 → combo 切 alphaDir → cchang 退役;重组自动化
+  与 delay0 接入后议。
 - `ops export`:库内因子导出为可独立运行副本 + "不让用户直跑因子库因子"约束
   (拆雷退役 D9 的替代保护;用户点名 TODO)。
 - submit/check 入口收紧新杂质(D5 单轨配套:旧路径形态/Mod id/V5 即拒)。

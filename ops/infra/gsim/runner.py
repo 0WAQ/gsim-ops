@@ -33,6 +33,28 @@ def resolve_bcorr_pools(config: Config, discovery_method: str | None) -> list[Pa
     return [config.pnl_prod_path, config.pnl_alphalib]
 
 
+def _raise_nofile() -> None:
+    """子进程 preexec:把 RLIMIT_NOFILE soft 提到 65536。
+
+    sudo/pam_limits 会把 soft 压回 1024(170 金丝雀 produce 实测 EMFILE 炸在
+    gsim memmap);gsim 对 cc_all 全表 memmap,fd 需求随表数线性,1024 必炸。
+    非 root 只能把 soft 提到 hard 为止(root 可提 hard);提不上不抢戏,
+    维持原状让 gsim 自己报错。
+    """
+    import resource
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = 65536
+    if soft >= target:
+        return
+    if hard != resource.RLIM_INFINITY and hard < target:
+        try:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (target, target))
+        except (ValueError, OSError):
+            return
+    else:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+
+
 class Runner:
     @staticmethod
     def run_bcorr(pnl_file: Path, config: Config,
@@ -110,17 +132,35 @@ class Runner:
             return None
 
     @staticmethod
-    def run_backtest(xml_file: Path, config: Config):
+    def run_backtest(xml_file: Path, config: Config, timeout: int | None = None,
+                     log_path: Path | None = None):
         # 禁写 __pycache__:回测 @module 指向共享盘(staging/alpha_src 均 JFS),
         # root 进程往里写字节码缓存 = 污染 + JFS 写放大(生产化后归档 XML 可
         # 直跑,此保护成为常态而非偶发)
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        argv = [config.python_path, config.run_script, xml_file]
+        if log_path is not None:
+            # 产线语义:gsim 输出(stdout+stderr 合并)全量落盘,不吞;
+            # 失败取日志尾部做 BacktestError 载荷
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "w", encoding="utf-8") as lf:
+                result = subprocess.run(
+                    argv, stdout=lf, stderr=subprocess.STDOUT,
+                    timeout=timeout or config.timeout,
+                    env=env, preexec_fn=_raise_nofile,
+                )
+            if result.returncode != 0:
+                tail = log_path.read_text(encoding="utf-8",
+                                          errors="replace")[-2000:]
+                raise BacktestError(tail)
+            return
         result = subprocess.run(
-            [config.python_path, config.run_script, xml_file],
+            argv,
             capture_output=True,
             text=True,
-            timeout=config.timeout,
+            timeout=timeout or config.timeout,
             env=env,
+            preexec_fn=_raise_nofile,
         )
 
         if result.returncode != 0:

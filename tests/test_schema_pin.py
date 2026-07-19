@@ -18,6 +18,7 @@ def _statements(sql: str) -> list[str]:
 
 
 def test_init_sql_mirrors_store_schemas():
+    from ops.infra.groups.pg_store import _SCHEMA as group_schema
     from ops.infra.info.pg_store import _SCHEMA as info_schema
     from ops.infra.snapshot.pg_store import _SCHEMA as snapshot_schema
     from ops.infra.store.pg_store import _SCHEMA as state_schema
@@ -25,7 +26,8 @@ def test_init_sql_mirrors_store_schemas():
     init_sql = (get_project_root() / "scripts" / "postgres" / "init"
                 / "01-schema.sql").read_text()
 
-    code_side = _statements(info_schema + state_schema + snapshot_schema)
+    code_side = _statements(info_schema + state_schema + snapshot_schema
+                            + group_schema)
     init_side = _statements(init_sql)
     assert init_side == code_side, (
         "init/01-schema.sql 与 pg_store._SCHEMA 漂移 —— 改表结构须两处同改。\n"

@@ -129,6 +129,10 @@ produce:
   pnl_root: /nvme125/alpha_pnl              # D4/D6;与 alphalib alpha_pnl (check 快照字节源) 隔离
   datasvc_prefix: /nvme125    # 归档改写 REPLACE-② 前缀 (Universe 例外内置, 见设计 §4)
   module_prefix: /mnt/storage/alphalib/alpha_src   # D11 @module 跨机稳定前缀 (四机皆有软链)
+  grouped:                    # 分组产线 (docs/design/factor-produce-groups.md);只产 delay1
+    root: /nvme125/production/alpha   # 组工作区 + dump/pnl/pending 全在其下;与旧 dataset 隔离
+    group_size: 500                   # 每组腿数(全史 ~660GB/组,bootstrap 串行;日常续跑远轻)
+    workers: 8                        # 日常组并行数(bootstrap 期 -w 4 覆盖)
 
 # 运行模式
 mode:

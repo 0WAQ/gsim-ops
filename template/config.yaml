@@ -99,6 +99,11 @@ produce:
   pnl_root: /nvme125/alpha_pnl
   datasvc_prefix: /nvme125
   module_prefix: /mnt/storage/alphalib/alpha_src
+  # grouped: 分组产线;root 缺席 = 未启用(--grouped 报错退出,per-factor 不受影响)
+  # grouped:
+  #   root: /nvme125/production/alpha
+  #   group_size: 500
+  #   workers: 8
 
 mode:
   max_workers: 16

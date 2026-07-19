@@ -230,6 +230,8 @@ def _isolated_paths(base: dict, tmp_path: Path, library_id: str) -> None:
         p["pnl_root"] = str(tmp_path / "produce" / "alpha_pnl")
         # 测试环境无 /mnt/storage 软链,@module 稳定前缀指向隔离 alpha_src
         p["module_prefix"] = str(root / "alpha_src")
+        if p.get("grouped"):
+            p["grouped"]["root"] = str(tmp_path / "produce" / "grouped")
 
 
 def _mkdirs(config) -> None:
