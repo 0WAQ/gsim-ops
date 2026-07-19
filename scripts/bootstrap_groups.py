@@ -3,8 +3,8 @@
 
 roster/ordinal 落 PG(produce_group 两表,语义真相),group.xml 与组目录是
 DB 的派生物;code/ 是建组时从 alpha_src 拷贝的冻结副本(组不引用活代码)。
-幂等:已在 active 组的因子跳过,重跑只封 pending 池的新组;gid 发号查库,
-永不复号(重组后的旧组 superseded 也占号)。
+幂等:已在 active 组的因子跳过,重跑只封待产/单产池的新组;封组即转正
+(单产注册移除,单产目录留作冷备)。gid 发号查库,永不复号。
 
 安全模型(仓库红线:破坏性 opt-in):
 - 缺省 dry-run:只出报告 + 首组样品 XML(形态验收用),盘面与库零改动;
@@ -142,8 +142,8 @@ def main() -> int:
 
     built = failed = 0
     if args.apply:
-        # 产线三根随建组一次就位(叶子不在,gsim Stats "不存在才建" 会撞并行竞态)
-        for d in (params.dump_root, params.pnl_root, params.pending_checkpoint_root):
+        # 共享产物根随建组一次就位(叶子不在,gsim Stats "不存在才建" 会撞并行竞态)
+        for d in (params.dump_root, params.pnl_root):
             Path(d).mkdir(parents=True, exist_ok=True)
         for gid, spec, gsim in plan:
             gdir = Path(params.group_dir(spec.author, gid))
@@ -159,6 +159,9 @@ def main() -> int:
                 save_xml(gdir / "group.xml", gsim)
                 repo.create_group(gid, spec.author, spec.delay,
                                   list(spec.members))
+                for name in spec.members:
+                    # 单产 → 组产转正:注册移除(单产目录留作冷备,checkpoint 保留)
+                    repo.remove_single(name)
                 built += 1
             except Exception as e:               # 单组失败不阻断,留现场待查
                 failed += 1

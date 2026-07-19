@@ -1,4 +1,12 @@
-"""分组生产:组划分与组 XML 生成(纯函数,SSOT 锚点见文末不变量)。
+"""分组生产:组划分与组/单产 XML 生成(纯函数,SSOT 锚点见文末不变量)。
+
+三态模型(可生产 = ACTIVE;现行生产闸 delay==1):
+  在产 = in-group(组产,roster 在 PG)+ single-factor(单产,注册表在 PG);
+  pending(待产)= 可生产 − 在产 —— 纯推导,零盘面零库表足迹,只报告不生产。
+组产与单产同构(single = 组大小为 1 的组,以因子名代 gid):冻结代码副本 +
+自有 XML + checkpoint + logs;XML 生成路径不同 —— 组是合并式
+(build_group_xml,sibling 平铺),单产是补丁式(build_single_xml,单 <Alpha>
+原形态保留,用户 2026-07-19 钉死:单产没有 Alphas 容器)。
 
 分组形态 = sibling `<Alpha>` 平铺共享一次 gsim init(日常提速的来源),dump/pnl
 与 per-factor 位级一致(实证:`docs/remediation/BATCH-PRODUCE-MECHANICS-RESULT.md`)。
@@ -22,12 +30,14 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ops.infra.config import Config
 
-ONLY_DELAY = 1  # 当前只生产 delay1;delay0 归 jdw 盘中产线,不进组不进 pending
+ONLY_DELAY = 1  # 当前生产闸 = delay==1(delay0 归 jdw 盘中产线);可生产域 = 全部
+                # ACTIVE,三态模型(组产/单产/待产)与 delay 无关,放开闸即接入 delay0
 
 
 def as_list(node: Any) -> list:
@@ -71,13 +81,15 @@ class GroupParams:
     def pnl_root(self) -> str:
         return f"{self.root.rstrip('/')}/pnl"
 
-    @property
-    def pending_checkpoint_root(self) -> str:
-        return f"{self.root.rstrip('/')}/pending/checkpoint"
+    # -- 单产(single-factor)布局:与组同构,以因子名代 gid;无 pending 目录 --
+    def single_dir(self, author: str, factor: str) -> str:
+        return f"{self.root.rstrip('/')}/single/{author}/delay{ONLY_DELAY}/{factor}"
 
-    @property
-    def pending_log_root(self) -> str:
-        return f"{self.root.rstrip('/')}/pending/logs"
+    def single_checkpoint_dir(self, author: str, factor: str) -> str:
+        return f"{self.single_dir(author, factor)}/checkpoint/"
+
+    def single_log_dir(self, author: str, factor: str) -> str:
+        return f"{self.single_dir(author, factor)}/logs"
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +146,6 @@ def _frozen_module(node: dict, factor: str, code_dir: str) -> None:
     目录名 ≠ .py 名的存量不少,文件名只能沿用原 basename)。"""
     mod = str(node.get("@module") or "")
     if mod.endswith(".py"):
-        from pathlib import Path
         node["@module"] = f"{code_dir}/{factor}/{Path(mod).name}"
 
 
@@ -213,6 +224,34 @@ def build_group_xml(legs: list[tuple[str, dict]],
         }
     }
     return result
+
+
+# ---------------------------------------------------------------------------
+# 单产 XML(补丁式;与组合并式互不通用 —— 单 <Alpha> 原形态保留)
+# ---------------------------------------------------------------------------
+
+def build_single_xml(cfg: dict, params: GroupParams, author: str,
+                     factor: str) -> dict:
+    """单产 XML:归档生产 XML 的补丁式改写。
+
+    四处:@module → 冻结副本(code/ 直挂,单产目录本身已是 per-factor)、
+    checkpointDir → 单产 checkpoint、dumpAlphaDir/pnlDir → 新根。
+    结构、腿属性、Operations/Description 一律不动。
+    """
+    gsim = copy.deepcopy(cfg)["gsim"]
+    gsim["Constants"]["@checkpointDir"] = params.single_checkpoint_dir(author, factor)
+    stats = gsim["Portfolio"]["Stats"]
+    stats["@pnlDir"] = params.pnl_root
+    stats["@dumpPnl"] = "true"
+    leg = gsim["Portfolio"]["Alpha"]
+    leg["@dumpAlphaFile"] = "true"
+    leg["@dumpAlphaDir"] = params.dump_root
+    code = f"{params.single_dir(author, factor)}/code"
+    for mod in as_list(gsim.get("Modules", {}).get("Alpha")):
+        m = str(mod.get("@module") or "")
+        if m.endswith(".py"):
+            mod["@module"] = f"{code}/{Path(m).name}"
+    return {"gsim": gsim}
 
 
 # ---------------------------------------------------------------------------

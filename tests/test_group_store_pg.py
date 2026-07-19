@@ -59,6 +59,21 @@ def test_supersede_keeps_roster_but_vacates_membership(test_config):
     assert "g103" in [g.gid for g in store.list_groups(active_only=False)]
 
 
+def test_single_registry(test_config):
+    _, config = test_config
+    store = PostgresGroupStore(config.state_postgres_conninfo)
+
+    store.admit_single("AlphaS1", "wbai")
+    store.admit_single("AlphaS2", "lhw")
+    store.admit_single("AlphaS1", "wbai")          # 幂等:重准入不炸不重复
+
+    assert [(s.factor, s.author) for s in store.list_singles()] == [
+        ("AlphaS1", "wbai"), ("AlphaS2", "lhw")]
+    store.remove_single("AlphaS1")
+    assert [(s.factor, s.author) for s in store.list_singles()] == [
+        ("AlphaS2", "lhw")]
+
+
 def test_repository_group_facade_and_ungrouped(test_config, seed_factor):
     _, config = test_config
     repo = FactorRepository(config)

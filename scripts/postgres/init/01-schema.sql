@@ -105,3 +105,8 @@ CREATE TABLE IF NOT EXISTS produce_group_member (
     CONSTRAINT uq_pgm_gid_ordinal UNIQUE (gid, ordinal)
 );
 CREATE INDEX IF NOT EXISTS ix_pgm_factor ON produce_group_member(factor);
+CREATE TABLE IF NOT EXISTS produce_single (
+    factor TEXT PRIMARY KEY,
+    author TEXT NOT NULL,
+    admitted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

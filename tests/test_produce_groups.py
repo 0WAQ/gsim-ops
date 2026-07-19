@@ -1,9 +1,9 @@
-"""ops produce --grouped 单测:json 后端 + FakeRepo(组 roster PG-only,内存仿)
-+ fake backtest,无需 PG / gsim。
+"""ops produce --grouped 单测(三态:组产/单产/待产)。
 
-覆盖:sync 静音/解静音/漂移/不变量校验、pending 归类、pre-check 自动静音、
-组与 pending 的运行与落点、失败退出码、dry-run。组 XML 由真实
-core/prodgroup.build_group_xml 生成(生成路径即被测路径)。
+json 后端 + FakeRepo(roster/单产注册内存仿)+ fake backtest,无需 PG / gsim。
+覆盖:sync 组侧(静音/解静音/漂移降级转单产/不变量校验)、单产侧(离库移除/
+漂移重冻结)、待产推导、准入(--single-only 点名)、运行落点与退出码。
+组 XML 由真实 core/prodgroup 生成(生成路径即被测路径)。
 """
 import argparse
 from pathlib import Path
@@ -14,10 +14,15 @@ import pytest
 import xmltodict
 
 import ops.services.produce.groups as groups_mod
-from ops.core.prodgroup import GroupParams, as_list, build_group_xml, group_legs
+from ops.core.prodgroup import GroupParams, as_list, build_group_xml
 from ops.core.state import FactorRecord, FactorStatus
-from ops.infra.groups.pg_store import GroupMember, ProduceGroup
-from ops.services.produce.groups import _run_pending, run_produce_groups, sync_groups
+from ops.infra.groups.pg_store import GroupMember, ProduceGroup, ProduceSingle
+from ops.services.produce.groups import (
+    _admit_single,
+    _run_single,
+    run_produce_groups,
+    sync_groups,
+)
 from ops.utils.xmlio import load_xml, save_xml
 
 
@@ -40,18 +45,29 @@ def _factor_cfg(name: str, delay: str = "1") -> dict:
 
 
 class _FakeRepo:
-    """组 roster 的内存替身(PG store 的真身测试在 test_repository/pg 系)。"""
-    def __init__(self, active, roster, records=None):
+    """roster + 单产注册的内存替身(PG store 真身测试在 test_group_store_pg)。"""
+    def __init__(self, active, roster, records=None, singles=None):
         # active: [(name, author, delay)];roster: {gid: (author, [(factor, muted)])}
         self._active = active
         self._roster = {g: (a, list(legs)) for g, (a, legs) in roster.items()}
         self._records = records or {}
+        self._singles = dict(singles or {})      # factor -> author
 
     def find(self, status=None, **kw):
         return [SimpleNamespace(name=n, identity=SimpleNamespace(author=a),
                                 snapshot=SimpleNamespace(delay=d))
                 for n, a, d in self._active if status in (None, "active")]
 
+    def get(self, name):
+        for n, a, _ in self._active:
+            if n == name:
+                return SimpleNamespace(identity=SimpleNamespace(author=a))
+        return None
+
+    def record(self, name):
+        return self._records.get(name)
+
+    # -- 组 --
     def group_membership(self):
         return {f: gid for gid, (_, legs) in self._roster.items() for f, _ in legs}
 
@@ -67,15 +83,23 @@ class _FakeRepo:
         self._roster[gid] = (self._roster[gid][0], [
             (f, muted if f in factors else m) for f, m in self._roster[gid][1]])
 
-    def record(self, name):
-        return self._records.get(name)
+    # -- 单产 --
+    def admit_single(self, factor, author):
+        self._singles[factor] = author
+
+    def remove_single(self, factor):
+        self._singles.pop(factor, None)
+
+    def singles(self):
+        return [ProduceSingle(factor=f, author=a)
+                for f, a in sorted(self._singles.items())]
 
 
 def _active_record(name):
     return FactorRecord(name=name, status=FactorStatus.ACTIVE,
-                        updated_at="2026-07-18T00:00:00",
-                        submitted_at="2026-07-18T00:00:00",
-                        entered_at="2026-07-18T00:00:00")
+                        updated_at="2026-07-19T00:00:00",
+                        submitted_at="2026-07-19T00:00:00",
+                        entered_at="2026-07-19T00:00:00")
 
 
 def _mk_factor(config, name: str, delay: str = "1",
@@ -105,7 +129,7 @@ def _mk_group(config, author: str, gid: str, members: list[str],
 
 
 def _fake_backtest(seen: list):
-    """替身 gsim:组 XML 按腿写 dump(sibling 形态,per-leg 落盘)。"""
+    """替身 gsim:按 XML 的腿写 dump(组 sibling / 单产单 Alpha 通吃)。"""
     def _run(xml_file, cfg, timeout=None, log_path=None):
         seen.append(Path(xml_file))
         g = load_xml(Path(xml_file))["gsim"]
@@ -121,7 +145,7 @@ def _fake_backtest(seen: list):
 
 def _args(cfg_path, **kw):
     base = dict(config_path=cfg_path, grouped=True, dry_run=False,
-                sync_only=False, skip_pending=False, pending_only=False,
+                sync_only=False, groups_only=False, single_only=None,
                 workers=1, timeout=None)
     base.update(kw)
     return argparse.Namespace(**base)
@@ -137,10 +161,10 @@ def env(json_config, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# sync
+# sync:组侧
 # ---------------------------------------------------------------------------
 
-def test_sync_mutes_left_active_and_code_drift(env):
+def test_sync_mutes_left_and_demotes_drift_to_single(env):
     cfg_path, config, install = env
     for n in ("AlphaA", "AlphaB", "AlphaC"):
         _mk_factor(config, n)
@@ -152,40 +176,42 @@ def test_sync_mutes_left_active_and_code_drift(env):
         roster={"g001": ("wbai", [("AlphaA", False), ("AlphaB", False),
                                   ("AlphaC", False)])})
     install(fake)
+    params = GroupParams.maybe_from_config(config)
 
-    notes, corrupted, pending = sync_groups(fake, GroupParams.maybe_from_config(config),
-                                            config)
+    _, corrupted, pending = sync_groups(fake, params, config)
 
     assert corrupted == []
     members = {m.factor: m.muted for m in fake.group_members("g001")}
     assert members == {"AlphaA": False, "AlphaB": True, "AlphaC": True}
-    cfg = load_xml(Path(GroupParams.maybe_from_config(config)
-                        .group_dir("wbai", "g001")) / "group.xml")
-    assert group_legs(cfg) == ["AlphaA", "AlphaB", "AlphaC"]     # 序不动
-    flags = {a["@id"]: a["@dumpAlphaFile"]
-             for a in cfg["gsim"]["Portfolio"]["Alpha"]}
-    assert flags == {"AlphaA": "true", "AlphaB": "false", "AlphaC": "false"}
+    # 漂移降级:AlphaC 组内静音 + 注册单产,单产目录三件套就位
+    assert "AlphaC" in fake._singles
+    sdir = Path(params.single_dir("wbai", "AlphaC"))
+    assert (sdir / "AlphaC.xml").is_file()
+    assert (sdir / "code" / "AlphaC.py").read_text() == "X = 2\n"   # 冻结的是新代码
+    assert (sdir / "checkpoint").is_dir()
+    # 单产 XML:补丁式 —— 单 Alpha 形态,落点全部指新根
+    g = load_xml(sdir / "AlphaC.xml")["gsim"]
+    assert g["Portfolio"]["Alpha"]["@id"] == "AlphaC"
+    assert g["Portfolio"]["Alpha"]["@dumpAlphaDir"] == params.dump_root
+    assert g["Constants"]["@checkpointDir"].startswith(str(sdir))
     assert pending == []
-    assert any("静音" in n for n in notes)
 
 
-def test_sync_unmutes_returned_factor(env):
+def test_sync_unmutes_returned_and_removes_from_single(env):
     cfg_path, config, install = env
     _mk_factor(config, "AlphaA")
-    _mk_group(config, "wbai", "g001", ["AlphaA"])
-    # 同一副本被换掉 → 组里改回与 alpha_src 一致(模拟回库且代码未变)
-    gdir = Path(GroupParams.maybe_from_config(config).group_dir("wbai", "g001"))
-    (gdir / "code" / "AlphaA" / "AlphaA.py").write_text("X = 1\n")
+    gdir = _mk_group(config, "wbai", "g001", ["AlphaA"])
     fake = _FakeRepo(active=[("AlphaA", "wbai", 1)],
-                     roster={"g001": ("wbai", [("AlphaA", True)])})
+                     roster={"g001": ("wbai", [("AlphaA", True)])},
+                     singles={"AlphaA": "wbai"})
     install(fake)
 
     sync_groups(fake, GroupParams.maybe_from_config(config), config)
 
     assert fake.group_members("g001")[0].muted is False
+    assert "AlphaA" not in fake._singles          # 一个因子只有一个生产之家
     cfg = load_xml(gdir / "group.xml")
-    alphas = as_list(cfg["gsim"]["Portfolio"]["Alpha"])
-    assert alphas[0]["@dumpAlphaFile"] == "true"
+    assert as_list(cfg["gsim"]["Portfolio"]["Alpha"])[0]["@dumpAlphaFile"] == "true"
 
 
 def test_sync_order_mismatch_is_corrupted(env):
@@ -193,7 +219,6 @@ def test_sync_order_mismatch_is_corrupted(env):
     _mk_factor(config, "AlphaA")
     _mk_factor(config, "AlphaB")
     gdir = _mk_group(config, "wbai", "g001", ["AlphaA", "AlphaB"])
-    # 手改 XML 换腿序 → 与 DB ordinal 不一致 = 现场被改过
     cfg = load_xml(gdir / "group.xml")
     alphas = cfg["gsim"]["Portfolio"]["Alpha"]
     alphas[0], alphas[1] = alphas[1], alphas[0]
@@ -206,49 +231,126 @@ def test_sync_order_mismatch_is_corrupted(env):
     assert corrupted == ["g001"]
 
 
-def test_pending_only_new_delay1(env):
+def test_pending_excludes_grouped_and_singles(env):
     cfg_path, config, install = env
     _mk_factor(config, "AlphaA")
+    _mk_factor(config, "AlphaS")
     _mk_group(config, "wbai", "g001", ["AlphaA"])
     fake = _FakeRepo(
         active=[("AlphaA", "wbai", 1), ("AlphaNew", "wbai", 1),
-                ("AlphaD0", "wbai", 0)],                      # delay0 不进 pending
-        roster={"g001": ("wbai", [("AlphaA", False)])})
+                ("AlphaS", "wbai", 1), ("AlphaD0", "wbai", 0)],
+        roster={"g001": ("wbai", [("AlphaA", False)])},
+        singles={"AlphaS": "wbai"})
     install(fake)
 
     _, _, pending = sync_groups(fake, GroupParams.maybe_from_config(config), config)
-    assert pending == ["AlphaNew"]
+    assert pending == ["AlphaNew"]          # 组产/单产/delay0 都不在待产
+
+
+# ---------------------------------------------------------------------------
+# sync:单产侧
+# ---------------------------------------------------------------------------
+
+def test_single_removed_when_leaves_active(env):
+    cfg_path, config, install = env
+    fake = _FakeRepo(active=[], roster={}, singles={"AlphaOld": "wbai"})
+    install(fake)
+    params = GroupParams.maybe_from_config(config)
+    Path(params.single_dir("wbai", "AlphaOld")).mkdir(parents=True)
+
+    sync_groups(fake, params, config)
+    assert "AlphaOld" not in fake._singles
+
+
+def test_single_drift_refresh_deletes_checkpoint(env):
+    cfg_path, config, install = env
+    _mk_factor(config, "AlphaS", code="X = 1\n")
+    fake = _FakeRepo(active=[("AlphaS", "wbai", 1)], roster={})
+    install(fake)
+    params = GroupParams.maybe_from_config(config)
+    _admit_single("AlphaS", fake, params, config)       # 按旧代码 X=1 准入
+    (config.alpha_src / "AlphaS" / "AlphaS.py").write_text("X = 2\n")   # 重入库
+    sdir = Path(params.single_dir("wbai", "AlphaS"))
+    ck = sdir / "checkpoint" / "archive.bin"
+    ck.write_text("stale")
+
+    sync_groups(fake, params, config)
+
+    assert not ck.exists()                              # 漂移 = 删 checkpoint 全段重跑
+    assert (sdir / "code" / "AlphaS.py").read_text() == "X = 2\n"   # 重冻结新代码
 
 
 # ---------------------------------------------------------------------------
 # run
 # ---------------------------------------------------------------------------
 
-def test_run_groups_and_pending_end_to_end(env, monkeypatch):
+def test_run_default_groups_and_singles(env, monkeypatch):
     cfg_path, config, install = env
-    for n in ("AlphaA", "AlphaB", "AlphaNew"):
-        _mk_factor(config, n)
-    gdir = _mk_group(config, "wbai", "g001", ["AlphaA", "AlphaB"])
-    fake = _FakeRepo(
-        active=[("AlphaA", "wbai", 1), ("AlphaB", "wbai", 1), ("AlphaNew", "wbai", 1)],
-        roster={"g001": ("wbai", [("AlphaA", False), ("AlphaB", False)])},
-        records={"AlphaNew": _active_record("AlphaNew")})
+    _mk_factor(config, "AlphaA")
+    _mk_factor(config, "AlphaS")
+    gdir = _mk_group(config, "wbai", "g001", ["AlphaA"])
+    fake = _FakeRepo(active=[("AlphaA", "wbai", 1), ("AlphaS", "wbai", 1)],
+                     roster={"g001": ("wbai", [("AlphaA", False)])},
+                     records={"AlphaS": _active_record("AlphaS")})
     install(fake)
+    params = GroupParams.maybe_from_config(config)
+    _admit_single("AlphaS", fake, params, config)
     seen: list = []
     monkeypatch.setattr(groups_mod, "Runner",
                         SimpleNamespace(run_backtest=_fake_backtest(seen)))
 
     run_produce_groups(_args(cfg_path))
 
-    assert seen[0] == gdir / "group.xml"                    # 组跑的是组 XML 本尊
-    assert seen[1] != gdir / "group.xml"                    # pending 跑的是临时副本
+    assert seen[0] == gdir / "group.xml"
+    assert seen[1] == Path(params.single_dir("wbai", "AlphaS")) / "AlphaS.xml"
+    assert (Path(params.dump_root) / "AlphaS" / "2026" / "07"
+            / "20260717v2.npy").exists()
+
+
+def test_groups_only_skips_singles(env, monkeypatch):
+    cfg_path, config, install = env
+    _mk_factor(config, "AlphaA")
+    _mk_factor(config, "AlphaS")
+    gdir = _mk_group(config, "wbai", "g001", ["AlphaA"])
+    fake = _FakeRepo(active=[("AlphaA", "wbai", 1), ("AlphaS", "wbai", 1)],
+                     roster={"g001": ("wbai", [("AlphaA", False)])},
+                     singles={"AlphaS": "wbai"})
+    install(fake)
     params = GroupParams.maybe_from_config(config)
-    assert (Path(params.dump_root) / "AlphaA" / "2026" / "07"
-            / "20260717v2.npy").exists()
-    assert (Path(params.dump_root) / "AlphaNew" / "2026" / "07"
-            / "20260717v2.npy").exists()
-    # pending 的 checkpoint 落 pending 根,不碰旧 dataset 侧
-    assert (Path(params.pending_checkpoint_root) / "AlphaNew").is_dir()
+    _admit_single("AlphaS", fake, params, config)
+    seen: list = []
+    monkeypatch.setattr(groups_mod, "Runner",
+                        SimpleNamespace(run_backtest=_fake_backtest(seen)))
+
+    run_produce_groups(_args(cfg_path, groups_only=True))
+
+    assert seen == [gdir / "group.xml"]
+
+
+def test_single_only_named_admits_pending(env, monkeypatch):
+    """点名 pending 因子:先准入(冻结 + XML + 注册)再跑;组不碰。"""
+    cfg_path, config, install = env
+    _mk_factor(config, "AlphaA")
+    _mk_factor(config, "AlphaNew")
+    gdir = _mk_group(config, "wbai", "g001", ["AlphaA"])
+    fake = _FakeRepo(
+        active=[("AlphaA", "wbai", 1), ("AlphaNew", "wbai", 1)],
+        roster={"g001": ("wbai", [("AlphaA", False)])},
+        records={"AlphaNew": _active_record("AlphaNew")})
+    install(fake)
+    params = GroupParams.maybe_from_config(config)
+    seen: list = []
+    monkeypatch.setattr(groups_mod, "Runner",
+                        SimpleNamespace(run_backtest=_fake_backtest(seen)))
+
+    run_produce_groups(_args(cfg_path, single_only=["AlphaNew"]))
+
+    assert "AlphaNew" in fake._singles
+    sdir = Path(params.single_dir("wbai", "AlphaNew"))
+    assert seen == [sdir / "AlphaNew.xml"]
+    assert seen != [gdir / "group.xml"]
+    with pytest.raises(SystemExit):
+        run_produce_groups(_args(cfg_path, single_only=[], groups_only=True))
 
 
 def test_run_failure_exit_code(env, monkeypatch):
@@ -286,10 +388,6 @@ def test_precheck_auto_mutes_bad_leg(env, monkeypatch):
 
     members = {m.factor: m.muted for m in fake.group_members("g001")}
     assert members == {"AlphaA": False, "AlphaB": True}
-    cfg = load_xml(gdir / "group.xml")
-    flags = {a["@id"]: a["@dumpAlphaFile"]
-             for a in cfg["gsim"]["Portfolio"]["Alpha"]}
-    assert flags == {"AlphaA": "true", "AlphaB": "false"}
     assert seen == [gdir / "group.xml"]                    # 坏腿静音后组照跑
 
 
@@ -310,72 +408,30 @@ def test_dry_run_never_runs_gsim(env, monkeypatch):
     run_produce_groups(_args(cfg_path, sync_only=True))
 
 
-def test_skip_pending_runs_groups_only(env, monkeypatch):
-    """试点口径:--skip-pending 只跑已封的组,pending 一个不碰。"""
+def test_run_single_xml_is_patched_to_new_roots(env, monkeypatch):
+    """单产 XML 是补丁式:单 Alpha 形态保留,checkpoint/dump/pnl 全指新根。"""
     cfg_path, config, install = env
-    _mk_factor(config, "AlphaA")
-    _mk_factor(config, "AlphaNew")
-    gdir = _mk_group(config, "wbai", "g001", ["AlphaA"])
-    fake = _FakeRepo(
-        active=[("AlphaA", "wbai", 1), ("AlphaNew", "wbai", 1)],
-        roster={"g001": ("wbai", [("AlphaA", False)])},
-        records={"AlphaNew": _active_record("AlphaNew")})
+    _mk_factor(config, "AlphaS")
+    fake = _FakeRepo(active=[("AlphaS", "wbai", 1)], roster={},
+                     records={"AlphaS": _active_record("AlphaS")})
     install(fake)
-    seen: list = []
-    monkeypatch.setattr(groups_mod, "Runner",
-                        SimpleNamespace(run_backtest=_fake_backtest(seen)))
-
-    run_produce_groups(_args(cfg_path, skip_pending=True))
-
-    assert seen == [gdir / "group.xml"]
-
-
-def test_pending_only_skips_groups_and_mutex(env, monkeypatch):
-    """--pending-only:只跑 pending 池(新增因子),组一个不碰;
-    与 --skip-pending 互斥(语义矛盾直接拒)。"""
-    cfg_path, config, install = env
-    _mk_factor(config, "AlphaA")
-    _mk_factor(config, "AlphaNew")
-    gdir = _mk_group(config, "wbai", "g001", ["AlphaA"])
-    fake = _FakeRepo(
-        active=[("AlphaA", "wbai", 1), ("AlphaNew", "wbai", 1)],
-        roster={"g001": ("wbai", [("AlphaA", False)])},
-        records={"AlphaNew": _active_record("AlphaNew")})
-    install(fake)
-    seen: list = []
-    monkeypatch.setattr(groups_mod, "Runner",
-                        SimpleNamespace(run_backtest=_fake_backtest(seen)))
-
-    run_produce_groups(_args(cfg_path, pending_only=True))
-
-    assert len(seen) == 1 and seen[0] != gdir / "group.xml"   # 只有 pending 临时副本
-
-    with pytest.raises(SystemExit):
-        run_produce_groups(_args(cfg_path, pending_only=True, skip_pending=True))
-
-
-def test_pending_worker_rewrites_roots_to_new_production(env, monkeypatch):
-    """pending 的归档 XML 指旧 dataset,临时副本必须把三根改指新根。"""
-    cfg_path, config, install = env
-    _mk_factor(config, "AlphaNew")
-    fake = _FakeRepo(active=[("AlphaNew", "wbai", 1)], roster={},
-                     records={"AlphaNew": _active_record("AlphaNew")})
-    install(fake)
+    params = GroupParams.maybe_from_config(config)
+    _admit_single("AlphaS", fake, params, config)
     seen: list = []
 
     def _spy(xml_file, cfg, timeout=None, log_path=None):
         g = load_xml(Path(xml_file))["gsim"]
-        seen.append((g["Constants"]["@checkpointDir"],
-                     g["Portfolio"]["Alpha"]["@dumpAlphaDir"],
-                     g["Portfolio"]["Stats"]["@pnlDir"]))
+        seen.append(g)
 
     monkeypatch.setattr(groups_mod, "Runner", SimpleNamespace(run_backtest=_spy))
-    params = GroupParams.maybe_from_config(config)
+    name, status, _ = _run_single("AlphaS", "wbai", config)
 
-    name, status, _ = _run_pending("AlphaNew", config)
-
-    assert status == "ok" or name == "AlphaNew"
-    ckdir, dumpdir, pnldir = seen[0]
-    assert ckdir.startswith(params.pending_checkpoint_root)
-    assert dumpdir == params.dump_root and pnldir == params.pnl_root
-    assert "/nvme125/alpha_dump" not in dumpdir          # 绝不落旧 dataset
+    assert status == "ok" or name == "AlphaS"
+    g = seen[0]
+    assert not isinstance(g["Portfolio"]["Alpha"], list)     # 单 Alpha 形态
+    assert g["Constants"]["@checkpointDir"].endswith(
+        "single/wbai/delay1/AlphaS/checkpoint/")
+    assert g["Portfolio"]["Alpha"]["@dumpAlphaDir"] == params.dump_root
+    assert g["Portfolio"]["Stats"]["@pnlDir"] == params.pnl_root
+    assert g["Modules"]["Alpha"]["@module"].startswith(
+        str(Path(params.root) / "single"))

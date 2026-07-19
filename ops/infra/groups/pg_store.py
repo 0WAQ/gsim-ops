@@ -26,6 +26,11 @@ CREATE TABLE IF NOT EXISTS produce_group_member (
     CONSTRAINT uq_pgm_gid_ordinal UNIQUE (gid, ordinal)
 );
 CREATE INDEX IF NOT EXISTS ix_pgm_factor ON produce_group_member(factor);
+CREATE TABLE IF NOT EXISTS produce_single (
+    factor TEXT PRIMARY KEY,
+    author TEXT NOT NULL,
+    admitted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 
@@ -43,6 +48,13 @@ class GroupMember:
     factor: str
     ordinal: int
     muted: bool = False
+
+
+@dataclass(frozen=True)
+class ProduceSingle:
+    """单产注册行(在产 per-factor 形态;pending(待产)无行 —— 待产纯推导)。"""
+    factor: str
+    author: str
 
 
 class PostgresGroupStore:
@@ -103,3 +115,27 @@ class PostgresGroupStore:
             conn.execute(
                 "UPDATE produce_group SET status = 'superseded' WHERE gid = %s",
                 (gid,))
+
+    # ------------------------------------------------------------------
+    # 单产注册表(produce_single)
+    # ------------------------------------------------------------------
+
+    def admit_single(self, factor: str, author: str) -> None:
+        """pending → single 准入(幂等:重复准入 = 刷新 admitted_at)。"""
+        with self.pool.connection() as conn:
+            conn.execute(
+                "INSERT INTO produce_single (factor, author) VALUES (%s, %s)"
+                " ON CONFLICT (factor) DO UPDATE SET"
+                " author = EXCLUDED.author, admitted_at = now()",
+                (factor, author))
+
+    def remove_single(self, factor: str) -> None:
+        """退回 pending(离 ACTIVE / 封组转正);删行即退,不留墓碑。"""
+        with self.pool.connection() as conn:
+            conn.execute("DELETE FROM produce_single WHERE factor = %s", (factor,))
+
+    def list_singles(self) -> list[ProduceSingle]:
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT factor, author FROM produce_single ORDER BY factor").fetchall()
+        return [ProduceSingle(factor=r[0], author=r[1]) for r in rows]

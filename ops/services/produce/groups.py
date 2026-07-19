@@ -1,27 +1,27 @@
-"""分组产线驱动(`ops produce --grouped`)—— sync + pre-check + run。
+"""分组产线驱动(`ops produce --grouped`)—— 三态:组产 / 单产 / 待产。
 
-设计正主 `docs/design/factor-produce-groups.md`,不变量在 `ops/core/prodgroup.py`
-(roster/顺序冻结,唯一合法编辑 = 单腿 `dumpAlphaFile` 属性翻转)。组拓扑的
-SSOT 是 PG 两表(roster/ordinal/muted);盘面 group.xml 是**派生物**——sync 的
-职责就是让 XML 收敛到 DB 状态,并校验"DB 序 == XML 腿序"这条承重不变量。
+状态模型(正主 `docs/design/factor-produce-groups.md`;可生产 = ACTIVE,
+现行生产闸 delay==1):
+  在产 = in-group(组产,roster 在 PG)+ single-factor(单产,注册表在 PG);
+  pending(待产)= 可生产 − 在产 —— 纯推导,只报告**永不生产**(新到因子
+  天然屏蔽)。状态转移:pending → 单产 = 显式点名(人工闸);→ 组产 =
+  bootstrap 封组;组产 → 单产 = 代码漂移自动降级(产线连续性);
+  单产重漂移 = 重冻结 + 删 checkpoint 全段重跑。准入幂等,重准入 = 重冻结。
 
-sync(每次跑前):
-  ① 不变量校验:DB roster 序 == group.xml 腿序;不一致 = 现场被手改过,
-    该组跳过并响亮报(绝不带病跑 —— 序号错位 = 静默污染);
-  ② 静音收敛:腿不在 delay1 ACTIVE、或冻结副本与 alpha_src 漂移(= 重入库)
-    → 置 muted;回库且代码一致的腿解除静音(muted 只翻属性,序号不动);
-  ③ pending:delay1 ACTIVE 不在任何 active 组 → pending 池(per-factor 跑,
-    临时副本把 dump/pnl/checkpoint 指到新根)。
-pre-check:未静音腿的冻结 .py 存在 + py_compile 可编译;坏腿自动静音(gsim
-无腿级容错,一条坏腿整组死)。只能查语法/存在性,import 级错误由首跑暴露,
-故障域限于单组。
-run:逐组 `factor_lock(group:<gid>)` → run_cp.py checkpoint 续跑;首跑
-savedi=0 天然全史 = bootstrap。单组失败不阻断;失败 >0 退出码 1(cron 判据)。
+sync(每次跑前,DB/XML/ACTIVE 三方收敛):
+  ① 组:DB roster 序 == group.xml 腿序(不一致 = 现场被改过,跳过响亮报);
+    腿不在 delay1 ACTIVE 或冻结副本漂移 → 静音;回库且代码一致 → 解除静音;
+  ② 单产:离 ACTIVE → 注册移除(退回待产);冻结副本漂移 → 重冻结;
+  ③ 待产 = delay1 ACTIVE − roster − 单产注册表,只计数报告。
+
+run:逐组/逐单 run_cp.py checkpoint 续跑;组级锁 group:<gid>,单产锁因子名。
+pre-check 只护组(组 = 故障域,单腿炸整组死);单产是大小为 1 的故障域,
+失败自含。gsim 输出全量落盘(组 logs/ 与单产 logs/)。失败 >0 退出码 1。
 """
 from __future__ import annotations
 
 import filecmp
-import tempfile
+import shutil
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
@@ -33,6 +33,7 @@ from ops.core.prodgroup import (
     ONLY_DELAY,
     GroupParams,
     as_list,
+    build_single_xml,
     group_legs,
     mute_legs,
 )
@@ -93,6 +94,47 @@ def _precheck_leg(code_file: Path) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# 单产准入 / 重冻结
+# ---------------------------------------------------------------------------
+
+def _admit_single(name: str, repo: FactorRepository, params: GroupParams,
+                  config: Config) -> None:
+    """pending/drift → 单产准入:冻结副本 + 生成单产 XML + 注册。
+
+    幂等:重准入 = 重冻结 + 重建 XML。checkpoint 默认保留(代码未变的重准入
+    不该清状态);drift 重冻结见 _refresh_single —— 先删 checkpoint 再重准入,
+    全段重跑。
+    """
+    factor = repo.get(name)
+    if factor is None:
+        raise SystemExit(f"单产准入: {name} 无记录")
+    author = factor.identity.author or ""
+    src = FactorPaths.of(name, config).src
+    xmls = sorted(src.glob("*.xml"))
+    if not xmls:
+        raise SystemExit(f"单产准入: {name} alpha_src 无 XML({src})")
+    sdir = Path(params.single_dir(author, name))
+    (sdir / "checkpoint").mkdir(parents=True, exist_ok=True)
+    (sdir / "logs").mkdir(parents=True, exist_ok=True)
+    code = sdir / "code"
+    if code.exists():
+        shutil.rmtree(code)
+    shutil.copytree(src, code)
+    save_xml(sdir / f"{name}.xml",
+             build_single_xml(load_xml(xmls[0]), params, author, name))
+    repo.admit_single(name, author)
+
+
+def _refresh_single(name: str, author: str, repo: FactorRepository,
+                    params: GroupParams, config: Config) -> None:
+    """单产代码漂移 = 重冻结:删 checkpoint(全段重跑)+ 重准入。"""
+    ck = Path(params.single_checkpoint_dir(author, name))
+    if ck.exists():
+        shutil.rmtree(ck)
+    _admit_single(name, repo, params, config)
+
+
+# ---------------------------------------------------------------------------
 # sync
 # ---------------------------------------------------------------------------
 
@@ -103,6 +145,7 @@ def sync_groups(repo: FactorRepository, params: GroupParams, config: Config,
     corrupted: list[str] = []
     active_d1 = _active_delay1(repo)
     membership = repo.group_membership()
+    singles = {s.factor for s in repo.singles()}
 
     for g in repo.groups():
         gdir = Path(params.group_dir(g.author, g.gid))
@@ -120,13 +163,22 @@ def sync_groups(repo: FactorRepository, params: GroupParams, config: Config,
             notes.append(f"✘ {g.gid}({g.author}): DB 序 ≠ XML 腿序(现场被改过?),跳过")
             continue
 
-        desired_muted = {f for f in db_order
-                         if f not in active_d1
-                         or _code_drifted(gdir / "code" / f,
-                                          FactorPaths.of(f, config).src)}
-        # 回库且代码一致的腿允许解除静音(muted 是属性,序号未动,checkpoint 安全)
+        drifted = {f for f in db_order
+                   if f in active_d1
+                   and _code_drifted(gdir / "code" / f, FactorPaths.of(f, config).src)}
+        desired_muted = {f for f in db_order if f not in active_d1 or f in drifted}
         to_mute = desired_muted - muted_db
         to_unmute = (muted_db - desired_muted) & active_d1
+        # 漂移降级:仍在 ACTIVE 但代码漂移 → 组内静音 + 转单产(自动,产线连续性)
+        for f in sorted(drifted - singles):
+            _admit_single(f, repo, params, config)
+            singles.add(f)
+            notes.append(f"↓ {f}: 代码漂移,组内静音并转单产")
+        # 回组(unmute):若曾在单产,注册移除 —— 一个因子只有一个生产之家
+        for f in sorted(to_unmute & singles):
+            repo.remove_single(f)
+            singles.discard(f)
+            notes.append(f"↑ {f}: 回组生产,单产注册移除")
         if to_mute:
             repo.set_group_muted(g.gid, to_mute, True)
             mute_legs(cfg, to_mute, mute=True)
@@ -138,12 +190,25 @@ def sync_groups(repo: FactorRepository, params: GroupParams, config: Config,
             notes.append(f"⊘ {g.gid}({g.author}): 静音 {sorted(to_mute) or '—'}"
                          f" / 解除 {sorted(to_unmute) or '—'}")
 
-    pending = sorted(n for n in active_d1 if n not in membership)
+    # 单产收敛:离 ACTIVE 移除;漂移重冻结(刚准入的已是最新,跳过)
+    for s in repo.singles():
+        if s.factor not in active_d1:
+            repo.remove_single(s.factor)
+            notes.append(f"⊝ {s.factor}: 不在 delay1 ACTIVE,单产注册移除(退回待产)")
+            continue
+        if s.factor in singles and _code_drifted(
+                Path(params.single_dir(s.author, s.factor)) / "code",
+                FactorPaths.of(s.factor, config).src):
+            _refresh_single(s.factor, s.author, repo, params, config)
+            notes.append(f"↻ {s.factor}: 代码漂移,单产重冻结(全段重跑)")
+
+    pending = sorted(n for n in active_d1
+                     if n not in membership and n not in singles)
     return notes, corrupted, pending
 
 
 # ---------------------------------------------------------------------------
-# run(组 / pending;worker 须顶层,ProcessPool 要 pickle)
+# run(组 / 单产;worker 须顶层,ProcessPool 要 pickle)
 # ---------------------------------------------------------------------------
 
 def _run_group(gid: str, author: str, config: Config,
@@ -166,38 +231,29 @@ def _run_group(gid: str, author: str, config: Config,
         return (gid, "failed", ("…" + msg[-300:]) if len(msg) > 300 else msg)
 
 
-def _run_pending(name: str, config: Config,
-                 timeout: int | None = None) -> tuple[str, str, str]:
-    """pending 池 per-factor:临时副本把 dump/pnl/checkpoint 指到新根
-    (归档 XML 指旧 dataset —— 绝不能直跑,产出会落进 cchang 侧)。"""
+def _run_single(name: str, author: str, config: Config,
+                timeout: int | None = None) -> tuple[str, str, str]:
+    """单产续跑(单 <Alpha> 形态;故障域 = 自己)。status 同 _run_group。"""
     params = _params_of(config)
+    sdir = Path(params.single_dir(author, name))
     try:
         with factor_lock(name, config):
             rec = FactorRepository(config).record(name)
             if rec is None or rec.status != FactorStatus.ACTIVE:
                 got = rec.status.value if rec else "无记录"
                 return (name, "skipped", f"状态已变: {got}")
-            xmls = sorted(FactorPaths.of(name, config).src.glob("*.xml"))
-            if not xmls:
-                return (name, "failed", "alpha_src 无 XML")
-            ck = Path(params.pending_checkpoint_root) / name
-            ck.mkdir(parents=True, exist_ok=True)
-            log = Path(params.pending_log_root) / f"{name}-{datetime.now():%Y%m%d-%H%M%S}.log"
-            with tempfile.TemporaryDirectory(prefix="ops-produce-pending-") as td:
-                cfg = load_xml(xmls[0])
-                cfg["gsim"]["Constants"]["@checkpointDir"] = str(ck) + "/"
-                cfg["gsim"]["Portfolio"]["Alpha"]["@dumpAlphaDir"] = params.dump_root
-                cfg["gsim"]["Portfolio"]["Stats"]["@pnlDir"] = params.pnl_root
-                tmp_xml = Path(td) / xmls[0].name
-                save_xml(tmp_xml, cfg)
-                Runner.run_backtest(tmp_xml, config, timeout=timeout, log_path=log)
+            xml = sdir / f"{name}.xml"
+            if not xml.is_file():
+                return (name, "failed", f"单产 XML 缺失({xml}),未准入?")
+            log = sdir / "logs" / f"{datetime.now():%Y%m%d-%H%M%S}.log"
+            Runner.run_backtest(xml, config, timeout=timeout, log_path=log)
             latest = max(dump_dates(Path(params.dump_root) / name), default=None)
             detail = f"dump 至 {latest}" if latest else "⚠ dump 目录为空"
             return (name, "ok", detail)
     except FactorLocked:
         return (name, "locked", "被另一个进程占用")
     except Exception as e:
-        logger.exception("produce pending failed factor={}", name)
+        logger.exception("produce single failed factor={}", name)
         msg = str(e)
         return (name, "failed", ("…" + msg[-300:]) if len(msg) > 300 else msg)
 
@@ -215,9 +271,15 @@ def run_produce_groups(args) -> None:
     repo = FactorRepository(config)
     timeout: int | None = getattr(args, "timeout", None)
 
-    # 产线三根的叶子必须预先存在:gsim Stats 对 pnlDir 是"不存在才 makedirs",
+    groups_only: bool = getattr(args, "groups_only", False)
+    single_only: list[str] | None = getattr(args, "single_only", None)
+    if groups_only and single_only is not None:
+        error("ops produce --grouped: --groups-only 与 --single-only 语义互斥")
+        raise SystemExit(1)
+
+    # 共享产物根的叶子必须预先存在:gsim Stats 对 pnlDir 是"不存在才 makedirs",
     # 多组并行首跑会撞 FileExistsError 竞态(170 试点 g001/g002 实测)
-    for d in (params.dump_root, params.pnl_root, params.pending_checkpoint_root):
+    for d in (params.dump_root, params.pnl_root):
         Path(d).mkdir(parents=True, exist_ok=True)
 
     banner("分组产线")
@@ -225,22 +287,35 @@ def run_produce_groups(args) -> None:
     notes, corrupted, pending = sync_groups(repo, params, config)
     for n in notes:
         (error if n.startswith("✘") else warn)(f"  {n}")
-    if getattr(args, "pending_only", False) and getattr(args, "skip_pending", False):
-        error("ops produce --grouped: --pending-only 与 --skip-pending 语义互斥")
-        raise SystemExit(1)
-    if getattr(args, "skip_pending", False):
-        if pending:
-            info(f"  pending {len(pending)} 个按 --skip-pending 跳过")
-        pending = []
-    groups = [] if getattr(args, "pending_only", False) else \
-        [g for g in repo.groups() if g.gid not in corrupted]
-    info(f"  同步: 组 {len(repo.groups())}(跳过 {len(corrupted)}) | "
-         f"pending {len(pending)}")
+
+    registered = {s.factor: s.author for s in repo.singles()}
+    run_groups = single_only is None
+    run_singles: list[tuple[str, str]] = []
+    if single_only is not None:
+        # --single-only:无名字 = 全部注册单产;有名字 = 点名的(pending 先准入)
+        for n in (single_only or sorted(registered)):
+            if n in registered:
+                run_singles.append((n, registered[n]))
+            elif n in pending:
+                _admit_single(n, repo, params, config)
+                factor = repo.get(n)
+                author = (factor.identity.author or "") if factor else ""
+                registered[n] = author
+                run_singles.append((n, author))
+                info(f"  + {n}: 准入单产(pending → single)")
+            else:
+                warn(f"  ⚠ {n}: 非 delay1 ACTIVE,跳过")
+    elif not groups_only:
+        run_singles = sorted(registered.items())
+
+    groups = [g for g in repo.groups() if g.gid not in corrupted] if run_groups else []
+    info(f"  同步: 组 {len(repo.groups())}(跑 {len(groups)},跳过 {len(corrupted)}) | "
+         f"单产 {len(run_singles)} | 待产 {len(pending)}(不生产)")
     if getattr(args, "sync_only", False):
         bottom()
         return
 
-    # pre-check:坏腿自动静音(单腿炸 = 整组死,不能带跑)
+    # pre-check 只护组(组 = 故障域):坏腿自动静音
     runnable: list[tuple[str, str]] = []          # (gid, author)
     for g in groups:
         gdir = Path(params.group_dir(g.author, g.gid))
@@ -276,12 +351,16 @@ def run_produce_groups(args) -> None:
             ck = (gdir / "checkpoint" / "archive.bin").exists()
             info(f"  - {gid}({author}): 腿 {len(legs)}(静音 {muted_n}) "
                  f"checkpoint={'有' if ck else '首跑全史'}")
+        for name, author in run_singles:
+            sdir = Path(params.single_dir(author, name))
+            ck = (sdir / "checkpoint" / "archive.bin").exists()
+            info(f"  - [s] {name}: checkpoint={'有' if ck else '首跑全史'}")
         bottom()
         return
 
-    total = len(runnable) + len(pending)
+    total = len(runnable) + len(run_singles)
     if not total:
-        info("  没有可生产的组或 pending 因子")
+        info("  没有可生产的组或单产因子")
         bottom()
         return
 
@@ -312,16 +391,16 @@ def run_produce_groups(args) -> None:
         for gid, author in runnable:
             i += 1
             _handle("", _run_group(gid, author, config, timeout), i)
-        for name in pending:
+        for name, author in run_singles:
             i += 1
-            _handle("[p] ", _run_pending(name, config, timeout), i)
+            _handle("[s] ", _run_single(name, author, config, timeout), i)
     else:
         futures: dict = {}
         with ProcessPoolExecutor(max_workers=workers) as pool:
             for gid, author in runnable:
                 futures[pool.submit(_run_group, gid, author, config, timeout)] = ""
-            for name in pending:
-                futures[pool.submit(_run_pending, name, config, timeout)] = "[p] "
+            for name, author in run_singles:
+                futures[pool.submit(_run_single, name, author, config, timeout)] = "[s] "
             for i, fut in enumerate(as_completed(futures), 1):
                 _handle(futures[fut], fut.result(), i)
 

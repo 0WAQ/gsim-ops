@@ -41,7 +41,7 @@ from ops.core.paths import FactorPaths
 from ops.core.prodxml import ProdParams, productionize_file
 from ops.core.state import CheckRecord, FactorRecord, FactorStatus, HistoryEvent
 from ops.infra.groups import default_group_store
-from ops.infra.groups.pg_store import GroupMember, ProduceGroup
+from ops.infra.groups.pg_store import GroupMember, ProduceGroup, ProduceSingle
 from ops.infra.info import default_info_store
 from ops.infra.lock import factor_lock
 from ops.infra.pg import get_pool
@@ -204,6 +204,20 @@ class FactorRepository:
     def group_membership(self) -> dict[str, str]:
         """factor → gid(仅 active 组)—— sync 判"在不在组里"的唯一查询。"""
         return self._groups.active_membership()
+
+    # 单产注册表(在产 per-factor;pending(待产)无行,纯推导)
+
+    def admit_single(self, factor: str, author: str) -> None:
+        """pending → single 准入(幂等)。落库只是注册;冻结副本与单产 XML
+        的生成在 service 层(准入 = 库 + 盘面一并就位)。"""
+        self._groups.admit_single(factor, author)
+
+    def remove_single(self, factor: str) -> None:
+        """退回 pending(离 ACTIVE / 封组转正);删行即退,不留墓碑。"""
+        self._groups.remove_single(factor)
+
+    def singles(self) -> list[ProduceSingle]:
+        return self._groups.list_singles()
 
     def ungrouped_delay1(self) -> list[tuple[str, str, int]]:
         """delay1 ACTIVE 且不在任何 active 组的 (name, author, delay) ——

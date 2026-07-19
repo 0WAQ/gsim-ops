@@ -115,7 +115,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |
 | `info` | Show factor details | `ops/cli/info.py` + `ops/services/info/` |
 | `pack` | Aggregate per-date `alpha_dump` files into per-factor `alpha_feature` matrices | `ops/cli/pack.py` + `ops/services/pack/` |
-| `produce` | 因子产线薄驱动:sync(ACTIVE ⇔ checkpoint,停线归 .retired)+ run(直接跑 alpha_src 归档 XML,gsim checkpoint 续跑重写尾部 ~5 天,dump/pnl 直落 170 产线 dataset)。归档 XML 即生产态(入库时 `repo.productionize_src` 写好,`core/prodxml.py` 三张规则表);无状态、幂等,失败退出码 1。`--grouped` = 分组产线(sibling 平铺共享 init;组 roster 入 PG produce_group 两表,组 XML 腿序冻结,产物落 /nvme125/production/alpha,只产 delay1)。设计 `docs/design/factor-produce-v3.md` + `docs/design/factor-produce-groups.md` | `ops/cli/produce.py` + `ops/services/produce/` |
+| `produce` | 因子产线薄驱动:sync(ACTIVE ⇔ checkpoint,停线归 .retired)+ run(直接跑 alpha_src 归档 XML,gsim checkpoint 续跑重写尾部 ~5 天,dump/pnl 直落 170 产线 dataset)。归档 XML 即生产态(入库时 `repo.productionize_src` 写好,`core/prodxml.py` 三张规则表);无状态、幂等,失败退出码 1。`--grouped` = 分组产线三态:组产(roster 入 PG,组 XML 腿序冻结)+ 单产(produce_single 注册表,补丁式 XML)+ 待产(纯推导,只报告不生产);产物落 /nvme125/production/alpha,生产闸 delay==1。设计 `docs/design/factor-produce-v3.md` + `docs/design/factor-produce-groups.md` | `ops/cli/produce.py` + `ops/services/produce/` |
 | `setup` | 声明式管理本机 alphalib 部署:hosts 块按 hostname 匹配挂载点,缺省幂等补建(目录/软链/权限组),`--check` 只读体检。JFS 挂载本身归 join.sh | `ops/cli/setup.py` + `ops/services/setup/` |
 | `doctor` | 盘 ↔ PG 数据对账(8 族:池鬼影/stale 快照/时间线不变量/info 孤儿/src·staging 漂移/产物孤儿/本机 dump 孤儿)。缺省纯只读;`--fix <族>` 逐族确认修复(五道闸删除管道) | `ops/cli/doctor.py` + `ops/services/doctor/` |
 

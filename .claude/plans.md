@@ -267,11 +267,16 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 
 **后议项**:
 - batch/分组产线形态:**已立项落地**(2026-07-19,`ops produce --grouped`;
-  组大小 500、roster 入 PG produce_group 两表、生产根 /nvme125/production/alpha、
-  只产 delay1)。设计正主 `docs/design/factor-produce-groups.md`;机制实证
+  三态模型:组产(roster 入 PG produce_group 两表)+ 单产(produce_single
+  注册表)+ 待产(纯推导,新因子默认屏蔽);组大小 500、生产根
+  /nvme125/production/alpha、生产闸 delay==1)。设计正主
+  `docs/design/factor-produce-groups.md`;机制实证
   `docs/remediation/BATCH-PRODUCE-MECHANICS-RESULT.md`。待办:bootstrap 全史
   首跑 → byte-diff 抽验 → 观察 → combo 切 alphaDir → cchang 退役;重组自动化
   与 delay0 接入后议。
+- **TODO(2026-07-20)**:三态模型真机测试 —— 参照 7-19 试点流程(170,pilot
+  config + roster 落 ops_test):组产续跑(checkpoint 存在)/ 单产点名准入
+  真跑 / 待产屏蔽验证 / byte-diff 验收;跑完清理产物与 ops_test roster。
 - `ops export`:库内因子导出为可独立运行副本 + "不让用户直跑因子库因子"约束
   (拆雷退役 D9 的替代保护;用户点名 TODO)。
 - submit/check 入口收紧新杂质(D5 单轨配套:旧路径形态/Mod id/V5 即拒)。

@@ -31,13 +31,14 @@ Example:
     parser.add_argument("--enddate", type=str, default=None,
                         help="钉死日重算 YYYYMMDD(临时 XML 副本 + 一次性 checkpoint)")
     parser.add_argument("--grouped", action="store_true",
-                        help="分组模式:跑 produce_group 组(续跑) + pending 池,"
-                             "而非逐因子(设计 docs/design/factor-produce-groups.md)")
-    parser.add_argument("--skip-pending", action="store_true",
-                        help="分组模式下不跑 pending 池(试点/验收期用:只跑已封的组)")
-    parser.add_argument("--pending-only", action="store_true",
-                        help="分组模式下只跑 pending 池(新增因子),不跑组;"
-                             "与 --skip-pending 互斥")
+                        help="分组模式:跑在产(组产 + 单产),而非逐因子"
+                             "(设计 docs/design/factor-produce-groups.md)")
+    parser.add_argument("--groups-only", action="store_true",
+                        help="分组模式下只跑组产(不跑单产)")
+    parser.add_argument("--single-only", nargs="*", metavar="FACTOR", default=None,
+                        help="分组模式下只跑单产:无名字 = 全部注册单产;"
+                             "点名 = 指定因子(pending 中的先准入再跑);"
+                             "与 --groups-only 互斥")
     parser.add_argument("--timeout", type=int, default=None,
                         help="单次 gsim 运行超时秒数(缺省 config.mode.timeout=1800;"
                              "bootstrap 全史首跑需放大,如 43200)")
