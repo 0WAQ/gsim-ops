@@ -253,7 +253,8 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 
 **设计正主 `docs/design/factor-produce-v3.md`**(归档即生产态 + checkpoint 续跑
 薄驱动;决策台账 D1-D11 + 接管七步序列在彼)。实证材料:
-`docs/remediation/DISCOVER-PRODUCE-PROD*` + `AUDIT-DUMP-CONSISTENCY*`。
+`docs/remediation/DISCOVER-PRODUCE-PROD*` + `AUDIT-DUMP-CONSISTENCY*` +
+`BATCH-PRODUCE-MECHANICS-RESULT.md`(batch/分组机制实证,2026-07-18)。
 
 **代码侧已齐**(2026-07-18):`core/prodxml.py`(规则表)→ `repo.archive` 归档
 内联生产化 + 拆雷退役 → `ops produce`(sync+run 薄驱动)→
@@ -265,6 +266,10 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 手动观察周 + 443 新线首跑 → cron 进 `# 3. generate alpha` 槽位,cchang 线退役。
 
 **后议项**:
+- batch/分组产线形态:机制事实已钉死(sibling 平铺可行、组=故障域、checkpoint
+  序号语义下组成员冻结、静音开关处理入退库、规模与 bootstrap 测算),见
+  `docs/remediation/BATCH-PRODUCE-MECHANICS-RESULT.md`。是否启用、用于
+  bootstrap 还是日常增量,未拍板。
 - `ops export`:库内因子导出为可独立运行副本 + "不让用户直跑因子库因子"约束
   (拆雷退役 D9 的替代保护;用户点名 TODO)。
 - submit/check 入口收紧新杂质(D5 单轨配套:旧路径形态/Mod id/V5 即拒)。
