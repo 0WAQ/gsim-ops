@@ -220,8 +220,8 @@ Example:
         type=str,
         help="Filter conditions separated by commas (e.g., tables=ashareeodprices,ret>30,shrp>1.5)",
     )
-    # choices 从 metric 注册表派生(SSOT,core/metrics.SNAPSHOT_METRICS):
-    # delay 若要可排序,在注册表加一行(snapshot 表须有对应列)。
+    # choices 从 metric 注册表派生(SSOT,core/metrics.SNAPSHOT_METRICS;
+    # delay 已注册,可过滤可排序)。
     parser.add_argument(
         "--sort-by",
         type=str,

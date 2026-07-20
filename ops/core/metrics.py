@@ -65,6 +65,9 @@ SNAPSHOT_METRICS: dict[str, MetricSpec] = {
     "tvr": MetricSpec("tvr"),
     "fitness": MetricSpec("fitness"),
     "bcorr": MetricSpec("max_bcorr", absolute=True),
+    # delay 是 INT 快照列(0/1/None):过滤是生产/combo 建腿口径(delay=1);
+    # None(无快照)一律不匹配,与 metric 阈值语义一致
+    "delay": MetricSpec("delay"),
 }
 
 

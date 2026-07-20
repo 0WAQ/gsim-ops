@@ -73,6 +73,27 @@ def test_json_state_list_filters(jstate):
 # list 过滤解析 + snapshot glob→LIKE 下推(2026-07-09 阶段 2 对抗评审修复)
 # ---------------------------------------------------------------------------
 
+def test_delay_filter_parse_and_apply():
+    """delay 过滤(--filter-by delay=1 的生产/combo 建腿口径):
+    解析收进合法键集;内存取值 INT 语义,None(无快照/无 delay)一律不匹配。"""
+    from ops.core.factor import Factor, FactorIdentity, FactorSnapshot
+    from ops.services.list.list import apply_filters, parse_filters
+
+    assert parse_filters("delay=1") == [("delay", "=", "1")]
+    assert parse_filters("delay=0,delay>=0") == [("delay", "=", "0"),
+                                                 ("delay", ">=", "0")]
+
+    def _f(name, delay):
+        return Factor(identity=FactorIdentity(name=name),
+                      state=None,
+                      snapshot=FactorSnapshot(name=name, delay=delay)
+                      if delay is not None else None)
+
+    rows = [_f("AlphaD1", 1), _f("AlphaD0", 0), _f("AlphaNone", None)]
+    assert [x.identity.name for x in apply_filters(rows, [("delay", "=", "1")])] == ["AlphaD1"]
+    assert [x.identity.name for x in apply_filters(rows, [("delay", "=", "0")])] == ["AlphaD0"]
+
+
 def test_parse_filters_rejects_bad_operator():
     """typo 比较符(=> 等)必须响亮拒绝 —— 原先能过正则但下推白名单与内存
     if 链都没有分支,条件被静默吞掉且新旧读路径因子集不一致。
@@ -119,7 +140,8 @@ def test_metric_registry_is_single_source():
     from ops.infra.snapshot.pg_store import _prefixed_metric_expr, metric_order_expr
 
     # 键集决策(新增/删除 metric 键须有意为之)
-    assert set(SNAPSHOT_METRICS) == {"ret", "shrp", "mdd", "tvr", "fitness", "bcorr"}
+    assert set(SNAPSHOT_METRICS) == {"ret", "shrp", "mdd", "tvr", "fitness",
+                                     "bcorr", "delay"}
     assert tuple(METRIC_SORT_KEYS) == tuple(SNAPSHOT_METRICS)   # CLI choices 同源
 
     # SQL 半边:每个注册键都能产出下推表达式,bcorr 是 abs(带前缀改写正确)
@@ -127,14 +149,14 @@ def test_metric_registry_is_single_source():
         assert _prefixed_metric_expr(key, "n.") is not None
     assert _prefixed_metric_expr("bcorr", "n.") == "abs(n.max_bcorr)"
     assert _prefixed_metric_expr("ret", "") == "ret"
-    assert metric_order_expr("delay") is None                   # 白名单外拒绝
+    assert metric_order_expr("delay") == "delay"                # delay 已注册
 
     # 内存半边:同一注册表取值,bcorr 取绝对值,与 SQL abs() 语义一致
-    snap = FactorSnapshot(name="X", ret=12.5, max_bcorr=-0.42)
+    snap = FactorSnapshot(name="X", ret=12.5, max_bcorr=-0.42, delay=1)
     assert metric_value(snap, "ret") == 12.5
     assert metric_value(snap, "bcorr") == pytest.approx(0.42)
     assert metric_value(snap, "shrp") is None                   # 值缺失
-    assert metric_value(snap, "delay") is None                  # 未注册键
+    assert metric_value(snap, "delay") == 1                     # delay 已注册
     assert metric_value(None, "ret") is None                    # 无快照
 
 

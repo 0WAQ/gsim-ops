@@ -282,9 +282,10 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
   (Fguo,含 delay1 35)用 CLI 查不到,只能走 SQL。repository 层是
   `i.author = %s` 精确匹配,归一发生在 CLI/参数处理,修法:精确匹配、
   不做归一(或归一但按 DB 实际值匹配)。
-- **TODO(2026-07-20 登记)**:`ops list --filter-by` 支持 delay 键
-  (delay=1 过滤;FILTER_KEYS 现仅 tables/field/metric 注册键,delay 是
-  snapshot 列,加键 + SQL 下推 + 内存取值三处同步,参照 SNAPSHOT_METRICS 派生纪律)。
+- ~~TODO(2026-07-20 登记)~~:`ops list --filter-by` 支持 delay 键
+  **✅ 已完成(2026-07-20)**:delay 注册进 SNAPSHOT_METRICS(注册表一行,
+  SQL 下推/内存取值/CLI choices 三方派生),`--filter-by delay=1|0` 与
+  `--sort-by delay` 可用;None(无快照)不匹配。真机验证 lhw 663 / zxu 121+37。
 - `ops export`:库内因子导出为可独立运行副本 + "不让用户直跑因子库因子"约束
   (拆雷退役 D9 的替代保护;用户点名 TODO)。
 - submit/check 入口收紧新杂质(D5 单轨配套:旧路径形态/Mod id/V5 即拒)。
