@@ -3,12 +3,18 @@
 ## 概述
 为 gsim-ops 项目构建 AI 协作功能，自动化因子开发、审查和维护流程。
 
-## 已实现功能
+## 已实现功能(2026-07-20 更新)
 
-### `/review-staging` 技能
-- 自动检查 staging 目录中的待审查因子
-- 显示因子状态和数据库信息
-- 提供下一步操作建议
+技能本体在 `.claude/skills/`(kimi 经 `.kimi-code/skills` 软链接入,双兼容):
+
+- **工作流技能 ×10**:`review-staging`(staging 审查)/ `check-factor`(因子体检)/
+  `analyze-failure`(失败归因)/ `analyze-report`(check 报告汇总)/ `audit-cc`
+  (cc 质量审计)/ `compare-cc`(cc 跨根比对)/ `verify-data-claim`(数据反馈核实)/
+  `audit-docs` / `sync-docs` / `commit`
+- **角色技能 ×6**(claude agent 转 skill):factor-analyst(因子深析)/
+  cc-data-auditor / report-analyst / pipeline-debugger / docs-auditor / docs-updater
+
+计划功能与本清单的覆盖关系在各条目标注。
 
 ## 计划功能
 
@@ -22,7 +28,7 @@
   - 性能指标（IR, turnover, bcorr 等）
   - 潜在问题警告
 
-#### `/analyze-factor` - 深度因子分析
+#### `/analyze-factor` - 深度因子分析(已大部覆盖:`factor-analyst` / `check-factor` 两技能)
 - 输入：因子名称
 - 分析内容：
   - 历史表现趋势
@@ -31,7 +37,7 @@
   - 优化建议
 - 输出：详细的分析报告
 
-#### `/compare-factors` - 因子对比
+#### `/compare-factors` - 因子对比(cc 数据域已覆盖:`compare-cc`;因子间对比仍待做)
 - 输入：多个因子名称
 - 对比维度：
   - 性能指标（IR, Sharpe, turnover）
@@ -48,7 +54,7 @@
   - 如果 delay > 0，警告可能的特征错位问题
   - 参考：commit e429e11 中记录的 bug
   
-- **数据质量检查**
+- **数据质量检查**(cc 域已覆盖:`audit-cc` 全字段扫描 + `verify-data-claim` 单点核实)
   - 缺失值比例
   - 异常值检测
   - 时间序列连续性
@@ -64,7 +70,7 @@
   - 特征工程改进
   - 组合策略建议
 
-#### 审查报告生成
+#### 审查报告生成(已覆盖:`analyze-report` 出批量汇总 + QR 反馈稿)
 - 自动生成结构化的审查报告
 - 包含：问题列表、风险评估、改进建议
 - 支持导出为 markdown 或 PDF
@@ -134,14 +140,14 @@
 - 增量更新而非全量重算
 
 ### 数据存储
-- 扩展现有的 SQLite 数据库存储分析结果
+- 分析结果若需持久化走 Postgres(PG 是唯一真相源,项目无 SQLite;先文件后评估入库,参照 compliance 测量'先文件不进 PG'前例)
 - 考虑添加表：
   - `factor_analysis` - 分析历史
   - `factor_issues` - 检测到的问题
   - `factor_suggestions` - 优化建议
 
 ### 集成方式
-- 通过 Claude Code 的 skills 系统集成
+- 通过 skills 系统集成(Claude Code / Kimi Code 双兼容,kimi 经 `.kimi-code/skills` 软链)
 - 保持与现有 `ops` 命令行工具的兼容性
 - 可以独立使用，也可以组合使用
 
@@ -156,5 +162,5 @@
 
 ---
 
-*最后更新：2025-01-XX*
+*最后更新：2026-07-20*
 *维护者：wbai*

@@ -51,6 +51,8 @@ metadata:
 - **关键运维事实: 承载 ops state 的 Redis (redis://mymaster...:26380/0, sentinel) 同时是 JuiceFS `/tank/vault/alphalib` 的 metadata 后端。停 Redis 进程 = 挂掉整个因子库文件。ops 迁 PG 后只是"停用 Redis 的 state key", Redis 进程必须为 JFS 继续活着。残留 state:* key 留作回退, 验稳后可精确 DEL (绝不 FLUSHDB)。**
 - config.yaml state.backend: postgres (redis 段保留作回退)。Redis 降缓存但暂不实装 (直接 PG)。
 
+(2026-07-20 注: 此行多项已被后文取代 —— `ops refresh` 已删、`feat/derived-postgres` 分支已合 main、`ops query` 未做但以 `ops list --filter-by` 下推代之;保留作时点记录。)
+
 **遗留 TODO** (更新): 反查命令 `ops query --field/--table` 待做 (SQL 下推本身已落地 commit a450f39: field/tables/metrics/sort/limit 全下推); refresh_* 从 list 独立成 ops refresh (已落地 commit bbc5462); 150/144 部署 (补 PG 密码 + uv tool install 带 psycopg); 分支 `feat/derived-postgres` 未合 main; 验稳后清 Redis 残留 state key; #4 时序监控用另开的 factor_metrics_history 表 (钉死: 不往 factor_derived 加 ret_<date> 列)。
 
 **双表 → 三表重构 (2026-07-06, commit a51c85e, 同分支) —— metrics 语义从"可刷新"改为"入库时不可变快照"**: 旧的 `factor_state` (含 author/submitted_by) + `factor_derived` 宽表拆成三张表, 全部去掉 `library_id` (永远单库), `id SERIAL` 主键 + `name UNIQUE`:

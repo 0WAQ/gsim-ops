@@ -31,7 +31,7 @@ metadata:
   - `Job` — a scheduled/triggered execution of a graph of ops
   - `AssetMaterialization` — recorded event when an asset is produced
   - `Sensor` / `Schedule` — triggers for pipeline execution
-- Maps to gsim-ops: check.py's 8-stage pipeline ≈ a Dagster job, reconcile ≈ asset reconciliation
+- Maps to gsim-ops: check.py's 6-stage + archive pipeline ≈ a Dagster job (stage 唯一真相源 = ops/services/check/stages.py PIPELINE 元组), reconcile ≈ asset reconciliation
 
 ### 3. DVC — Data Versioning
 - Website: https://dvc.org

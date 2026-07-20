@@ -7,9 +7,7 @@ metadata:
   originSessionId: 0dc2ca03-0ee3-4cac-b874-f0ee5ec0c49d
 ---
 
-因子入库前需通过 `ops check` 的 7 阶段验证管道:`validate → checkbias → checkpoint → long_backtest → compliance → correlation → to_lib (入库 commit)`。
-
-代码 `ops/services/check/check.py:249-275` 跑 6 个 checker, 通过后 `to_lib()` 入库, 算 7。
+因子入库前需通过 `ops check` 的 6 stage + archive 段验证管道:`validate → checkbias → checkpoint → long_backtest → compliance → correlation`(stage 身份唯一真相源 = `ops/services/check/stages.py` 的 `PIPELINE` 元组;archive 是其后的入库动作。行号引用已弃,以 stages.py 为准)。
 
 ## 关键检查项
 
