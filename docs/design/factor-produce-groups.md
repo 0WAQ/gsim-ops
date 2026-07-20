@@ -5,6 +5,14 @@
 > `docs/remediation/BATCH-PRODUCE-MECHANICS-RESULT.md`(sibling 平铺位级一致、
 > 无腿级容错、checkpoint 序号语义)。per-factor 设计(factor-produce-v3.md)
 > 仍管归档生产化(prodxml 三张规则表是两形态 XML 的共同源头)。
+>
+> **本文取代 `produce-batch-engine.md`(v4,2026-07-18 收敛稿)** —— 同一批
+> 实证的另一条设计线。与 v4 的实质差异(有意为之,非漂移):组大小 500(v4 议
+> 200~300,用户拍 500);roster 入 PG 两表(v4 设想的 manifest 文件+指纹闸门,
+> I1 的等价实现是"DB 序 == XML 腿序"校验);新增**待产态**(v4 无:可生产 −
+> 在产,默认屏蔽);封组 = `bootstrap_groups.py --apply` 生产根直接全史首跑
+> (v4 设想的周末 scratch 铸 checkpoint 换入,未采用);组 XML 建组时一次
+> 落盘(v4 设想运行时临时组装)。
 
 ## 1. 为什么分组
 
@@ -124,3 +132,11 @@ ops produce --grouped -w 4 --timeout 43200     # bootstrap 全史首跑
 - checkpoint 移植工具(.so 格式破解):bootstrap 走全史重跑,一次性成本已接受。
 - 重组自动化:初版手动(bootstrap 脚本重跑封新组;组重组脚本后议)。
 - delay0 分组、combo/信号入 production 根(目录已预留,立项再议)。
+
+## 9. 后议方向(继承 v4 设计,实施时以本文档为准)
+
+- **代际累积的封组节奏**:待产/单产攒批封组(初版手动跑
+  `bootstrap_groups.py --apply`;节奏化候选 = 每周或攒满一组即封)。
+- **清淤重组**:组内静音腿比例过高时重铸该组(省计算;触发比例与窗口后定)。
+- **肇事腿自动隔离**:组炸后从 stderr 定位肇事腿 → 自动静音 + 转单产 +
+  当日重跑(现状 = 整组失败退出码 1,次日续跑自愈;自动隔离后议)。
