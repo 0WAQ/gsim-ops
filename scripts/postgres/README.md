@@ -49,7 +49,8 @@ docker exec -it ops-pg psql -U ops -d ops -c '\dt'   # 预期 factor_info/state/
 | `migrate_legacy_snapshot_at.sql` | legacy 批①:472 条 snapshot_at 漂移拉回最近 check 事件 at(600 守卫 + 残余断言,幂等) | ✅ 2026-07-13(legacy 清理批,VERIFY-LEGACY-CLEANUP-RESULT) |
 | `backfill_compliance_snapshots.py` | legacy 批②:compliance 被拒 22 条补跑 simsummary → 测得快照(缺省 dry-run) | ✅ 2026-07-13(legacy 清理批,VERIFY-LEGACY-CLEANUP-RESULT) |
 | `migrate_discovery_notnull.py` | legacy 批③:discovery_method 归一(池位置 + --assign 人工名单)+ chk_discovery 收窄 + SET NOT NULL(可分批,幂等) | ✅ 2026-07-13(legacy 清理批,VERIFY-LEGACY-CLEANUP-RESULT) |
-| `migrate_produce_group.sql` | 分组产线 roster 三表(produce_group + produce_group_member + produce_single 单产注册) | ⏳ 待执行(随分组产线上线;init 镜像已含,`tests/test_schema_pin.py` 钉一致性) |
+| `migrate_author_case.sql` | author 大小写归一(Fguo→fguo 848 行 + 防复发校验;成因 = 5-20 周那批 GA 因子 XML 大写 author 原文落库,解析层归一早已修) | ✅ 2026-07-20(pg_dump 备份 ops-20260720-1122,-u Fguo 5324 验证) |
+| `migrate_produce_group.sql` | 分组产线 roster 三表(produce_group + produce_group_member + produce_single 单产注册) | ✅ 2026-07-20(ops + ops_test 双库;分组产线试点用) |
 
 ## 备份
 

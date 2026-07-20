@@ -277,11 +277,11 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 - **TODO(2026-07-20)**:三态模型真机测试 —— 参照 7-19 试点流程(170,pilot
   config + roster 落 ops_test):组产续跑(checkpoint 存在)/ 单产点名准入
   真跑 / 待产屏蔽验证 / byte-diff 验收;跑完清理产物与 ops_test roster。
-- **BUG(2026-07-20 登记,待修)**:`ops list -u` 对 author 大小写做归一,
-  `-u Fguo` 返回的是小写 fguo 的行 —— 大写 author 的 712 条 ACTIVE
-  (Fguo,含 delay1 35)用 CLI 查不到,只能走 SQL。repository 层是
-  `i.author = %s` 精确匹配,归一发生在 CLI/参数处理,修法:精确匹配、
-  不做归一(或归一但按 DB 实际值匹配)。
+- ~~BUG(2026-07-20 登记)~~:`ops list -u` 对 author 大小写做归一,
+  **✅ 已修(2026-07-20)**:成因 = 2026-05-20~27 一批 GA 因子 XML 大写
+  `author="Fguo"` 原文落库(解析层归一早已修,无新增);处置 = 存量迁移
+  `migrate_author_case.sql`(848 行归小写 + 防复发校验,pg_dump 备份在先),
+  `-u Fguo` 验证 5324 全中。查询层代码未动(LowerAction 归一后无害)。
 - ~~TODO(2026-07-20 登记)~~:`ops list --filter-by` 支持 delay 键
   **✅ 已完成(2026-07-20)**:delay 注册进 SNAPSHOT_METRICS(注册表一行,
   SQL 下推/内存取值/CLI choices 三方派生),`--filter-by delay=1|0` 与
