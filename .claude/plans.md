@@ -277,6 +277,14 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
 - **TODO(2026-07-20)**:三态模型真机测试 —— 参照 7-19 试点流程(170,pilot
   config + roster 落 ops_test):组产续跑(checkpoint 存在)/ 单产点名准入
   真跑 / 待产屏蔽验证 / byte-diff 验收;跑完清理产物与 ops_test roster。
+- **BUG(2026-07-20 登记,待修)**:`ops list -u` 对 author 大小写做归一,
+  `-u Fguo` 返回的是小写 fguo 的行 —— 大写 author 的 712 条 ACTIVE
+  (Fguo,含 delay1 35)用 CLI 查不到,只能走 SQL。repository 层是
+  `i.author = %s` 精确匹配,归一发生在 CLI/参数处理,修法:精确匹配、
+  不做归一(或归一但按 DB 实际值匹配)。
+- **TODO(2026-07-20 登记)**:`ops list --filter-by` 支持 delay 键
+  (delay=1 过滤;FILTER_KEYS 现仅 tables/field/metric 注册键,delay 是
+  snapshot 列,加键 + SQL 下推 + 内存取值三处同步,参照 SNAPSHOT_METRICS 派生纪律)。
 - `ops export`:库内因子导出为可独立运行副本 + "不让用户直跑因子库因子"约束
   (拆雷退役 D9 的替代保护;用户点名 TODO)。
 - submit/check 入口收紧新杂质(D5 单轨配套:旧路径形态/Mod id/V5 即拒)。
