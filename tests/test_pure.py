@@ -212,3 +212,19 @@ def test_write_command_declarations_match_registry():
     # produce 2026-07-18 v3 落地:写产线 dataset(root-owned)
     assert declared == {"submit", "restage", "check", "run", "rm",
                         "approve", "cancel", "clear", "pack", "setup", "produce"}
+
+
+def test_raise_nofile_lifts_soft_limit():
+    """fd 限额自举:软限额抬到 min(目标, 硬限额);已够高不动、永不降。
+    (sudo 环境 soft=1024,gsim 全史 memmap 打满 —— 170 金丝雀实测。)"""
+    import resource
+
+    from ops.utils.rlimit import raise_nofile
+
+    soft0, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    raise_nofile()
+    soft1, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    expected = 65536 if hard == resource.RLIM_INFINITY else min(65536, hard)
+    assert soft1 >= min(soft0, expected)          # 永不降
+    if soft0 < expected:
+        assert soft1 == expected                  # 能抬则抬到目标
