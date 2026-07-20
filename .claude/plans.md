@@ -274,9 +274,23 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
   `docs/remediation/BATCH-PRODUCE-MECHANICS-RESULT.md`。待办:bootstrap 全史
   首跑 → byte-diff 抽验 → 观察 → combo 切 alphaDir → cchang 退役;重组自动化
   与 delay0 接入后议。
-- **TODO(2026-07-20)**:三态模型真机测试 —— 参照 7-19 试点流程(170,pilot
-  config + roster 落 ops_test):组产续跑(checkpoint 存在)/ 单产点名准入
-  真跑 / 待产屏蔽验证 / byte-diff 验收;跑完清理产物与 ops_test roster。
+- ~~TODO(2026-07-20)~~:三态模型真机测试 **✅ 已完成(2026-07-20)**:
+  组产续跑 3s 收敛 / 单产点名准入全史跑通 / 待产 3294 个零生产(恰好 11 个
+  dump 目录)/ 11 因子 7546 文件全部 byte-equal;产物与 ops_test roster 已清。
+
+## combo 产线(2026-07-20 立项,首跑验证完成)
+
+设计正主 `docs/design/combo-production.md`(4 combo × 3 mode 矩阵、谱系、
+Data 套件坑、startdate 2020 口径);XML 全部出自 `scripts/build_combo_xml.py`。
+首跑(2020→20260710)mode0×3 全过、产物计数精确。
+
+**后议项**:
+- 日增排程:mode0 盘前续跑进 cron;与 cchang run_combo.sh 交接(对拍数日)。
+- alphaDir 切新根(alpha 分组产线接管后 `/nvme125/alpha_dump` →
+  `/nvme125/production/alpha/dump`,生成器改常量重出)。
+- cchang combo 旧线(`/nvme125/combo{,_cchang}/`)与旧 dataset 退役归并。
+- 消费方(signals/实盘)combo_dump 读取随排程迁移。
+- mode2 的中性化/指数口径如有调整,改生成器一次到位(勿手改 XML)。
 - ~~BUG(2026-07-20 登记)~~:`ops list -u` 对 author 大小写做归一,
   **✅ 已修(2026-07-20)**:成因 = 2026-05-20~27 一批 GA 因子 XML 大写
   `author="Fguo"` 原文落库(解析层归一早已修,无新增);处置 = 存量迁移
