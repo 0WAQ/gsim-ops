@@ -26,4 +26,4 @@
 
 ## 规范
 
-`docs/design/combo/calling-convention.md`（接口）/ `combo-submit-guide.md`（给 qr）/ `combo-train-spec.md`（train 接口）。
+`docs/design/combo/calling-convention.md`(接口)/ `submit-guide.md`(给 qr)/ `train-spec.md`(train 接口)。

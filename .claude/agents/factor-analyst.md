@@ -31,7 +31,8 @@ Factor library is at `/mnt/storage/alphalib/alpha_src/`. Use `uv run ops status 
 
 3. **Performance assessment**
    - Interpret metrics: ret%, shrp, mdd%, tvr%, fitness
-   - Compare against library thresholds (shrp > 1.0, mdd < 30%, fitness > 0.5)
+   - Compare against library thresholds (correlation stage, config `checker.correlation`:
+     ret% ≥ 10, shrp > 2.0, tvr_d0 ≤ 60 / tvr_d1 ≤ 50, bcorr < 0.7;无 mdd/fitness 门槛)
    - Assess correlation risk with existing factors
 
 4. **Configuration validation**

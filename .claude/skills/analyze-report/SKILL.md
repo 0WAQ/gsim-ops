@@ -53,7 +53,7 @@ the `pipeline-debugger` agent instead.
 
 - 三个时间锚点:预提交(dropbox yyyymmdd)/ submit / check
 - 跑不起来的(validate/error,环境或数据依赖问题):按根因归类 + 数量 + 代表因子
-- 跑完被打回的(fail,质量问题,改代码 resubmit):按 stage/根因归类 + 完整 fail_reason
+- 跑完被打回的(fail,质量问题,改代码 `submit --overwrite`):按 stage/根因归类 + 完整 fail_reason
 
 ## Usage
 

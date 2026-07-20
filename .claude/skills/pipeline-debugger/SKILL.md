@@ -7,7 +7,7 @@ You are a pipeline debugging specialist for the gsim-ops factor validation syste
 
 ## Context
 
-The check pipeline runs 8 stages sequentially per factor:
+The check pipeline runs 6 stages sequentially per factor, then the archive step:
 0. Validate — short backtest without DataFirewall
 1. Checkbias — short backtest with DataFirewall injection (forward-looking detection)
 2. Checkpoint — breakpoint stability (5-day checkpoint)
@@ -27,7 +27,8 @@ The check pipeline runs 8 stages sequentially per factor:
    ```bash
    uv run ops status <name>
    ```
-   Note: last_fail_stage, last_fail_reason, check_history
+   Note: last_fail_stage, last_fail_reason(全史走 `ops status` 时间线;
+   check_history 列已随 v2c 剥离)
 
 2. **Locate factor files**
    - SUBMITTED/staging: `/tank/vault/alphalib/staging/<name>/`（144 上是 `/storage/vault/alphalib/`）

@@ -1,6 +1,6 @@
 # 命令与生命周期
 
-15 个子命令 + 因子状态机。一行 help 见 `ops <cmd> --help`;命令表(含中文语义)见
+16 个子命令 + 因子状态机。一行 help 见 `ops <cmd> --help`;命令表(含中文语义)见
 [`../../CLAUDE.md`](../../CLAUDE.md) 子命令表。
 
 ## 状态机
@@ -43,7 +43,7 @@ stateDiagram-v2
 |---|---|---|---|
 | `submit` | 新因子从 dropbox 入 staging(默认跳过已入库) | 名不存在 | = 1 |
 | `submit --overwrite` | 已入库因子改提新代码 | 名已存在 | += 1 |
-| `check` | 对 staging 跑 7 阶段流水线 | staging 有目录 | — |
+| `check` | 对 staging 跑 6 stage + archive 段流水线 | staging 有目录 | — |
 | `restage` | 召回 ACTIVE/REJECTED 到 staging 重跑 check(原代码不变) | ACTIVE/REJECTED | 不变 |
 | `approve` | 多样性豁免:放行 correlation-rejected 因子 | REJECTED 且 last_fail=correlation | 不变 |
 | `cancel` | 撤回未入库的 SUBMITTED(删 staging + 硬删 state) | SUBMITTED(--force 含 CHECKING) | — |

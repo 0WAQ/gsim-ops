@@ -24,7 +24,7 @@ Batch review all factors currently in staging, ready for check pipeline.
 3. **State consistency**
    - Run `uv run ops status --status submitted` to see all SUBMITTED factors
    - Cross-check: factors in staging should be SUBMITTED
-   - Flag any mismatches (reconcile would fix, but good to know)
+   - Flag any mismatches(reconcile 已下线,由下次 ops check 扫 staging 自愈;报出来即可)
 
 4. **Risk assessment**
    - Flag factors with delay=0 (pack offset bug affects them)

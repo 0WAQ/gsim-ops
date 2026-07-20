@@ -5,7 +5,7 @@
 
 **状态**(2026-07-16 收官):摸底 → 定策 → checker 重写 → 影子对比全链完成(见文末
 "定策与 checker 重写"两节),产出存档 `report/compliance-survey/`。分支
-`claude/compliance-survey`(待合 main)。缺陷全清单与决策记录见 `.claude/plans.md`
+`claude/compliance-survey`(已合 main)。缺陷全清单与决策记录见 `.claude/plans.md`
 "Compliance 判定重做"节。
 
 ---

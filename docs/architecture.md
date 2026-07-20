@@ -26,7 +26,7 @@
 flowchart LR
   QR[QR 研究员] -->|写因子| DB[(dropbox<br/>只读)]
   DB -->|ops submit| ST[staging<br/>SUBMITTED]
-  ST -->|ops check<br/>7 阶段| GS{gsim 引擎}
+  ST -->|ops check<br/>6 阶段+archive| GS{gsim 引擎}
   GS -->|pass| ACT[alpha_src<br/>ACTIVE]
   GS -->|fail| REJ[alpha_src<br/>REJECTED]
   ACT -->|ops pack| FEAT[alpha_feature]
@@ -85,23 +85,24 @@ stateDiagram-v2
 = entered 事件)/ **已入库**(至少入库过,`entered_at` 非空)。删除不是状态——因子要么存在
 要么被 rm 删掉,无墓碑。
 
-15 个命令按作用面分三组(一行 help 见 `ops <cmd> --help`):
+16 个命令按作用面分四组(一行 help 见 `ops <cmd> --help`):
 
 | 组 | 命令 |
 |---|---|
 | 生命周期写 | `submit` `check` `restage` `approve` `cancel` `clear` `rm` |
 | 读 / 查 | `list` `status` `info` |
 | 产物 / 回测 | `run` `pack` `combo` |
+| 产线 | `produce` |
 | 运维 | `setup` `doctor` |
 
 **破坏性操作一律 opt-in**(设计原则,§10):默认路径永不删用户数据,破坏性变体藏在
 显式 flag 或独立子命令后。
 
-→ 详见 [components/commands.md](components/commands.md)(15 命令 + 状态机 + 产物规则)。
+→ 详见 [components/commands.md](components/commands.md)(16 命令 + 状态机 + 产物规则)。
 
 ## 4. 验证流水线(ops check)
 
-`check` 对 staging 里每个因子顺序跑 7 个 stage(**stage 身份的唯一真相源是
+`check` 对 staging 里每个因子顺序跑 6 个 stage + archive 段(**stage 身份的唯一真相源是
 `services/check/stages.py` 的 `PIPELINE` 元组**,新增 stage = 加一行):
 
 | # | Stage | 作用 | 路由 |
@@ -122,7 +123,7 @@ stage)。DataFirewall / checker 细节见 `ops/services/check/CLAUDE.md`。
 **测得快照**(v3):correlation/compliance 失败也把测得指标写 `factor_snapshot`——所以被拒因子
 在 `ops list` 也能看到 ret/shrp,不是只有入库因子有指标。
 
-→ 详见 [components/check-pipeline.md](components/check-pipeline.md)(7 阶段 + 路由 + DataFirewall + 门槛)。
+→ 详见 [components/check-pipeline.md](components/check-pipeline.md)(6 阶段 + archive + 路由 + DataFirewall + 门槛)。
 
 ## 5. 存储三层分离(核心设计)
 

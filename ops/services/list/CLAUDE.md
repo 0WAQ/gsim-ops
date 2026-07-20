@@ -18,7 +18,8 @@ Comma-separated `key<op>value` expressions. Comparison ops (`>`, `<`, `>=`, `<=`
 **Supported keys**:
 - `tables` — glob match (fnmatch) against any factor table, e.g. `tables=ashare*`
 - `field` — exact match against any factor field
-- `ret`, `shrp`, `mdd`, `tvr`, `fitness` — numeric comparison
+- `ret`, `shrp`, `mdd`, `tvr`, `fitness`, `bcorr`(abs 语义), `delay` — numeric comparison
+  (键集与语义的唯一注册表 = `core/metrics.py::SNAPSHOT_METRICS`,新增键须在彼加行)
 
 Repeated keys AND together: `--filter-by "ret>20,ret<=30"`.
 

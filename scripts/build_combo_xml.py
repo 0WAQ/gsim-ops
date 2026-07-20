@@ -9,7 +9,7 @@
   mode1 = AlphaLoad 读本线 dump → Stats mode=1 pnl(run.py,不重算);
   mode2 = 同 mode1 但 Stats mode=2(中证1000 基准)。
 - 全部:Combo_su10、TOP3000 universe、全 mode 中性化(Neutralize→Power)、
-  startdate 20110101(与 alpha 产线 D2 对齐)、enddate 钉死 20260710(验收窗)。
+  startdate 20200101(2011 因 lhw/zxu 数据全 NaN 被 LGBM 零样本拒,回现役口径)、enddate 钉死 20260710(验收窗)。
 - Data 套件镜像现役 combo_eq(TOP3000/中性化的配套依赖:HS300/ZZ500/
   AIndexWeight/adv20/asharebalancesheet/equ_factor_return)。
 

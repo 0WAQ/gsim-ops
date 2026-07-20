@@ -1,11 +1,11 @@
 # 验证流水线
 
-`ops check` 对 staging 里每个因子顺序跑 7 个 stage。**stage 身份 / 顺序 / 路由的唯一真相源**
+`ops check` 对 staging 里每个因子顺序跑 6 个 stage + archive 段。**stage 身份 / 顺序 / 路由的唯一真相源**
 是 [`ops/services/check/stages.py`](../../ops/services/check/stages.py) 的 `PIPELINE` 元组
 (新增 stage = 加一行)。checker 与 DataFirewall 深度见
 [`../../ops/services/check/CLAUDE.md`](../../ops/services/check/CLAUDE.md)。
 
-## 7 个 stage
+## 6 个 stage(+ archive 段)
 
 | # | Stage | 回测窗口 | 作用 | 失败路由 |
 |---|---|---|---|---|
@@ -26,8 +26,9 @@
 
 - **retryable 失败**(validate / long_backtest,多属环境/配置问题)→ revert SUBMITTED,留
   staging,下次 `ops check` 无条件重扫自动重试。
-- **REJECTED**(checkbias/checkpoint/compliance/correlation/archive)→ 因子质量问题,src 归档
-  alpha_src,QR 须改代码重提。
+- **REJECTED**(checkbias/checkpoint/compliance/correlation 及 archive 段的 CheckFail)
+  → 因子质量问题,src 归档 alpha_src,QR 须改代码重提;archive 的普通异常走
+  unexpected 臂(revert SUBMITTED,可重跑),与 factor-validation.md 表述一致。
 - **keep_artifacts_on_fail**(compliance/correlation)→ 额外保留 pnl+dump(数据完整有分析
   价值);checkbias/checkpoint 失败清 dump/feature(短期数据不完整)。
 - prepare 落盘失败 / 非 CheckFail 异常 → unexpected 臂,revert SUBMITTED + 完整日志。

@@ -1,6 +1,6 @@
 # Check Pipeline
 
-`CheckerPipeline` in `check.py` runs 7 stages sequentially per factor:
+`CheckerPipeline` in `check.py` runs 6 stages sequentially per factor, then the archive step:
 
 0. **Validate** - Minimal backtest (`VALIDATE_WINDOW`) without DataFirewall — validates factor code/config can run at all
 1. **Checkbias** - Short backtest (`CHECKBIAS_WINDOW`) with DataFirewall injection for forward-looking bias detection

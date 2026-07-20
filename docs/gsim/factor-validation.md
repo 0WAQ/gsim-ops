@@ -4,7 +4,7 @@
 
 ## 检测流程概览
 
-因子提交后，通过 `ops check` 进入 7 阶段验证管道（实际实现见 `ops/services/check/`）：
+因子提交后，通过 `ops check` 进入 6 stage + archive 段验证管道（实际实现见 `ops/services/check/`）：
 
 ```
 提交 → Validate → Checkbias → Checkpoint → Long Backtest → Compliance → Correlation → Archive
@@ -212,7 +212,7 @@ long_backtest 的每日 dump **全史逐日**查(尾窗 762 已退役);空/全 N
 | Long Backtest | `SUBMITTED` | 留 staging（可 retry） |
 | Compliance | `REJECTED` | src 留 alpha_src |
 | Correlation | `REJECTED` | src 留 alpha_src |
-| Archive | `SUBMITTED` | 留 staging（普通异常走 unexpected 臂，revert 后可重跑） |
+| Archive | CheckFail → `REJECTED`;普通异常 → `SUBMITTED`（unexpected 臂，revert 后可重跑） |
 
 设计原则：
 - **环境/配置问题** → 回退到 SUBMITTED，可 retry

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**ops** is a Python CLI for alpha factor validation, backtesting, and lifecycle management. It orchestrates a 7-stage validation pipeline for quantitative trading factors before they enter the production factor library.
+**ops** is a Python CLI for alpha factor validation, backtesting, and lifecycle management. It orchestrates a 6-stage validation pipeline (plus the archive step) for quantitative trading factors before they enter the production factor library.
 
 ## Hosts / Network Topology
 
@@ -35,7 +35,7 @@ uv run ops --help                    # CLI help
 uv run ops submit -u wbai -s 20260401            # Submit a day's factors from dropbox
 uv run ops submit -u wbai -s 20260401 -f Alpha   # Submit one factor
 uv run ops submit -u wbai -s 20260401 --overwrite  # 已入库同名因子改提新代码(version += 1;默认跳过)
-uv run ops check                                 # Run 7-stage pipeline on staging
+uv run ops check                                 # Run 6-stage pipeline (+ archive) on staging
 uv run ops status AlphaXxx                       # Query factor lifecycle state
 uv run ops status -u wbai --status submitted     # Filter by author/state
 uv run ops list                      # List factors (default config.yaml → JFS)
@@ -109,7 +109,7 @@ Project is organized in 4 layers: `cli/` (argparse + output) → `services/` (or
 | `cancel` | 撤回未入库的 SUBMITTED 因子(删 staging + 硬删 state record) | `ops/services/cancel/` |
 | `clear` | 清理 staging 孤儿(state 无 record 的目录,进程非正常终止的 crash residue) | `ops/services/clear/` |
 | `combo` | QR combo 端到端代测(predict+backtest, 占位符注入, 无状态) | `ops/services/combo/` |
-| `check` | 7-stage validation pipeline (runs in-place on staging) | `ops/services/check/` |
+| `check` | 6-stage validation pipeline + archive step (runs in-place on staging) | `ops/services/check/` |
 | `run` | Run backtest on factors in library | `ops/services/run/` |
 | `status` | Query factor lifecycle state | `ops/cli/status.py` + `ops/services/status/` |
 | `list` | List factors in the library | `ops/cli/list.py` + `ops/services/list/` |

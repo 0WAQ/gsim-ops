@@ -2,6 +2,9 @@
 
 Feature checklist. Done items are kept for reference. See `.claude/plans.md` for detailed design of unstarted items.
 
+> 注(2026-07-20):下列 [x] 含已退役命令(sync/backfill/health 等)与已删概念
+> (derived 层),退役清单以根 `CLAUDE.md` Removed 节为准。
+
 ## Factor Storage & Management
 - [x] `ops list` - List all factors (filter by author)
 - [x] `ops info <factor>` - View factor details

@@ -9,7 +9,7 @@
 量化因子的**验证、回测、生命周期管理与生产编排**。它不是回测引擎——回测
 由外部 gsim 框架(`/usr/local/gsim/`)执行;ops 是编排者:决定哪些因子跑、
 跑什么、结果落哪、状态怎么变。核心流程是把因子从研究员的 dropbox 提交进
-staging,跑 7 阶段验证流水线,入库后由产线接管:`ops produce` 日增生产
+staging,跑 6 stage + archive 段的验证流水线,入库后由产线接管:`ops produce` 日增生产
 因子 dump/pnl(分组形态),combo 产线(`/nvme125/production/combo`)再聚合
 供实盘消费。
 
@@ -95,9 +95,10 @@ DB 驱动只在 infra(C8)。
 
 ### 验证流水线(ops check)
 
-7 个 stage,**stage 身份的唯一真相源是 `ops/services/check/stages.py` 的
+6 个 stage,**stage 身份的唯一真相源是 `ops/services/check/stages.py` 的
 `PIPELINE` 元组**:`validate → checkbias → checkpoint → long_backtest →
-compliance → correlation → archive`。路由三态:validate/long_backtest 失败回
+compliance → correlation`(archive 不在 PIPELINE 内,是 for-loop 之后
+pass 分支的动作)。路由三态:validate/long_backtest 失败回
 SUBMITTED 留 staging 重试(retryable);其余失败置 REJECTED;compliance/
 correlation 失败额外保留 pnl+dump。crash 靠 staging 重扫自愈(check 按 staging
 目录扫,不看 state status)。

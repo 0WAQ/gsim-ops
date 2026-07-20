@@ -276,7 +276,8 @@ ops factor status [name]   # alias: ops status   (until folded into info, see pr
   与 delay0 接入后议。
 - ~~TODO(2026-07-20)~~:三态模型真机测试 **✅ 已完成(2026-07-20)**:
   组产续跑 3s 收敛 / 单产点名准入全史跑通 / 待产 3294 个零生产(恰好 11 个
-  dump 目录)/ 11 因子 7546 文件全部 byte-equal;产物与 ops_test roster 已清。
+  dump 目录)/ 11 因子逐因子各 7546 个可比文件全部 byte-equal(7-19 试点
+  10 因子共 75460 个全等,CLAUDE.md 大事件口径);产物与 ops_test roster 已清。
 
 ## combo 产线(2026-07-20 立项,首跑验证完成)
 
@@ -424,4 +425,4 @@ test_e2e_compliance_fail)。
 
 **遗留(不阻断)**:①12 条转放行毛刺不主动 restage(用户拍:通知 QR 自决);
 ②coverage-missing 里 123 个 active 双缺源,影子盲区(低风险,留档);
-③分支 claude/compliance-survey 合 main。
+③~~分支 claude/compliance-survey 合 main~~ ✅(已合)。

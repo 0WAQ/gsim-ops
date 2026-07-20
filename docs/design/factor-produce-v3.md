@@ -103,8 +103,8 @@ ops produce = sync(ACTIVE 集 ⇔ checkpoint 目录集)+ run(逐因子直接跑
 - **新线**(ACTIVE 有、checkpoint 无):无需任何构建 —— 首跑时 gsim savedi=0
   天然全段。接管日一次性 +443(hwang/xmf/ybai/sli),全段首跑错峰。
 - **停线**(checkpoint 有、ACTIVE 无):checkpoint 目录移入
-  `<checkpoint_root>/.retired/`;dump/pnl **缺省不删**(破坏性回收走
-  `--purge-retired` 显式确认)。
+  `<checkpoint_root>/.retired/`;dump/pnl **缺省不删**(`--purge-retired`
+  显式回收当时未实现,现状 = 只归 .retired,回收需手工)。
 - **重建线**(重入库:`submit --overwrite`/restage 后重过 check):归档时代码与
   XML 已更新,**归档段联动删除该因子 checkpoint** → 下次 produce 自然全段重跑。
 - **接管闸门(一次性)**:停线名单(在产不在库 555)先与 combo mode0.xml 腿清单
