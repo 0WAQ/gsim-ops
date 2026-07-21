@@ -88,7 +88,7 @@ _MODE0_BODY = """\
 {stats}
         <Alphas id="{container}" universeId="TOP3000" booksize="20e6" delay="1"
             combo="{combo}" {attrs}
-            dumpAlphaCombo="true" dumpAlphaFile="true" dumpAlphaDir="{root}/" moduleId="Alpha" lg="240">
+            dumpAlphaCombo="true" dumpAlphaFile="true" dumpAlphaDir="{root}/{container}/dump/" moduleId="Alpha" lg="240">
 {legs}
         </Alphas>
 {ops}
@@ -99,7 +99,7 @@ _MODE0_BODY = """\
 _PNL_BODY = """\
     <Portfolio id="Portfolio" booksize="20e6" homecurrency="CNY">
 {stats}
-        <Alpha id="{container}" module="AlphaLoad" universeId="TOP3000" alphaDir="{root}" ver="v2"></Alpha>
+        <Alpha id="{container}" module="AlphaLoad" universeId="TOP3000" alphaDir="{root}/{container}/dump" ver="v2"></Alpha>
 {ops}
     </Portfolio>
 </gsim>
@@ -108,7 +108,7 @@ _PNL_BODY = """\
 _LEG0 = ('            <Alpha id="{name}" module="AlphaLoad" universeId="TOP3000"'
          ' alphaDir="' + ALPHA_DUMP + '/" ver="v2"></Alpha>')
 _LEG_EQ = ('            <Alpha id="{cid}" module="AlphaLoad" universeId="TOP3000"'
-           ' alphaDir="' + PROD_ROOT + '/dump" ver="v2"/>')
+           ' alphaDir="' + PROD_ROOT + '/{cid}/dump" ver="v2"/>')
 
 _INDEX = {0: "aindexeodprices.s_dq_pctchange_000852",
           1: "aindexeodprices.s_dq_pctchange_000852",
