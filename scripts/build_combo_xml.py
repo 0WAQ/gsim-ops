@@ -75,7 +75,7 @@ _HEAD = """<?xml version='1.0' encoding='utf-8'?>
 _STATS = """\
         <Stats module="StatsSimpleV6" mode="{mode}" index_ret="{index_ret}" thres="90"
             tradePrice="close" tax="0." fee="0." slippage="0." printStats="true"
-            dumpPnl="true" pnlDir="{root}/pnl/{owner}/mode{mode}/"></Stats>"""
+            dumpPnl="true" pnlDir="{root}/{owner}/pnl/mode{mode}/"></Stats>"""
 
 _OPS = """\
             <Operations>
@@ -88,7 +88,7 @@ _MODE0_BODY = """\
 {stats}
         <Alphas id="{container}" universeId="TOP3000" booksize="20e6" delay="1"
             combo="{combo}" {attrs}
-            dumpAlphaCombo="true" dumpAlphaFile="true" dumpAlphaDir="{root}/dump/" moduleId="Alpha" lg="240">
+            dumpAlphaCombo="true" dumpAlphaFile="true" dumpAlphaDir="{root}/" moduleId="Alpha" lg="240">
 {legs}
         </Alphas>
 {ops}
@@ -99,7 +99,7 @@ _MODE0_BODY = """\
 _PNL_BODY = """\
     <Portfolio id="Portfolio" booksize="20e6" homecurrency="CNY">
 {stats}
-        <Alpha id="{container}" module="AlphaLoad" universeId="TOP3000" alphaDir="{root}/dump" ver="v2"></Alpha>
+        <Alpha id="{container}" module="AlphaLoad" universeId="TOP3000" alphaDir="{root}" ver="v2"></Alpha>
 {ops}
     </Portfolio>
 </gsim>
@@ -133,7 +133,7 @@ def _stats(owner: str, mode: int) -> str:
 
 def mode0_xml(author: str, legs: list[str]) -> str:
     return (_head(author, f"combo_{author}",
-                  f"{PROD_ROOT}/checkpoint/combo_{author}/", "Combo_su10")
+                  f"{PROD_ROOT}/{author}/checkpoint/", "Combo_su10")
             + _MODE0_BODY.format(
                 stats=_stats(author, 0), container=author, combo="Combo_su10",
                 attrs=SU10, root=PROD_ROOT,
@@ -148,7 +148,7 @@ def pnl_xml(owner: str, mode: int) -> str:
 
 def combo_eq_mode0_xml(containers: list[str]) -> str:
     return (_head("combo_eq", "combo_eq",
-                  f"{PROD_ROOT}/checkpoint/combo_eq/", None)
+                  f"{PROD_ROOT}/combo_eq/checkpoint/", None)
             + _MODE0_BODY.format(
                 stats=_stats("combo_eq", 0), container="combo_eq",
                 combo="AlphaComboEqualProd", attrs=EQPROD, root=PROD_ROOT,
@@ -160,7 +160,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--author", choices=sorted(COMBOS) + ["combo_eq"], default=None,
                     help="只生成指定 combo(缺省 = 全部 4 个 × 3 mode)")
-    ap.add_argument("--out-dir", type=Path, default=Path(f"{PROD_ROOT}/xml"),
+    ap.add_argument("--out-dir", type=Path, default=None,
                     help="XML 落点(试跑可指 /tmp)")
     ap.add_argument("--config-path", "-c", type=Path,
                     default=get_default_config_path())
@@ -170,7 +170,11 @@ def main() -> int:
     repo = FactorRepository(config)
     active = repo.find(status="active")
 
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    def _out(owner: str) -> Path:
+        d = args.out_dir or Path(PROD_ROOT) / owner / "xml"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     containers: list[str] = []
     for author, authors in COMBOS.items():
         if args.author not in (None, author):
@@ -181,23 +185,25 @@ def main() -> int:
         # 无 dump 的腿(ACTIVE 但未投产)排除 —— 进来就是 NaN 腿;名单照报
         missing = {n for n in legs if not (Path(ALPHA_DUMP) / n).is_dir()}
         legs = [n for n in legs if n not in missing]
+        out = _out(author)
         for mode, content in ((0, mode0_xml(author, legs)),
                               (1, pnl_xml(author, 1)), (2, pnl_xml(author, 2))):
-            (args.out_dir / f"{author}.mode{mode}.xml").write_text(
+            (out / f"{author}.mode{mode}.xml").write_text(
                 content, encoding="utf-8")
         containers.append(author)
         print(f"{author}: mode0 腿 {len(legs)}(排除未投产 {len(missing)})"
-              f" + mode1/mode2 → {args.out_dir}")
+              f" + mode1/mode2 → {out}")
         for n in sorted(missing)[:10]:
             print(f"  ⚠ 未投产,未入 XML: {n}")
 
     if args.author in (None, "combo_eq"):
+        out = _out("combo_eq")
         for mode, content in ((0, combo_eq_mode0_xml(containers)),
                               (1, pnl_xml("combo_eq", 1)),
                               (2, pnl_xml("combo_eq", 2))):
-            (args.out_dir / f"combo_eq.mode{mode}.xml").write_text(
+            (out / f"combo_eq.mode{mode}.xml").write_text(
                 content, encoding="utf-8")
-        print(f"combo_eq: 聚合 {containers} × 3 mode → {args.out_dir}")
+        print(f"combo_eq: 聚合 {containers} × 3 mode → {out}")
     return 0
 
 
